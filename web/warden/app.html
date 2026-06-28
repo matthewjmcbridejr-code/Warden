@@ -408,77 +408,101 @@
 
       <!-- ════════════════════ MODEL GATEWAY CONTROL ROOM ════════════════════ -->
       <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
-        <header class="gw-topbar">
-          <div class="gw-topbar-left">
-            <h2 class="gw-title">Model Gateway</h2>
-            <span class="gw-subtitle">Token-efficient routing · 6 aliases · privacy enforcement</span>
+
+        <!-- ── Summary strip ──────────────────────────────────────────────── -->
+        <div class="gw-summary-strip">
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Gateway</div>
+            <div class="gw-stat-value" id="gw-stat-status-val">Checking…</div>
           </div>
-          <div class="gw-topbar-right">
-            <button type="button" id="gw-refresh-btn" class="gw-icon-btn" title="Refresh status">↺</button>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Active Route</div>
+            <div class="gw-stat-value" id="gw-stat-route-val">—</div>
           </div>
-        </header>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Privacy Guard</div>
+            <div class="gw-stat-value">Private routing enforced</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Context Savings</div>
+            <div class="gw-stat-value" id="gw-stat-savings-val">—</div>
+          </div>
+          <button type="button" id="gw-refresh-btn" class="gw-refresh-btn" title="Refresh status">↺</button>
+        </div>
 
         <div class="gw-body">
 
-          <!-- ── Row 1: Provider status cards ────────────────────────────── -->
-          <section class="gw-card-section">
-            <h3 class="gw-section-title">Providers</h3>
-            <div class="gw-providers" id="gw-providers">
-              <div class="gw-provider-skeleton">Loading providers…</div>
+          <!-- ── Route Preview ───────────────────────────────────────────── -->
+          <section class="gw-block">
+            <div class="gw-block-header">
+              <h3 class="gw-section-title">Route Preview</h3>
+              <span class="gw-quiet-badge">No tokens spent</span>
             </div>
-          </section>
-
-          <!-- ── Row 2: Alias table ───────────────────────────────────────── -->
-          <section class="gw-card-section">
-            <h3 class="gw-section-title">Model Aliases</h3>
-            <div class="gw-aliases" id="gw-aliases">
-              <div class="gw-provider-skeleton">Loading aliases…</div>
-            </div>
-          </section>
-
-          <!-- ── Row 3: Routing Simulator + Context Budget Inspector ──────── -->
-          <div class="gw-twin-row">
-
-            <!-- Routing Simulator -->
-            <section class="gw-card gw-simulator">
-              <h3 class="gw-section-title">Routing Simulator <span class="gw-badge">No tokens spent</span></h3>
-              <p class="gw-card-desc">Paste a task and preview how Warden routes it before sending.</p>
-              <textarea id="gw-sim-input" class="gw-sim-input" rows="3"
-                placeholder="e.g. fix the bug in context_budget.py …"></textarea>
-              <button type="button" id="gw-sim-btn" class="gw-sim-btn">Preview Route</button>
-              <div id="gw-sim-result" class="gw-sim-result" style="display:none;"></div>
-            </section>
-
-            <!-- Context Budget Inspector -->
-            <section class="gw-card gw-inspector">
-              <h3 class="gw-section-title">Context Budget Inspector</h3>
-              <p class="gw-card-desc">See exactly what Warden keeps, drops, or compresses for a given input.</p>
-              <textarea id="gw-ctx-input" class="gw-sim-input" rows="2"
-                placeholder="Describe what you'd send…"></textarea>
-              <div class="gw-ctx-controls">
-                <select id="gw-ctx-alias" class="gw-ctx-select">
-                  <option value="">auto-route</option>
-                  <option value="warden-local">warden-local</option>
-                  <option value="warden-fast">warden-fast</option>
-                  <option value="warden-free">warden-free</option>
-                  <option value="warden-code">warden-code</option>
-                  <option value="warden-deep">warden-deep</option>
-                </select>
-                <button type="button" id="gw-ctx-btn" class="gw-sim-btn">Inspect</button>
+            <div class="gw-route-layout">
+              <div class="gw-route-input-col">
+                <textarea id="gw-sim-input" class="gw-textarea" rows="4"
+                  placeholder="Describe a task — e.g. fix the login bug in auth.py"></textarea>
+                <button type="button" id="gw-sim-btn" class="gw-primary-btn">Preview Route</button>
               </div>
-              <div id="gw-ctx-result" class="gw-ctx-result" style="display:none;"></div>
-            </section>
-
-          </div>
-
-          <!-- ── Row 4: Trace Timeline ────────────────────────────────────── -->
-          <section class="gw-card-section gw-trace-section">
-            <div class="gw-trace-header-row">
-              <h3 class="gw-section-title">Agent Gateway Traces</h3>
-              <button type="button" id="gw-traces-refresh" class="gw-icon-btn" title="Refresh">↺</button>
+              <div class="gw-route-result-col">
+                <div id="gw-sim-result" class="gw-sim-result">
+                  <span class="gw-sim-hint">Enter a task to preview routing.</span>
+                </div>
+              </div>
             </div>
-            <div class="gw-trace-timeline" id="gw-trace-timeline">
-              <div class="gw-trace-empty">No traces yet — send a message via the Agent panel.</div>
+          </section>
+
+          <!-- ── Provider Health ────────────────────────────────────────── -->
+          <section class="gw-block">
+            <h3 class="gw-section-title">Provider Health</h3>
+            <div id="gw-providers"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <!-- ── Model Aliases ──────────────────────────────────────────── -->
+          <section class="gw-block">
+            <h3 class="gw-section-title">Model Aliases</h3>
+            <div id="gw-aliases"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <!-- ── Diagnostics (collapsed) ────────────────────────────────── -->
+          <section class="gw-block gw-diag-section">
+            <button type="button" class="gw-diag-toggle" id="gw-diag-toggle" aria-expanded="false">
+              <span>Diagnostics</span>
+              <span class="gw-toggle-caret" aria-hidden="true">›</span>
+            </button>
+            <div class="gw-diag-body" id="gw-diag-body" hidden>
+
+              <!-- Context Budget -->
+              <div class="gw-diag-block">
+                <h4 class="gw-diag-title">Context Budget</h4>
+                <p class="gw-diag-desc">See what Warden keeps, drops, or compresses for a given prompt.</p>
+                <textarea id="gw-ctx-input" class="gw-textarea" rows="2"
+                  placeholder="Describe what you'd send…"></textarea>
+                <div class="gw-ctx-controls">
+                  <select id="gw-ctx-alias" class="gw-select">
+                    <option value="">auto-route</option>
+                    <option value="warden-local">warden-local</option>
+                    <option value="warden-fast">warden-fast</option>
+                    <option value="warden-free">warden-free</option>
+                    <option value="warden-code">warden-code</option>
+                    <option value="warden-deep">warden-deep</option>
+                  </select>
+                  <button type="button" id="gw-ctx-btn" class="gw-secondary-btn">Inspect</button>
+                </div>
+                <div id="gw-ctx-result" class="gw-ctx-result" style="display:none;"></div>
+              </div>
+
+              <!-- Recent Traces -->
+              <div class="gw-diag-block">
+                <div class="gw-diag-title-row">
+                  <h4 class="gw-diag-title">Recent Traces</h4>
+                  <button type="button" id="gw-traces-refresh" class="gw-link-btn">Refresh</button>
+                </div>
+                <div id="gw-trace-timeline" class="gw-trace-timeline">
+                  <div class="gw-loading">Loading…</div>
+                </div>
+              </div>
+
             </div>
           </section>
 
