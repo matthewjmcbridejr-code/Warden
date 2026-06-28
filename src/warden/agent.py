@@ -319,19 +319,33 @@ TOOL_SCHEMAS = [
 # LLM selection
 # ---------------------------------------------------------------------------
 
-def _pick_litellm_model() -> tuple[str, str] | None:
-    """Return (provider, litellm_model) for the best available cloud key, or None."""
+_LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://127.0.0.1:4000")
+
+
+def _pick_litellm_model() -> tuple[str, str, str] | None:
+    """Return (provider, litellm_model, api_key) routing through the LiteLLM proxy when available,
+    falling back to direct cloud key selection."""
+    master_key = os.getenv("LITELLM_MASTER_KEY", "")
+    if master_key:
+        return "litellm-proxy", f"openai/warden-fast", master_key
+    # Direct cloud fallback (no proxy)
     from src.marius.model_profiles import TOOL_CALL_CLOUD_CANDIDATES
     for cand in TOOL_CALL_CLOUD_CANDIDATES:
-        if os.getenv(cand["env"]):
-            return cand["provider"], cand["model"]
+        key = os.getenv(cand["env"])
+        if key:
+            return cand["provider"], cand["model"], key
     return None
 
 
 async def _litellm_chat(messages: list[dict], tools: list[dict] | None = None,
-                        model: str = "", timeout: int = 60) -> Any:
+                        model: str = "", timeout: int = 60,
+                        api_base: str | None = None, api_key: str | None = None) -> Any:
     import litellm
     kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout}
+    if api_base:
+        kwargs["api_base"] = api_base
+    if api_key:
+        kwargs["api_key"] = api_key
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
@@ -428,7 +442,8 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
         logger.info("No cloud key found — using ReAct/Ollama fallback")
         return _react_fallback(message, history)
 
-    provider, model = cloud
+    provider, model, api_key = cloud
+    proxy_base = _LITELLM_PROXY_URL if provider == "litellm-proxy" else None
     messages: list[dict] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
     messages += history
     messages.append({"role": "user", "content": message})
@@ -437,7 +452,8 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
     sources: set[str] = set()
 
     for iteration in range(MAX_ITERATIONS):
-        resp = await _litellm_chat(messages, tools=TOOL_SCHEMAS, model=model)
+        resp = await _litellm_chat(messages, tools=TOOL_SCHEMAS, model=model,
+                                   api_base=proxy_base, api_key=api_key)
         msg = resp.choices[0].message
 
         # No tool calls → final answer

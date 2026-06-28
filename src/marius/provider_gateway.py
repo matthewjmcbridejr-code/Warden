@@ -17,6 +17,14 @@ from .calculator import safe_calc, is_math_query
 
 logger = logging.getLogger(__name__)
 
+_LITELLM_PROXY_URL = os.getenv("LITELLM_PROXY_URL", "http://127.0.0.1:4000")
+_PROFILE_TO_ALIAS = {
+    "fast": "warden-fast",
+    "balanced": "warden-fast",
+    "code": "warden-code",
+    "deep": "warden-deep",
+}
+
 class ProviderGateway:
     def __init__(self):
         self.config = get_config()
@@ -81,6 +89,9 @@ class ProviderGateway:
 
         # Priority 3: Cloud (if enabled and mode is cloud/auto)
         if (self.mode in ["cloud", "auto"]) and self.allow_cloud:
+            # Prefer LiteLLM proxy when master key is available — single key covers all providers
+            if os.getenv("LITELLM_MASTER_KEY"):
+                return "groq", _PROFILE_TO_ALIAS.get(self.current_profile, "warden-fast"), profile, None
             candidates = CLOUD_PROFILES.get(self.current_profile, CLOUD_PROFILES["fast"])
             for cand in candidates:
                 if os.getenv(cand["env"]):
@@ -210,18 +221,22 @@ class ProviderGateway:
         elif provider_name == "gemini":
             provider = GeminiProvider(os.getenv("GEMINI_API_KEY"), model, timeout=profile["timeout"])
         elif provider_name in _LITELLM_PROVIDERS:
-            pass  # handled below via litellm
+            pass  # handled below via LiteLLM proxy
         elif provider_name == "groq":
             provider = GroqProvider(os.getenv("GROQ_API_KEY"), model, timeout=profile["timeout"])
         elif provider_name == "openrouter":
             provider = OpenRouterProvider(os.getenv("OPENROUTER_API_KEY"), model, timeout=profile["timeout"])
 
         if provider_name in _LITELLM_PROVIDERS:
+            alias = _PROFILE_TO_ALIAS.get(self.current_profile, "warden-fast")
+            master_key = os.getenv("LITELLM_MASTER_KEY", "")
             try:
                 import litellm
                 start_time = time.time()
                 resp = await litellm.acompletion(
-                    model=model,
+                    model=f"openai/{alias}",
+                    api_base=_LITELLM_PROXY_URL,
+                    api_key=master_key or "no-key",
                     messages=messages,
                     temperature=profile["temperature"],
                     max_tokens=profile["max_tokens"],
@@ -231,9 +246,9 @@ class ProviderGateway:
                 response_text = resp.choices[0].message.content or ""
                 return {
                     "response": response_text,
-                    "provider": provider_name,
+                    "provider": "litellm-proxy",
                     "requested": requested_model,
-                    "actual": model,
+                    "actual": f"proxy/{alias}",
                     "elapsed": round(elapsed, 1),
                     "profile": self.current_profile,
                     "warning": auto_switch_msg,
@@ -244,12 +259,12 @@ class ProviderGateway:
                     } if current_brain_enabled else None,
                 }
             except Exception as e:
-                logger.warning("LiteLLM cloud call failed (%s/%s): %s", provider_name, model, e)
+                logger.warning("LiteLLM proxy call failed (alias=%s): %s", alias, e)
                 return {
-                    "response": f"Cloud provider error ({provider_name}): {e}",
+                    "response": f"LiteLLM proxy error (alias={alias}): {e}",
                     "provider": "fallback",
                     "requested": requested_model,
-                    "actual": model,
+                    "actual": f"proxy/{alias}",
                     "elapsed": 0,
                 }
 
