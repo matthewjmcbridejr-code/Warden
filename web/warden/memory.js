@@ -15,6 +15,10 @@
   let _searchQuery = "";
   let _sortBy = "recent";
 
+  /* Chat state */
+  let _chatHistory = [];
+  let _chatBusy = false;
+
   /* ------------------------------------------------------------------ */
   /* Utilities                                                            */
   /* ------------------------------------------------------------------ */
@@ -387,6 +391,175 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Memory Agent Chat                                                    */
+  /* ------------------------------------------------------------------ */
+  const SOURCE_META = {
+    git:      { label: "Git", icon: "⎇" },
+    shell:    { label: "Shell", icon: "❯" },
+    chrome:   { label: "Browser", icon: "○" },
+    board:    { label: "Board", icon: "▤" },
+    memories: { label: "Memories", icon: "⧉" },
+  };
+
+  function renderChatThread() {
+    const thread = document.getElementById("mem-chat-thread");
+    const welcome = document.getElementById("mem-chat-welcome");
+    if (!thread) return;
+
+    if (!_chatHistory.length) {
+      thread.style.display = "none";
+      if (welcome) welcome.style.display = "";
+      return;
+    }
+
+    if (welcome) welcome.style.display = "none";
+    thread.style.display = "";
+
+    thread.innerHTML = _chatHistory.map((msg, i) => {
+      if (msg.role === "user") {
+        return `<div class="mem-msg mem-msg-user" data-idx="${i}">
+          <div class="mem-msg-bubble mem-msg-bubble-user">${escapeHtml(msg.content)}</div>
+        </div>`;
+      }
+      // assistant
+      const sources = msg.sources || [];
+      const snap = msg.snapshot || {};
+      const fallback = msg.fallback ? `<span class="mem-source-chip mem-source-fallback" title="Ollama not available — structured answer only">⚠ offline</span>` : "";
+      const modelLabel = msg.model ? `<span class="mem-chat-msg-model">${msg.model}</span>` : "";
+      const sourceChips = sources.map(s => {
+        const m = SOURCE_META[s] || { label: s, icon: "·" };
+        const detail = snap[s] ? ` (${Array.isArray(snap[s]) ? snap[s].length : snap[s]})` : "";
+        return `<span class="mem-source-chip mem-source-${s}" title="${m.label}${detail}">${m.icon} ${m.label}${detail}</span>`;
+      }).join("");
+      const sourceBar = (sources.length || msg.fallback)
+        ? `<div class="mem-msg-sources">${sourceChips}${fallback}${modelLabel}</div>`
+        : "";
+      return `<div class="mem-msg mem-msg-agent" data-idx="${i}">
+        <div class="mem-msg-avatar">⧉</div>
+        <div class="mem-msg-body">
+          <div class="mem-msg-bubble mem-msg-bubble-agent">${formatReply(msg.content)}</div>
+          ${sourceBar}
+        </div>
+      </div>`;
+    }).join("");
+
+    // Scroll to bottom
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function formatReply(text) {
+    // Light markdown: bold, code spans, line breaks
+    return escapeHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`(.+?)`/g, "<code>$1</code>")
+      .replace(/\n/g, "<br>");
+  }
+
+  function setChatStatus(msg, isError = false) {
+    const el = document.getElementById("mem-chat-status");
+    if (!el) return;
+    if (!msg) { el.style.display = "none"; el.textContent = ""; return; }
+    el.style.display = "";
+    el.textContent = msg;
+    el.className = "mem-chat-status" + (isError ? " mem-chat-status-error" : "");
+  }
+
+  async function sendMemoryAgentMessage(text) {
+    const msg = (text || "").trim();
+    if (!msg || _chatBusy) return;
+    _chatBusy = true;
+
+    _chatHistory.push({ role: "user", content: msg });
+    renderChatThread();
+    setChatStatus("Memory agent thinking…");
+
+    const sendBtn = document.getElementById("mem-chat-send-btn");
+    const input = document.getElementById("mem-chat-input");
+    if (sendBtn) sendBtn.disabled = true;
+    if (input) { input.value = ""; input.style.height = ""; }
+
+    try {
+      // Build history for API (exclude source/snapshot metadata)
+      const apiHistory = _chatHistory
+        .filter(m => m.role === "user" || m.role === "assistant")
+        .slice(-10)
+        .map(m => ({ role: m.role, content: m.content }));
+
+      const data = await api(`${MCH}/warden/memory-agent/chat`, {
+        method: "POST",
+        body: JSON.stringify({ message: msg, history: apiHistory.slice(0, -1) }),
+      });
+
+      // Build snapshot summary for source chips
+      const snap = {};
+      const cs = data.context_snapshot || {};
+      if (cs.recent_commits?.length)  snap.git     = cs.recent_commits;
+      if (cs.shell_commands?.length)  snap.shell   = cs.shell_commands;
+      if (cs.browser_visits?.length)  snap.chrome  = cs.browser_visits;
+      if (cs.board_tasks?.length)     snap.board   = cs.board_tasks;
+      if (cs.memory_count)            snap.memories = cs.memory_count;
+
+      _chatHistory.push({
+        role: "assistant",
+        content: data.reply || "(no reply)",
+        sources: data.sources || [],
+        model: data.model_used || "",
+        snapshot: snap,
+        fallback: data.fallback || false,
+      });
+
+      // Update model label
+      const modelLabelEl = document.getElementById("mem-chat-model-label");
+      if (modelLabelEl && data.model_used) modelLabelEl.textContent = `local · ${data.model_used}`;
+
+      setChatStatus(null);
+    } catch (e) {
+      _chatHistory.push({
+        role: "assistant",
+        content: `Error: ${e.message}`,
+        sources: [],
+        fallback: true,
+      });
+      setChatStatus(`Request failed: ${e.message}`, true);
+      setTimeout(() => setChatStatus(null), 4000);
+    } finally {
+      _chatBusy = false;
+      if (sendBtn) sendBtn.disabled = false;
+      renderChatThread();
+    }
+  }
+
+  async function loadChatContext() {
+    const panel = document.getElementById("mem-chat-context-panel");
+    const body = document.getElementById("mem-chat-context-body");
+    if (!panel || !body) return;
+    panel.style.display = "";
+    body.textContent = "Loading…";
+    try {
+      const data = await api(`${MCH}/warden/memory-agent/context`);
+      body.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      body.textContent = `Error: ${e.message}`;
+    }
+  }
+
+  function clearChat() {
+    _chatHistory = [];
+    renderChatThread();
+    const welcome = document.getElementById("mem-chat-welcome");
+    if (welcome) welcome.style.display = "";
+    const thread = document.getElementById("mem-chat-thread");
+    if (thread) thread.style.display = "none";
+    setChatStatus(null);
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Context pack                                                         */
   /* ------------------------------------------------------------------ */
   async function buildContextPack() {
@@ -496,11 +669,57 @@
       openNewModal();
     });
 
+    // ── Chat ──
+    const chatInput = document.getElementById("mem-chat-input");
+    const chatSendBtn = document.getElementById("mem-chat-send-btn");
+
+    chatSendBtn?.addEventListener("click", () => sendMemoryAgentMessage(chatInput?.value));
+
+    chatInput?.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMemoryAgentMessage(chatInput.value);
+      }
+    });
+
+    // Auto-resize textarea
+    chatInput?.addEventListener("input", () => {
+      chatInput.style.height = "auto";
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+    });
+
+    // Starter prompts
+    document.querySelectorAll(".mem-starter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        sendMemoryAgentMessage(btn.dataset.msg || btn.textContent);
+      });
+    });
+
+    // Clear chat
+    document.getElementById("mem-chat-clear-btn")?.addEventListener("click", clearChat);
+
+    // Context snapshot panel
+    document.getElementById("mem-chat-context-btn")?.addEventListener("click", () => {
+      const panel = document.getElementById("mem-chat-context-panel");
+      if (!panel) return;
+      if (panel.style.display === "none" || !panel.style.display) {
+        loadChatContext();
+      } else {
+        panel.style.display = "none";
+      }
+    });
+    document.getElementById("mem-chat-context-close")?.addEventListener("click", () => {
+      const panel = document.getElementById("mem-chat-context-panel");
+      if (panel) panel.style.display = "none";
+    });
+
     // Keyboard
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") {
         closeNewModal();
         closeDetail();
+        const panel = document.getElementById("mem-chat-context-panel");
+        if (panel) panel.style.display = "none";
       }
     });
 

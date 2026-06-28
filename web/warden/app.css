@@ -3579,3 +3579,430 @@ textarea:focus-visible {
     grid-template-columns: repeat(2, minmax(0,1fr));
   }
 }
+
+/* =================================================================== */
+/* Memory Section — Pieces OS-style layout                              */
+/* =================================================================== */
+
+/* ── Section wrapper ── */
+.mem-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ── Top bar ── */
+.mem-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.mem-topbar-left { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.mem-section-title { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.mem-topbar-actions { display: flex; gap: 8px; }
+
+.mem-stats-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.mem-stat-chip {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--fg-muted, var(--muted));
+  white-space: nowrap;
+}
+.mem-stat-chip.kind-decision { border-color: #6b8cff44; color: #8ba4ff; }
+.mem-stat-chip.kind-proof    { border-color: #4caf5044; color: #6fcc74; }
+.mem-stat-chip.kind-failure  { border-color: #e5534b44; color: #e5534b; }
+.mem-stat-chip.kind-handoff  { border-color: #f0c66a44; color: #f0c66a; }
+.mem-stat-chip-muted { opacity: 0.6; }
+
+/* ── Two-pane body ── */
+.mem-body {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── LEFT: Vault pane ── */
+.mem-vault-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+  gap: 0;
+}
+
+/* Identity card */
+.mem-identity-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.mem-identity-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--accent, #5c8bff);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.mem-identity-info {
+  display: flex; flex-direction: column; flex: 1; min-width: 0;
+}
+.mem-identity-name {
+  font-weight: 600; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mem-identity-bio {
+  font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mem-identity-edit-btn { font-size: 0.72rem; padding: 2px 7px; flex-shrink: 0; }
+
+.mem-identity-projects {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 5px 14px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.mem-identity-project-tag {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+/* Search row */
+.mem-search-row {
+  display: flex; gap: 6px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+}
+.mem-search-input {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: 0.82rem;
+  min-width: 0;
+}
+.mem-search-input:focus { outline: none; border-color: var(--accent, #5c8bff); }
+
+/* Filter chips */
+.mem-filter-chips {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.mem-filter-chip {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.mem-filter-chip:hover { border-color: var(--accent, #5c8bff); color: var(--fg); }
+.mem-filter-chip.active { background: var(--accent, #5c8bff); border-color: var(--accent, #5c8bff); color: #fff; }
+
+/* Controls row */
+.mem-controls-row {
+  display: flex; gap: 6px; align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.mem-project-select, .mem-sort-select {
+  font-size: 0.75rem; padding: 4px 6px; flex: 1; min-width: 0;
+}
+.mem-list-count { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+
+/* Memory list */
+.mem-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Memory card */
+.mem-card {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+}
+.mem-card:hover { border-color: var(--accent, #5c8bff); background: var(--bg-2, var(--bg-1)); }
+.mem-card.active { border-color: var(--accent, #5c8bff); background: var(--bg-2, var(--bg-1)); box-shadow: 0 0 0 2px var(--accent, #5c8bff)33; }
+.mem-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+.mem-card-title { margin: 0; font-size: 0.8rem; font-weight: 600; flex: 1; line-height: 1.3; }
+.mem-card-summary { margin: 0 0 4px; font-size: 0.72rem; color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mem-card-footer { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.mem-card-time { font-size: 0.65rem; color: var(--muted); margin-left: auto; }
+
+/* Kind chip */
+.mem-kind-chip {
+  font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+  background: var(--bg-0); color: var(--muted); border: 1px solid var(--line);
+}
+.mem-kind-decision { background: #6b8cff18; color: #8ba4ff; border-color: #6b8cff44; }
+.mem-kind-proof    { background: #4caf5018; color: #6fcc74; border-color: #4caf5044; }
+.mem-kind-failure  { background: #e5534b18; color: #e5534b; border-color: #e5534b44; }
+.mem-kind-handoff  { background: #f0c66a18; color: #f0c66a; border-color: #f0c66a44; }
+.mem-kind-constraint { background: #9c7aff18; color: #9c7aff; border-color: #9c7aff44; }
+.mem-kind-user_note  { background: #4fc3f718; color: #4fc3f7; border-color: #4fc3f744; }
+.mem-kind-claim      { background: #ff8c4218; color: #ff8c42; border-color: #ff8c4244; }
+.mem-kind-agent_prompt, .mem-kind-agent_result { background: var(--bg-0); color: var(--muted); }
+
+/* Detail drawer (slides up inside vault pane) */
+.mem-detail-drawer {
+  border-top: 2px solid var(--accent, #5c8bff);
+  background: var(--bg-0);
+  padding: 12px 14px 10px;
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow-y: auto;
+}
+.mem-detail-header {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;
+}
+.mem-detail-title {
+  margin: 0; font-size: 0.88rem; font-weight: 600; flex: 1; line-height: 1.3;
+}
+.mem-detail-close-btn { padding: 2px 6px; font-size: 0.8rem; flex-shrink: 0; }
+.mem-detail-meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 6px; line-height: 1.6; }
+.mem-detail-body {
+  font-size: 0.78rem; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 120px; overflow-y: auto;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 4px;
+  padding: 8px; margin: 0 0 6px;
+}
+.mem-detail-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.mem-detail-actions { display: flex; gap: 6px; }
+
+/* ── RIGHT: Chat pane ── */
+.mem-chat-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+.mem-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.mem-chat-header-left { display: flex; align-items: baseline; gap: 10px; }
+.mem-chat-title { font-weight: 700; font-size: 0.95rem; }
+.mem-chat-model-label { font-size: 0.7rem; color: var(--muted); }
+.mem-chat-header-right { display: flex; gap: 6px; }
+
+/* Context snapshot panel */
+.mem-chat-context-panel {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  padding: 10px 14px;
+  flex-shrink: 0;
+  max-height: 200px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.mem-chat-context-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.8rem; margin-bottom: 6px;
+}
+.mem-chat-context-body {
+  flex: 1; overflow-y: auto;
+  font-size: 0.7rem; color: var(--muted);
+  margin: 0; line-height: 1.4;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* Welcome state */
+.mem-chat-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 12px;
+}
+.mem-chat-welcome-icon { font-size: 2.2rem; opacity: 0.4; }
+.mem-chat-welcome-heading { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.mem-chat-welcome-copy { margin: 0; color: var(--muted); font-size: 0.84rem; max-width: 420px; line-height: 1.5; }
+.mem-chat-starters {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  justify-content: center; margin-top: 8px;
+}
+.mem-starter-btn {
+  font-size: 0.78rem; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 20px;
+  background: var(--bg-1); color: var(--fg);
+  cursor: pointer; transition: border-color 0.15s, background 0.15s;
+}
+.mem-starter-btn:hover { border-color: var(--accent, #5c8bff); background: var(--bg-2, var(--bg-1)); }
+
+/* Chat thread */
+.mem-chat-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Messages */
+.mem-msg {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.mem-msg-user {
+  flex-direction: row-reverse;
+}
+.mem-msg-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--bg-2, var(--bg-1));
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.82rem; flex-shrink: 0;
+  color: var(--muted);
+}
+.mem-msg-body { display: flex; flex-direction: column; gap: 6px; max-width: 85%; }
+.mem-msg-bubble {
+  padding: 10px 13px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.mem-msg-bubble-user {
+  background: var(--accent, #5c8bff);
+  color: #fff;
+  border-radius: 10px 10px 3px 10px;
+  max-width: 85%;
+  align-self: flex-end;
+}
+.mem-msg-bubble-agent {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 3px 10px 10px 10px;
+}
+.mem-msg-bubble-agent code {
+  font-size: 0.78rem;
+  background: var(--bg-0);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+/* Sources bar */
+.mem-msg-sources {
+  display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+}
+.mem-source-chip {
+  font-size: 0.65rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mem-source-git      { border-color: #6b8cff44; color: #8ba4ff; }
+.mem-source-shell    { border-color: #4caf5044; color: #6fcc74; }
+.mem-source-chrome   { border-color: #ff8c4244; color: #ff8c42; }
+.mem-source-board    { border-color: #f0c66a44; color: #f0c66a; }
+.mem-source-memories { border-color: #9c7aff44; color: #9c7aff; }
+.mem-source-fallback { border-color: #e5534b44; color: #e5534b; }
+.mem-chat-msg-model  { font-size: 0.62rem; color: var(--muted); margin-left: auto; }
+
+/* Input area */
+.mem-chat-input-area {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.mem-chat-status {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+  padding: 4px 0;
+}
+.mem-chat-status-error { color: var(--bad); }
+.mem-chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.mem-chat-input {
+  flex: 1;
+  padding: 9px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-2, var(--bg-0));
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.84rem;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+.mem-chat-input:focus { outline: none; border-color: var(--accent, #5c8bff); }
+.mem-chat-send-btn { height: 40px; align-self: flex-end; flex-shrink: 0; }
+.mem-chat-input-hint {
+  font-size: 0.67rem; color: var(--muted); margin-top: 5px;
+  opacity: 0.7;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .mem-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .mem-vault-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    max-height: 340px;
+  }
+  .mem-chat-pane {
+    min-height: 400px;
+  }
+}

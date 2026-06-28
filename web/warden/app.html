@@ -30,6 +30,7 @@
         <button type="button" class="nav-item" data-section="tasks" data-testid="nav-tasks">Tasks</button>
         <button type="button" class="nav-item" data-section="runs" data-testid="nav-runs">Runs</button>
         <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
+        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory</button>
         <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
       </nav>
 
@@ -199,6 +200,148 @@
         </div>
       </section>
 
+      <!-- ============================================================== -->
+      <!-- Memory Section                                                 -->
+      <!-- ============================================================== -->
+      <section id="warden-section-memory" class="workspace-section mem-section" data-section="memory" data-testid="warden-section-memory">
+
+        <!-- Top bar -->
+        <header class="mem-topbar">
+          <div class="mem-topbar-left">
+            <h2 class="workspace-title mem-section-title">Memory</h2>
+            <div class="mem-stats-row">
+              <span class="mem-stat-chip" title="Total memories"><span id="mem-stat-total">—</span> total</span>
+              <span class="mem-stat-chip mem-stat-chip-muted" title="Vectorized"><span id="mem-stat-vectors">—</span> vectorized</span>
+              <span class="mem-stat-chip kind-decision" title="Decisions"><span id="mem-stat-decisions">0</span> decisions</span>
+              <span class="mem-stat-chip kind-proof" title="Proofs"><span id="mem-stat-proofs">0</span> proofs</span>
+              <span class="mem-stat-chip kind-failure" title="Failures"><span id="mem-stat-failures">0</span> failures</span>
+              <span class="mem-stat-chip kind-handoff" title="Handoffs"><span id="mem-stat-handoffs">0</span> handoffs</span>
+            </div>
+          </div>
+          <div class="mem-topbar-actions">
+            <button type="button" id="mem-refresh-btn" class="btn" data-testid="mem-refresh-btn">Refresh</button>
+            <button type="button" id="mem-new-btn" class="btn primary" data-testid="mem-new-btn">+ Remember</button>
+          </div>
+        </header>
+
+        <!-- Two-pane body -->
+        <div class="mem-body">
+
+          <!-- ── LEFT: Vault ── -->
+          <div class="mem-vault-pane">
+
+            <!-- Identity card -->
+            <div class="mem-identity-card">
+              <div class="mem-identity-avatar">M</div>
+              <div class="mem-identity-info">
+                <span id="mem-identity-name" class="mem-identity-name">Matt McBride</span>
+                <span id="mem-identity-bio" class="mem-identity-bio">Software engineer &amp; builder. Local-first agent OS.</span>
+              </div>
+              <button type="button" id="mem-edit-identity-btn" class="btn mem-identity-edit-btn" title="Add profile note">Edit</button>
+            </div>
+            <div id="mem-identity-projects" class="mem-identity-projects"></div>
+
+            <!-- Search + filters -->
+            <div class="mem-search-row">
+              <input id="mem-search-input" class="mem-search-input" type="search" placeholder="Search memories…" autocomplete="off" data-testid="mem-search-input" />
+              <button id="mem-search-btn" class="btn" type="button">Search</button>
+            </div>
+
+            <div id="mem-filter-chips" class="mem-filter-chips" data-testid="mem-filter-chips">
+              <button class="mem-filter-chip active" data-kind="">All</button>
+              <button class="mem-filter-chip" data-kind="decision">Decisions</button>
+              <button class="mem-filter-chip" data-kind="proof">Proofs</button>
+              <button class="mem-filter-chip" data-kind="failure">Failures</button>
+              <button class="mem-filter-chip" data-kind="handoff">Handoffs</button>
+              <button class="mem-filter-chip" data-kind="user_note">Notes</button>
+              <button class="mem-filter-chip" data-kind="claim">Claims</button>
+            </div>
+
+            <div class="mem-controls-row">
+              <select id="mem-project-filter" class="btn mem-project-select" data-testid="mem-project-filter">
+                <option value="">All projects</option>
+              </select>
+              <select id="mem-sort-select" class="btn mem-sort-select" data-testid="mem-sort-select">
+                <option value="recent">Recent first</option>
+                <option value="kind">By kind</option>
+                <option value="project">By project</option>
+              </select>
+              <span id="mem-list-count" class="mem-list-count" data-testid="mem-list-count"></span>
+            </div>
+
+            <!-- Memory list -->
+            <div id="mem-list" class="mem-list" data-testid="mem-list">
+              <div class="mem-empty">Loading memories…</div>
+            </div>
+
+            <!-- Detail drawer (slides up when a card is selected) -->
+            <div id="mem-detail" class="mem-detail-drawer" style="display:none;" data-testid="mem-detail">
+              <div class="mem-detail-header">
+                <span id="mem-detail-kind-chip" class="mem-kind-chip"></span>
+                <h4 id="mem-detail-title" class="mem-detail-title"></h4>
+                <button id="mem-detail-close" class="btn mem-detail-close-btn" type="button" data-testid="mem-detail-close">✕</button>
+              </div>
+              <div id="mem-detail-meta" class="mem-detail-meta"></div>
+              <pre id="mem-detail-body" class="mem-detail-body"></pre>
+              <div id="mem-detail-tags" class="mem-detail-tags"></div>
+              <div class="mem-detail-actions">
+                <button id="mem-forget-btn" class="btn bad" type="button" data-testid="mem-forget-btn">Forget</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── RIGHT: Memory Agent Chat ── -->
+          <div class="mem-chat-pane">
+            <div class="mem-chat-header">
+              <div class="mem-chat-header-left">
+                <span class="mem-chat-title">Memory Agent</span>
+                <span id="mem-chat-model-label" class="mem-chat-model-label">local · ollama</span>
+              </div>
+              <div class="mem-chat-header-right">
+                <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
+                <button id="mem-chat-clear-btn" class="btn" type="button" data-testid="mem-chat-clear-btn">Clear</button>
+              </div>
+            </div>
+
+            <!-- Context snapshot (hidden by default, toggled) -->
+            <div id="mem-chat-context-panel" class="mem-chat-context-panel" style="display:none;" data-testid="mem-chat-context-panel">
+              <div class="mem-chat-context-header">
+                <strong>Current context snapshot</strong>
+                <button id="mem-chat-context-close" class="btn" type="button">✕</button>
+              </div>
+              <pre id="mem-chat-context-body" class="mem-chat-context-body">Loading…</pre>
+            </div>
+
+            <!-- Welcome state -->
+            <div id="mem-chat-welcome" class="mem-chat-welcome" data-testid="mem-chat-welcome">
+              <div class="mem-chat-welcome-icon">⧉</div>
+              <h3 class="mem-chat-welcome-heading">Ask the Memory Agent</h3>
+              <p class="mem-chat-welcome-copy">I have access to your decisions, proofs, failures, git history, shell commands, and browser activity. Ask me anything about what you've been working on.</p>
+              <div class="mem-chat-starters">
+                <button class="mem-starter-btn" data-msg="What was I working on last?">What was I working on last?</button>
+                <button class="mem-starter-btn" data-msg="What did I decide about Warden?">What did I decide about Warden?</button>
+                <button class="mem-starter-btn" data-msg="What are my recent failures or blockers?">What are my recent failures or blockers?</button>
+                <button class="mem-starter-btn" data-msg="Give me a handoff brief for today.">Give me a handoff brief for today.</button>
+              </div>
+            </div>
+
+            <!-- Thread -->
+            <div id="mem-chat-thread" class="mem-chat-thread" data-testid="mem-chat-thread" style="display:none;"></div>
+
+            <!-- Input row -->
+            <div class="mem-chat-input-area">
+              <div id="mem-chat-status" class="mem-chat-status" style="display:none;"></div>
+              <div class="mem-chat-input-row">
+                <textarea id="mem-chat-input" class="mem-chat-input" placeholder="Ask the memory agent…" rows="2" data-testid="mem-chat-input"></textarea>
+                <button id="mem-chat-send-btn" class="btn primary mem-chat-send-btn" type="button" data-testid="mem-chat-send-btn">Ask</button>
+              </div>
+              <div class="mem-chat-input-hint">Draws on stored memories · git log · shell history · browser activity</div>
+            </div>
+          </div>
+
+        </div><!-- /mem-body -->
+      </section>
+
       <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
         <header class="workspace-header">
           <h2 class="workspace-title">Settings</h2>
@@ -271,6 +414,51 @@
         </aside>
       </div>
     </main>
+  </div>
+
+  <!-- New Memory Modal -->
+  <div id="mem-new-modal" data-testid="mem-new-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:10010;">
+    <div style="background:var(--bg-2);border:1px solid var(--line);padding:20px;width:90%;max-width:560px;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+      <h3 style="margin:0 0 14px;">Remember Something</h3>
+      <div style="display:grid;gap:10px;">
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Title (optional)</label>
+          <input id="mem-new-title" data-testid="mem-new-title" style="width:100%;padding:7px;" placeholder="Short label…" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="display:block;font-size:0.82em;margin-bottom:3px;">Kind</label>
+            <select id="mem-new-kind" data-testid="mem-new-kind" style="width:100%;padding:7px;">
+              <option value="user_note">Note</option>
+              <option value="decision">Decision</option>
+              <option value="proof">Proof</option>
+              <option value="failure">Failure</option>
+              <option value="handoff">Handoff</option>
+              <option value="constraint">Constraint</option>
+              <option value="claim">Claim</option>
+              <option value="acceptance_test">Acceptance Test</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.82em;margin-bottom:3px;">Project</label>
+            <input id="mem-new-project" data-testid="mem-new-project" style="width:100%;padding:7px;" placeholder="e.g. warden" />
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Tags (comma separated)</label>
+          <input id="mem-new-tags" data-testid="mem-new-tags" style="width:100%;padding:7px;" placeholder="e.g. agent, memory, wip" />
+        </div>
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Content <span style="color:var(--bad)">*</span></label>
+          <textarea id="mem-new-content" data-testid="mem-new-content" style="width:100%;padding:7px;min-height:100px;font-family:inherit;" placeholder="What should Warden remember?"></textarea>
+        </div>
+      </div>
+      <div id="mem-new-error" data-testid="mem-new-error" style="color:var(--bad);font-size:0.82em;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button id="mem-new-submit" data-testid="mem-new-submit" class="btn primary" type="button">Save Memory</button>
+        <button id="mem-new-cancel" data-testid="mem-new-cancel" class="btn" type="button">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- Add Agent Modal -->
@@ -589,5 +777,6 @@
   </div>
 
   <script src="./app.js"></script>
+  <script src="./memory.js"></script>
 </body>
 </html>
