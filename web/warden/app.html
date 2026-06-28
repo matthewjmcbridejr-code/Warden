@@ -32,6 +32,7 @@
         <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory</button>
         <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Agent</button>
+        <button type="button" class="nav-item" data-section="gateway" data-testid="nav-gateway">Gateway</button>
         <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
       </nav>
 
@@ -402,6 +403,85 @@
               <button type="button" id="wa-send-btn" class="wa-send-btn" title="Send">▶</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════ MODEL GATEWAY CONTROL ROOM ════════════════════ -->
+      <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
+        <header class="gw-topbar">
+          <div class="gw-topbar-left">
+            <h2 class="gw-title">Model Gateway</h2>
+            <span class="gw-subtitle">Token-efficient routing · 6 aliases · privacy enforcement</span>
+          </div>
+          <div class="gw-topbar-right">
+            <button type="button" id="gw-refresh-btn" class="gw-icon-btn" title="Refresh status">↺</button>
+          </div>
+        </header>
+
+        <div class="gw-body">
+
+          <!-- ── Row 1: Provider status cards ────────────────────────────── -->
+          <section class="gw-card-section">
+            <h3 class="gw-section-title">Providers</h3>
+            <div class="gw-providers" id="gw-providers">
+              <div class="gw-provider-skeleton">Loading providers…</div>
+            </div>
+          </section>
+
+          <!-- ── Row 2: Alias table ───────────────────────────────────────── -->
+          <section class="gw-card-section">
+            <h3 class="gw-section-title">Model Aliases</h3>
+            <div class="gw-aliases" id="gw-aliases">
+              <div class="gw-provider-skeleton">Loading aliases…</div>
+            </div>
+          </section>
+
+          <!-- ── Row 3: Routing Simulator + Context Budget Inspector ──────── -->
+          <div class="gw-twin-row">
+
+            <!-- Routing Simulator -->
+            <section class="gw-card gw-simulator">
+              <h3 class="gw-section-title">Routing Simulator <span class="gw-badge">No tokens spent</span></h3>
+              <p class="gw-card-desc">Paste a task and preview how Warden routes it before sending.</p>
+              <textarea id="gw-sim-input" class="gw-sim-input" rows="3"
+                placeholder="e.g. fix the bug in context_budget.py …"></textarea>
+              <button type="button" id="gw-sim-btn" class="gw-sim-btn">Preview Route</button>
+              <div id="gw-sim-result" class="gw-sim-result" style="display:none;"></div>
+            </section>
+
+            <!-- Context Budget Inspector -->
+            <section class="gw-card gw-inspector">
+              <h3 class="gw-section-title">Context Budget Inspector</h3>
+              <p class="gw-card-desc">See exactly what Warden keeps, drops, or compresses for a given input.</p>
+              <textarea id="gw-ctx-input" class="gw-sim-input" rows="2"
+                placeholder="Describe what you'd send…"></textarea>
+              <div class="gw-ctx-controls">
+                <select id="gw-ctx-alias" class="gw-ctx-select">
+                  <option value="">auto-route</option>
+                  <option value="warden-local">warden-local</option>
+                  <option value="warden-fast">warden-fast</option>
+                  <option value="warden-free">warden-free</option>
+                  <option value="warden-code">warden-code</option>
+                  <option value="warden-deep">warden-deep</option>
+                </select>
+                <button type="button" id="gw-ctx-btn" class="gw-sim-btn">Inspect</button>
+              </div>
+              <div id="gw-ctx-result" class="gw-ctx-result" style="display:none;"></div>
+            </section>
+
+          </div>
+
+          <!-- ── Row 4: Trace Timeline ────────────────────────────────────── -->
+          <section class="gw-card-section gw-trace-section">
+            <div class="gw-trace-header-row">
+              <h3 class="gw-section-title">Agent Gateway Traces</h3>
+              <button type="button" id="gw-traces-refresh" class="gw-icon-btn" title="Refresh">↺</button>
+            </div>
+            <div class="gw-trace-timeline" id="gw-trace-timeline">
+              <div class="gw-trace-empty">No traces yet — send a message via the Agent panel.</div>
+            </div>
+          </section>
+
         </div>
       </section>
 
@@ -842,5 +922,6 @@
   <script src="./app.js"></script>
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
+  <script src="./gateway.js"></script>
 </body>
 </html>

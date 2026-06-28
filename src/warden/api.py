@@ -3943,3 +3943,98 @@ def get_memory_agent_context():
         "memory_count": len(ctx.recent_memories),
         "gathered_at": ctx.gathered_at,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Model Gateway Control Room endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _RoutePreviewRequest(BaseModel):
+    task: str
+    force_alias: Optional[str] = None
+
+class _ContextPreviewRequest(BaseModel):
+    query: str
+    alias: Optional[str] = None
+    memories: list[dict] = []
+    git_context: Optional[str] = None
+    tool_outputs: list[dict] = []
+    system_prompt: Optional[str] = None
+
+
+@mcharness_router.get("/warden/model-gateway/status")
+def get_gateway_status():
+    """Provider reachability and key status. Never exposes raw key values."""
+    from .gateway.providers import check_all
+    return {"ok": True, "providers": check_all()}
+
+
+@mcharness_router.get("/warden/model-gateway/aliases")
+def get_gateway_aliases():
+    """All 6 model aliases with metadata."""
+    from .gateway.aliases import ALIAS_DEFS
+    return {"ok": True, "aliases": ALIAS_DEFS}
+
+
+@mcharness_router.post("/warden/model-gateway/route-preview")
+def post_route_preview(req: _RoutePreviewRequest):
+    """Preview how a task would be routed — no cloud token spend."""
+    from .gateway.policy import route
+    from .gateway.context_budget import _count_tokens, _ALIAS_BUDGETS
+    d = route(req.task, force_alias=req.force_alias)
+    input_tokens = d.estimated_input_tokens
+    budget = _ALIAS_BUDGETS.get(d.alias, 4096)
+    tokens_after = min(input_tokens, budget)
+    pct_saved = round((input_tokens - tokens_after) / max(1, input_tokens) * 100, 1) if input_tokens > budget else 0.0
+    from .gateway.aliases import ALIAS_DEFS
+    alias_def = ALIAS_DEFS.get(d.alias, {})
+    return {
+        "ok": True,
+        "alias": d.alias,
+        "reason": d.reason,
+        "confidence": round(d.confidence, 2),
+        "classifier_used": d.classifier_used,
+        "privacy": d.privacy,
+        "openrouter_free_blocked": d.openrouter_free_blocked,
+        "estimated_input_tokens": input_tokens,
+        "token_budget": budget,
+        "estimated_tokens_after_budget": tokens_after,
+        "pct_saved": pct_saved,
+        "likely_tools": d.likely_tools,
+        "primary_provider": alias_def.get("primary_provider"),
+        "fallback_provider": alias_def.get("fallback_provider"),
+        "warnings": d.warnings,
+    }
+
+
+@mcharness_router.post("/warden/model-gateway/context-preview")
+def post_context_preview(req: _ContextPreviewRequest):
+    """Show exactly what context would be kept/dropped/compressed for a given alias."""
+    from .gateway.policy import route
+    from .gateway.context_budget import build_budget, inspect
+    alias = req.alias or route(req.query).alias
+    result = build_budget(
+        alias=alias,
+        query=req.query,
+        memories=req.memories or [],
+        git_context=req.git_context,
+        tool_outputs=req.tool_outputs or [],
+        system_prompt=req.system_prompt,
+    )
+    return {
+        "ok": True,
+        "alias": alias,
+        "token_budget": result.token_budget,
+        "tokens_before": result.total_before,
+        "tokens_after": result.total_after,
+        "tokens_saved": result.tokens_saved,
+        "pct_saved": result.pct_saved,
+        "items": inspect(result),
+    }
+
+
+@mcharness_router.get("/warden/model-gateway/traces")
+def get_gateway_traces(limit: int = 50):
+    """Recent gateway request traces — task, alias, provider, token savings."""
+    from .gateway.traces import recent
+    return {"ok": True, "traces": recent(limit=min(limit, 200))}
