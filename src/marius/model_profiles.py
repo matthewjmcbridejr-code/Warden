@@ -46,6 +46,37 @@ def get_profile(name: str) -> Dict[str, Any]:
 def get_system_prompt(profile_name: str) -> str:
     return SYSTEM_PROMPTS.get(profile_name, SYSTEM_PROMPTS["default"])
 
+# Cloud provider candidates per profile — tried in order, first with a valid API key wins.
+# Model names use LiteLLM's provider/model format.
+CLOUD_PROFILES: dict[str, list[dict]] = {
+    "fast": [
+        {"provider": "groq",       "model": "groq/llama-3.1-8b-instant",            "env": "GROQ_API_KEY"},
+        {"provider": "cerebras",   "model": "cerebras/llama3.1-8b",                  "env": "CEREBRAS_API_KEY"},
+        {"provider": "openrouter", "model": "openrouter/google/gemma-3-12b-it:free", "env": "OPENROUTER_API_KEY"},
+    ],
+    "balanced": [
+        {"provider": "groq",       "model": "groq/llama-3.3-70b-versatile",               "env": "GROQ_API_KEY"},
+        {"provider": "cerebras",   "model": "cerebras/llama-3.3-70b",                      "env": "CEREBRAS_API_KEY"},
+        {"provider": "openrouter", "model": "openrouter/qwen/qwen3-235b-a22b:free",        "env": "OPENROUTER_API_KEY"},
+    ],
+    "code": [
+        {"provider": "openrouter", "model": "openrouter/qwen/qwen2.5-coder-32b-instruct:free", "env": "OPENROUTER_API_KEY"},
+        {"provider": "groq",       "model": "groq/llama-3.3-70b-versatile",                    "env": "GROQ_API_KEY"},
+    ],
+    "deep": [
+        {"provider": "openrouter", "model": "openrouter/qwen/qwen3-235b-a22b:free", "env": "OPENROUTER_API_KEY"},
+        {"provider": "groq",       "model": "groq/llama-3.3-70b-versatile",         "env": "GROQ_API_KEY"},
+        {"provider": "huggingface","model": "huggingface/Qwen/Qwen2.5-72B-Instruct","env": "HF_TOKEN"},
+    ],
+}
+
+# Best tool-calling model per available key (for WardenAgent)
+TOOL_CALL_CLOUD_CANDIDATES = [
+    {"provider": "groq",       "model": "groq/llama-3.3-70b-versatile", "env": "GROQ_API_KEY"},
+    {"provider": "cerebras",   "model": "cerebras/llama-3.3-70b",        "env": "CEREBRAS_API_KEY"},
+    {"provider": "openrouter", "model": "openrouter/qwen/qwen3-235b-a22b:free", "env": "OPENROUTER_API_KEY"},
+]
+
 KNOWN_MODELS = [
     "marius-fast", "marius-default", "marius-code-local",
     "llama3.2:1b", "llama3.2:3b", "qwen3:0.6b", "qwen3:4b", "gemma3:1b",

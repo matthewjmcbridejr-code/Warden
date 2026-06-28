@@ -997,6 +997,96 @@ def warden_handoff(
 
 
 # ---------------------------------------------------------------------------
+# WardenAgent + Gateway tools — accessible to any connected agent
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def warden_agent(message: str, history_json: str = "[]") -> str:
+    """Ask the Warden Agent a question — it queries git, GitHub PRs/issues, memory, and web search.
+
+    Use this when you want a synthesised status briefing, e.g.:
+    - "where we at with Warden?"
+    - "what are the open PRs?"
+    - "any recent failures or blockers?"
+    - "what decisions have been made about X?"
+
+    Args:
+        message: Your question or request.
+        history_json: Optional JSON array of {role, content} prior turns for multi-turn use.
+    """
+    try:
+        history = json.loads(history_json) if history_json and history_json.strip() != "[]" else []
+        from src.warden.agent import run_agent
+        result = await run_agent(message=message, history=history)
+        return _ok("warden_agent", {
+            "reply": result.reply,
+            "tools_used": [t["tool"] for t in result.tools_used],
+            "sources": result.sources,
+            "model": result.model,
+            "provider": result.provider,
+            "fallback": result.fallback,
+        })
+    except Exception as exc:
+        return _err("warden_agent", str(exc))
+
+
+@mcp.tool()
+async def warden_ask_marius(message: str, profile: str = "balanced", brain_context: bool = True) -> str:
+    """Send a message to Marius (the local AI gateway) and get a response.
+
+    Marius routes to the best available model: local Ollama first, then cloud
+    (Groq / Cerebras / OpenRouter) if MARIUS_ALLOW_CLOUD=1 and keys are set.
+
+    Args:
+        message: Your question or prompt.
+        profile: Model profile — 'fast', 'balanced', 'code', or 'deep'.
+        brain_context: Whether to include memory context (default True).
+    """
+    try:
+        from src.marius.provider_gateway import ProviderGateway
+        gw = ProviderGateway()
+        gw.current_profile = profile
+        result = await gw.chat(message, brain_enabled=brain_context)
+        return _ok("warden_ask_marius", {
+            "response": result.get("response", ""),
+            "provider": result.get("provider"),
+            "model": result.get("actual"),
+            "profile": result.get("profile"),
+            "elapsed": result.get("elapsed"),
+        })
+    except Exception as exc:
+        return _err("warden_ask_marius", str(exc))
+
+
+@mcp.tool()
+def warden_memory_context(query: str = "") -> str:
+    """Get a live snapshot of Warden memory context: branch, recent commits, shell, board, memories.
+
+    Useful for agents that want to orient themselves quickly without a full agent run.
+    """
+    try:
+        from src.warden.memory_agent import gather_context
+        ctx = gather_context(query)
+        return _ok("warden_memory_context", {
+            "branch": ctx.current_branch,
+            "commits": ctx.git_log[:8],
+            "shell_commands": ctx.shell_commands[-10:],
+            "board_tasks": [
+                {"status": t.get("status"), "title": t.get("title")}
+                for t in ctx.board_tasks[:8]
+            ],
+            "recent_memories": [
+                {"kind": m.get("kind"), "summary": (m.get("summary") or "")[:160]}
+                for m in ctx.recent_memories[:6]
+            ],
+            "sources": ctx.source_labels(),
+            "gathered_at": ctx.gathered_at,
+        })
+    except Exception as exc:
+        return _err("warden_memory_context", str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1053,7 +1143,7 @@ def main():
 
                 # Health check — no auth
                 if path == "/health":
-                    body = json.dumps({"ok": True, "server": "warden-brain", "tools": 15}).encode()
+                    body = json.dumps({"ok": True, "server": "warden-brain", "tools": 18}).encode()
                     await send({"type": "http.response.start", "status": 200,
                                 "headers": [[b"content-type", b"application/json"],
                                             [b"content-length", str(len(body)).encode()]]})

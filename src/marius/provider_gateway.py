@@ -8,7 +8,7 @@ from .providers.ollama import OllamaProvider
 from .providers.openrouter import OpenRouterProvider
 from .providers.groq import GroqProvider
 from .providers.gemini import GeminiProvider
-from .model_profiles import get_profile, get_system_prompt, DEFAULT_PROFILE, EMBEDDING_MODELS
+from .model_profiles import get_profile, get_system_prompt, DEFAULT_PROFILE, EMBEDDING_MODELS, CLOUD_PROFILES
 from .grounding import get_grounding_pack
 from .memory import get_where_left_off
 from .brain_context import build_brain_context_pack
@@ -81,8 +81,10 @@ class ProviderGateway:
 
         # Priority 3: Cloud (if enabled and mode is cloud/auto)
         if (self.mode in ["cloud", "auto"]) and self.allow_cloud:
-            # ... (cloud logic)
-            pass
+            candidates = CLOUD_PROFILES.get(self.current_profile, CLOUD_PROFILES["fast"])
+            for cand in candidates:
+                if os.getenv(cand["env"]):
+                    return cand["provider"], cand["model"], profile, None
 
         # Priority 4: Fallback for local: use the first available model that isn't an embedding model
         if self.mode in ["local", "auto"]:
@@ -200,26 +202,67 @@ class ProviderGateway:
         
         messages.append({"role": "user", "content": prompt})
 
+        _LITELLM_PROVIDERS = {"groq", "openrouter", "cerebras", "huggingface"}
+
         provider = None
         if provider_name == "ollama":
             provider = OllamaProvider(model, base_url=self.ollama_url, timeout=profile["timeout"])
+        elif provider_name == "gemini":
+            provider = GeminiProvider(os.getenv("GEMINI_API_KEY"), model, timeout=profile["timeout"])
+        elif provider_name in _LITELLM_PROVIDERS:
+            pass  # handled below via litellm
         elif provider_name == "groq":
             provider = GroqProvider(os.getenv("GROQ_API_KEY"), model, timeout=profile["timeout"])
         elif provider_name == "openrouter":
             provider = OpenRouterProvider(os.getenv("OPENROUTER_API_KEY"), model, timeout=profile["timeout"])
-        elif provider_name == "gemini":
-            provider = GeminiProvider(os.getenv("GEMINI_API_KEY"), model, timeout=profile["timeout"])
+
+        if provider_name in _LITELLM_PROVIDERS:
+            try:
+                import litellm
+                start_time = time.time()
+                resp = await litellm.acompletion(
+                    model=model,
+                    messages=messages,
+                    temperature=profile["temperature"],
+                    max_tokens=profile["max_tokens"],
+                    timeout=profile["timeout"],
+                )
+                elapsed = time.time() - start_time
+                response_text = resp.choices[0].message.content or ""
+                return {
+                    "response": response_text,
+                    "provider": provider_name,
+                    "requested": requested_model,
+                    "actual": model,
+                    "elapsed": round(elapsed, 1),
+                    "profile": self.current_profile,
+                    "warning": auto_switch_msg,
+                    "fallback_reason": fallback_reason,
+                    "brain_context": {
+                        "enabled": current_brain_enabled,
+                        "record_ids": brain_pack["record_ids"] if brain_pack else []
+                    } if current_brain_enabled else None,
+                }
+            except Exception as e:
+                logger.warning("LiteLLM cloud call failed (%s/%s): %s", provider_name, model, e)
+                return {
+                    "response": f"Cloud provider error ({provider_name}): {e}",
+                    "provider": "fallback",
+                    "requested": requested_model,
+                    "actual": model,
+                    "elapsed": 0,
+                }
 
         if provider:
             try:
                 start_time = time.time()
                 result = await provider.complete(
-                    messages, 
-                    temperature=profile["temperature"], 
+                    messages,
+                    temperature=profile["temperature"],
                     max_tokens=profile["max_tokens"]
                 )
                 elapsed = time.time() - start_time
-                
+
                 response_text = result["choices"][0]["message"]["content"]
                 return {
                     "response": response_text,

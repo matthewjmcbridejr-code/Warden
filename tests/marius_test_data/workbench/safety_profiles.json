@@ -1,0 +1,26 @@
+[
+  {
+    "arbitrary_command_execution_disabled": true,
+    "fake_worker_only": true,
+    "local_only": true,
+    "mcp_local_only": true,
+    "notes": "Real external agent launch is disabled.",
+    "profile_id": "operator_local",
+    "real_agent_launch_disabled": true,
+    "shell_enabled": false,
+    "summary": "Local-only supervised workflow profile with fake-worker-only execution.",
+    "title": "Operator Local"
+  },
+  {
+    "arbitrary_command_execution_disabled": true,
+    "fake_worker_only": true,
+    "local_only": true,
+    "mcp_local_only": true,
+    "notes": "Sample UI data is not executed.",
+    "profile_id": "screenshot_sample",
+    "real_agent_launch_disabled": true,
+    "shell_enabled": false,
+    "summary": "Preview profile for local cockpit screenshots and demos.",
+    "title": "Screenshot Sample"
+  }
+]

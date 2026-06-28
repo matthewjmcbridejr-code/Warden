@@ -3883,6 +3883,32 @@ class _MemoryChatRequest(BaseModel):
     model: Optional[str] = None
 
 
+class _AgentChatRequest(BaseModel):
+    message: str
+    history: list[_MemoryChatMessage] = []
+
+
+@mcharness_router.post("/warden/agent/chat")
+async def post_warden_agent_chat(req: _AgentChatRequest):
+    """WardenAgent — tool-calling agent for 'where we at?' queries.
+
+    Pulls from memory, git, GitHub PRs/issues, and web search.
+    Uses cloud LLM (Groq/Cerebras/OpenRouter) with Ollama fallback.
+    """
+    from .agent import run_agent
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+    result = await run_agent(message=req.message, history=history)
+    return {
+        "ok": True,
+        "reply": result.reply,
+        "tools_used": result.tools_used,
+        "sources": result.sources,
+        "model": result.model,
+        "provider": result.provider,
+        "fallback": result.fallback,
+    }
+
+
 @mcharness_router.post("/warden/memory-agent/chat")
 async def post_memory_agent_chat(req: _MemoryChatRequest):
     """Chat with the Warden Memory Agent — synthesizes git, shell, browser, tasks, and stored memories."""

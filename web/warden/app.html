@@ -31,6 +31,7 @@
         <button type="button" class="nav-item" data-section="runs" data-testid="nav-runs">Runs</button>
         <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory</button>
+        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Agent</button>
         <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
       </nav>
 
@@ -340,6 +341,68 @@
           </div>
 
         </div><!-- /mem-body -->
+      </section>
+
+      <!-- ═══════════════════════════ AGENT SECTION ═══════════════════════════ -->
+      <section id="warden-section-agent" class="workspace-section wa-section" data-section="agent" data-testid="warden-section-agent">
+        <header class="wa-topbar">
+          <div class="wa-topbar-left">
+            <h2 class="wa-title">Warden Agent</h2>
+            <span class="wa-subtitle">Ask anything — git, GitHub, memory, web</span>
+          </div>
+          <div class="wa-topbar-right">
+            <span id="wa-model-badge" class="wa-model-badge"></span>
+            <button type="button" id="wa-clear-btn" class="wa-icon-btn" title="Clear conversation">↺</button>
+          </div>
+        </header>
+
+        <div class="wa-body">
+          <!-- Tool trace sidebar -->
+          <div class="wa-trace-pane" id="wa-trace-pane">
+            <div class="wa-trace-header">
+              <span>Tool Calls</span>
+              <button type="button" id="wa-trace-toggle" class="wa-icon-btn" title="Hide">◀</button>
+            </div>
+            <div class="wa-trace-list" id="wa-trace-list">
+              <div class="wa-trace-empty">Tools used will appear here.</div>
+            </div>
+          </div>
+
+          <!-- Main chat -->
+          <div class="wa-chat-pane">
+            <!-- Welcome state -->
+            <div class="wa-welcome" id="wa-welcome">
+              <div class="wa-welcome-icon">⬡</div>
+              <h3 class="wa-welcome-title">What do you want to know?</h3>
+              <p class="wa-welcome-sub">I pull from git, GitHub PRs &amp; issues, project memory, and the web.</p>
+              <div class="wa-starters">
+                <button type="button" class="wa-starter-btn" data-prompt="Where we at with Warden?">Where we at with Warden?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What's blocking us right now?">What's blocking us right now?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="Show me open PRs and recent commits">Show me open PRs and recent commits</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What decisions have we made about Warden architecture?">Architecture decisions</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What did I work on last?">What did I work on last?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="Any recent failures or blockers in memory?">Recent failures or blockers</button>
+              </div>
+            </div>
+
+            <!-- Thread -->
+            <div class="wa-thread" id="wa-thread" style="display:none;"></div>
+
+            <!-- Status bar -->
+            <div class="wa-status" id="wa-status"></div>
+
+            <!-- Input -->
+            <div class="wa-input-row">
+              <textarea
+                id="wa-input"
+                class="wa-input"
+                placeholder="Ask Warden anything… (Enter to send, Shift+Enter for newline)"
+                rows="1"
+              ></textarea>
+              <button type="button" id="wa-send-btn" class="wa-send-btn" title="Send">▶</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
@@ -778,5 +841,6 @@
 
   <script src="./app.js"></script>
   <script src="./memory.js"></script>
+  <script src="./agent.js"></script>
 </body>
 </html>

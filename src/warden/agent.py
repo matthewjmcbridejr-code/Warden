@@ -1,0 +1,432 @@
+"""WardenAgent — tool-calling agent for 'where we at?' style queries.
+
+Sources: warden memory, git log, GitHub PRs/issues (gh CLI), web search (DDG).
+Uses LiteLLM for cloud tool-calling (Groq / Cerebras / OpenRouter) with
+Ollama fallback via ReAct-style prompting when no cloud key is available.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+CANONICAL_REPO = Path(
+    os.getenv("WARDEN_CANONICAL_REPO", "/home/matt/workspaces/warden/mcharness-public-export")
+).expanduser()
+
+WARDEN_API_BASE = os.getenv("WARDEN_API_BASE", "http://127.0.0.1:6969/api/mcharness")
+
+AGENT_SYSTEM_PROMPT = """\
+You are Warden, a senior engineering assistant with access to tools that let you \
+query project memory, git history, GitHub, and the web. \
+When asked status questions ("where we at?", "what's blocking X?", "recent wins?"), \
+call the appropriate tools to gather real data, then synthesise a concise, specific answer. \
+Never invent facts. Cite sources (memory record IDs, commit hashes, PR numbers) when you use them. \
+Be terse but complete — bullet points preferred for multi-part answers."""
+
+MAX_ITERATIONS = 6
+
+
+# ---------------------------------------------------------------------------
+# Tool implementations
+# ---------------------------------------------------------------------------
+
+def _run(cmd: list[str], cwd: Path | None = None, timeout: int = 10) -> str:
+    try:
+        return subprocess.check_output(
+            cmd, cwd=cwd or CANONICAL_REPO, stderr=subprocess.DEVNULL, timeout=timeout
+        ).decode().strip()
+    except Exception as e:
+        return f"error: {e}"
+
+
+def tool_recall_memories(query: str, limit: int = 8) -> dict:
+    """Query Warden stored memories."""
+    import urllib.request
+    import urllib.parse
+    url = f"{WARDEN_API_BASE}/memories/recall?q={urllib.parse.quote(query)}&limit={limit}"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read())
+        mems = data.get("memories") or []
+        return {
+            "count": len(mems),
+            "memories": [
+                {
+                    "id": m.get("memory_id", m.get("id")),
+                    "kind": m.get("kind"),
+                    "summary": (m.get("summary") or m.get("content") or "")[:200],
+                    "source": m.get("source"),
+                    "created_at": m.get("created_at"),
+                }
+                for m in mems
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e), "memories": []}
+
+
+def tool_git_log(n: int = 10, repo_path: str | None = None) -> dict:
+    """Recent git commits."""
+    repo = Path(repo_path).expanduser() if repo_path else CANONICAL_REPO
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
+    log = _run(["git", "log", f"-{n}", "--oneline", "--no-decorate"], cwd=repo)
+    diff_stat = _run(["git", "diff", "--stat", "HEAD"], cwd=repo)
+    return {
+        "branch": branch,
+        "commits": log.splitlines(),
+        "working_tree": diff_stat[:600] or "clean",
+    }
+
+
+def tool_github_prs(state: str = "open", limit: int = 10) -> dict:
+    """List GitHub pull requests via gh CLI."""
+    raw = _run(
+        ["gh", "pr", "list", "--state", state, "--limit", str(limit),
+         "--json", "number,title,state,author,createdAt,url,labels"],
+        timeout=15,
+    )
+    try:
+        prs = json.loads(raw)
+        return {"count": len(prs), "prs": prs}
+    except Exception:
+        return {"error": raw, "prs": []}
+
+
+def tool_github_issues(state: str = "open", limit: int = 10, label: str = "") -> dict:
+    """List GitHub issues via gh CLI."""
+    cmd = ["gh", "issue", "list", "--state", state, "--limit", str(limit),
+           "--json", "number,title,state,author,createdAt,url,labels"]
+    if label:
+        cmd += ["--label", label]
+    raw = _run(cmd, timeout=15)
+    try:
+        issues = json.loads(raw)
+        return {"count": len(issues), "issues": issues}
+    except Exception:
+        return {"error": raw, "issues": []}
+
+
+def tool_web_search(query: str, max_results: int = 5) -> dict:
+    """DuckDuckGo web search — free, no API key."""
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+        return {
+            "count": len(results),
+            "results": [
+                {"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body", "")[:300]}
+                for r in results
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
+
+def tool_warden_context(query: str = "") -> dict:
+    """Pull current Warden memory-agent context snapshot (git, shell, board, memories)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{WARDEN_API_BASE}/warden/memory-agent/context", timeout=5) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Tool registry — OpenAI function-calling schema
+# ---------------------------------------------------------------------------
+
+TOOL_FUNCTIONS = {
+    "recall_memories": tool_recall_memories,
+    "git_log": tool_git_log,
+    "github_prs": tool_github_prs,
+    "github_issues": tool_github_issues,
+    "web_search": tool_web_search,
+    "warden_context": tool_warden_context,
+}
+
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "recall_memories",
+            "description": "Search Warden stored memories for decisions, proofs, failures, and handoffs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "default": 8},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "Get recent git commits and working tree diff stat for the Warden repo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "n": {"type": "integer", "description": "Number of commits", "default": 10},
+                    "repo_path": {"type": "string", "description": "Repo path override (optional)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "github_prs",
+            "description": "List GitHub pull requests.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": ["open", "closed", "merged", "all"], "default": "open"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "github_issues",
+            "description": "List GitHub issues.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": ["open", "closed", "all"], "default": "open"},
+                    "limit": {"type": "integer", "default": 10},
+                    "label": {"type": "string", "description": "Filter by label (optional)", "default": ""},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web via DuckDuckGo. Use for recent news, docs, or anything not in memory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "warden_context",
+            "description": "Get a live snapshot: current branch, recent commits, board tasks, memory count.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "default": ""},
+                },
+            },
+        },
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# LLM selection
+# ---------------------------------------------------------------------------
+
+def _pick_litellm_model() -> tuple[str, str] | None:
+    """Return (provider, litellm_model) for the best available cloud key, or None."""
+    from src.marius.model_profiles import TOOL_CALL_CLOUD_CANDIDATES
+    for cand in TOOL_CALL_CLOUD_CANDIDATES:
+        if os.getenv(cand["env"]):
+            return cand["provider"], cand["model"]
+    return None
+
+
+async def _litellm_chat(messages: list[dict], tools: list[dict] | None = None,
+                        model: str = "", timeout: int = 60) -> Any:
+    import litellm
+    kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout}
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+    return await litellm.acompletion(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Fallback: ReAct loop against Ollama (no tool-calling)
+# ---------------------------------------------------------------------------
+
+def _ollama_chat_sync(messages: list[dict], model: str, timeout: float = 60) -> str:
+    import urllib.request
+    payload = json.dumps({"model": model, "messages": messages, "stream": False}).encode()
+    req = urllib.request.Request(
+        f"{os.getenv('OLLAMA_URL', 'http://127.0.0.1:11434')}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())["message"]["content"].strip()
+
+
+def _react_fallback(message: str, history: list[dict]) -> "AgentResponse":
+    """When no cloud key: gather context statically and ask Ollama to synthesise."""
+    ctx = {
+        "git": tool_git_log(10),
+        "prs": tool_github_prs("open", 5),
+        "memories": tool_recall_memories(message, 6),
+        "context": tool_warden_context(message),
+    }
+    ctx_text = json.dumps(ctx, indent=2)[:4000]
+    msgs = [
+        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "system", "content": f"# Gathered context\n{ctx_text}"},
+    ] + history + [{"role": "user", "content": message}]
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    # pick first available ollama model
+    try:
+        import urllib.request as _ur
+        tags = json.loads(_ur.urlopen(f"{ollama_url}/api/tags", timeout=3).read())
+        models = [m["name"] for m in tags.get("models", []) if "embed" not in m["name"]]
+        ollama_model = models[0] if models else "llama3.2:3b"
+    except Exception:
+        ollama_model = "llama3.2:3b"
+
+    try:
+        reply = _ollama_chat_sync(msgs, ollama_model)
+        return AgentResponse(
+            reply=reply,
+            tools_used=[{"tool": k, "result_summary": "static gather"} for k in ctx],
+            sources=["git", "github", "memories", "context"],
+            model=ollama_model,
+            provider="ollama",
+            fallback=True,
+        )
+    except Exception as e:
+        from .memory_agent import _fallback_structured_answer, gather_context
+        mc = gather_context(message)
+        return AgentResponse(
+            reply=_fallback_structured_answer(message, mc),
+            tools_used=[],
+            sources=mc.source_labels(),
+            model="fallback",
+            provider="fallback",
+            fallback=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Main agent loop
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentResponse:
+    reply: str
+    tools_used: list[dict] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    model: str = ""
+    provider: str = ""
+    fallback: bool = False
+
+
+async def run_agent(message: str, history: list[dict] | None = None) -> AgentResponse:
+    """
+    Tool-calling agent loop. Returns AgentResponse with synthesised reply.
+    Falls back to static gather + Ollama if no cloud key is available.
+    """
+    history = history or []
+    cloud = _pick_litellm_model()
+
+    if cloud is None:
+        logger.info("No cloud key found — using ReAct/Ollama fallback")
+        return _react_fallback(message, history)
+
+    provider, model = cloud
+    messages: list[dict] = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+    messages += history
+    messages.append({"role": "user", "content": message})
+
+    tools_used: list[dict] = []
+    sources: set[str] = set()
+
+    for iteration in range(MAX_ITERATIONS):
+        resp = await _litellm_chat(messages, tools=TOOL_SCHEMAS, model=model)
+        msg = resp.choices[0].message
+
+        # No tool calls → final answer
+        if not getattr(msg, "tool_calls", None):
+            return AgentResponse(
+                reply=msg.content or "",
+                tools_used=tools_used,
+                sources=sorted(sources),
+                model=model,
+                provider=provider,
+                fallback=False,
+            )
+
+        # Append assistant message (with tool_calls)
+        messages.append(msg.model_dump() if hasattr(msg, "model_dump") else dict(msg))
+
+        # Execute each tool call
+        for tc in msg.tool_calls:
+            fn_name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+
+            fn = TOOL_FUNCTIONS.get(fn_name)
+            if fn is None:
+                result = {"error": f"unknown tool: {fn_name}"}
+            else:
+                try:
+                    result = fn(**args)
+                except Exception as e:
+                    result = {"error": str(e)}
+
+            result_str = json.dumps(result, default=str)[:3000]
+            tools_used.append({"tool": fn_name, "args": args, "result_preview": result_str[:200]})
+
+            # Track sources
+            _src_map = {
+                "recall_memories": "memories", "warden_context": "memories",
+                "git_log": "git",
+                "github_prs": "github", "github_issues": "github",
+                "web_search": "web",
+            }
+            if fn_name in _src_map:
+                sources.add(_src_map[fn_name])
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "name": fn_name,
+                "content": result_str,
+            })
+
+    # Max iterations hit — ask for final summary
+    messages.append({"role": "user", "content": "Summarise what you found so far."})
+    final = await _litellm_chat(messages, model=model)
+    return AgentResponse(
+        reply=final.choices[0].message.content or "",
+        tools_used=tools_used,
+        sources=sorted(sources),
+        model=model,
+        provider=provider,
+        fallback=False,
+    )

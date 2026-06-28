@@ -1,0 +1,45 @@
+{
+  "session_id": "codex-int-a3ef9e",
+  "runner_id": "run_99f3909c",
+  "lane_id": "codex_cli",
+  "repo_id": "mcharness-public-export",
+  "queue_item_id": null,
+  "prompt_artifact_id": null,
+  "dispatch_prompt": "# Warden Memory Context\n\n## Project / Repo\n- Project: mcharness-public-export\n- Repo: /home/matt/workspaces/warden/mcharness-public-export\n\n## Relevant Project Context\n- [m-c2-bb2564] Agent prompt: c2: c2\n- [m-c1-a3ef5a] Agent prompt: c1: c1\n- [m-manual-still-works-with--dcff97] Run result: manual still works with runner present: manual still works with runner present\n\n## Source Memories\n- m-c2-bb2564: Agent prompt: c2\n- m-c1-a3ef5a: Agent prompt: c1\n- m-manual-still-works-with--dcff97: Run result: manual still works with runner present\n\n---\n\n# User Task\n\ncodex-int",
+  "memory_context": {
+    "context": "# Warden Memory Context\n\n## Project / Repo\n- Project: mcharness-public-export\n- Repo: /home/matt/workspaces/warden/mcharness-public-export\n\n## Relevant Project Context\n- [m-c2-bb2564] Agent prompt: c2: c2\n- [m-c1-a3ef5a] Agent prompt: c1: c1\n- [m-manual-still-works-with--dcff97] Run result: manual still works with runner present: manual still works with runner present\n\n## Source Memories\n- m-c2-bb2564: Agent prompt: c2\n- m-c1-a3ef5a: Agent prompt: c1\n- m-manual-still-works-with--dcff97: Run result: manual still works with runner present",
+    "memory_count": 3,
+    "memory_ids": [
+      "m-c2-bb2564",
+      "m-c1-a3ef5a",
+      "m-manual-still-works-with--dcff97"
+    ],
+    "truncated": false,
+    "scope": "mcharness-public-export",
+    "injected": true
+  },
+  "status": "stopped",
+  "tmux_session_name": "mch_run_run_99f3909c",
+  "prompt_file_path": "tests/marius_test_data/mcharness/artifacts/codex-int-a3ef9e/prompt-head.md",
+  "transcript_file_path": "tests/marius_test_data/mcharness/artifacts/codex-int-a3ef9e/transcript-runner-run_99f3909c.txt",
+  "started_at": "2026-06-28T05:34:45.669046+00:00",
+  "stopped_at": "2026-06-28T05:34:45.681067+00:00",
+  "exit_code": null,
+  "safety_policy": {
+    "allowlisted_lane": true,
+    "allowlisted_repo": true,
+    "tmux_runner_enabled": true,
+    "codex_runner_enabled": true,
+    "real_provider": true,
+    "arbitrary_shell_disabled": true,
+    "public_real_agent_launch_disabled": true
+  },
+  "notes": [
+    "gated tmux runner; lane=codex_cli (codex real only with both flags; fake for tests)",
+    "codex interactive tmux (not exec < file)",
+    "prompt text injected via tmux send-keys -l + Tab + Enter; waiting for Codex response",
+    "stopped by operator"
+  ],
+  "attach_command": "tmux attach -t fake",
+  "prompt_memory_id": "m-codex-int-326fe5"
+}

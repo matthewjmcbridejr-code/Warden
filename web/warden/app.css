@@ -4006,3 +4006,172 @@ textarea:focus-visible {
     min-height: 400px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════
+   Warden Agent Panel
+   ═══════════════════════════════════════════════════════ */
+
+.wa-section { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+
+/* ── Topbar ── */
+.wa-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+.wa-topbar-left { display: flex; flex-direction: column; gap: 2px; }
+.wa-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.wa-subtitle { font-size: 11px; color: var(--text-muted); margin: 0; }
+.wa-topbar-right { display: flex; align-items: center; gap: 8px; }
+.wa-model-badge {
+  font-size: 10px; color: var(--text-muted); background: var(--surface-alt);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px;
+}
+.wa-icon-btn {
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+.wa-icon-btn:hover { background: var(--surface-alt); color: var(--text-primary); }
+
+/* ── Body: tool trace + chat ── */
+.wa-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  flex: 1; overflow: hidden;
+}
+
+/* ── Trace pane ── */
+.wa-trace-pane {
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); transition: width 0.2s;
+}
+.wa-trace-pane.wa-trace-hidden { width: 0; overflow: hidden; border-right: none; }
+.wa-trace-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.wa-trace-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.wa-trace-empty { font-size: 11px; color: var(--text-muted); padding: 8px; }
+.wa-trace-item {
+  background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; font-size: 11px;
+}
+.wa-trace-tool-name { font-weight: 600; color: var(--accent, #6c8ebf); margin-bottom: 3px; }
+.wa-trace-args { color: var(--text-muted); margin-bottom: 4px; line-height: 1.5; }
+.wa-trace-arg { background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-right: 4px; }
+.wa-trace-preview {
+  color: var(--text-secondary, #aaa); font-size: 10px;
+  white-space: pre-wrap; word-break: break-all; max-height: 80px; overflow: hidden;
+  border-top: 1px solid var(--border); padding-top: 4px; margin-top: 4px;
+}
+
+/* ── Chat pane ── */
+.wa-chat-pane {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Welcome ── */
+.wa-welcome {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 24px; text-align: center;
+}
+.wa-welcome-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+.wa-welcome-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
+.wa-welcome-sub { font-size: 13px; color: var(--text-muted); margin: 0 0 24px; }
+.wa-starters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; }
+.wa-starter-btn {
+  background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 20px; color: var(--text-secondary, #ccc);
+  cursor: pointer; font-size: 12px; padding: 6px 14px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.wa-starter-btn:hover {
+  background: var(--surface); border-color: var(--accent, #6c8ebf);
+  color: var(--text-primary);
+}
+
+/* ── Thread ── */
+.wa-thread {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.wa-msg { display: flex; flex-direction: column; max-width: 82%; }
+.wa-msg-user { align-self: flex-end; align-items: flex-end; }
+.wa-msg-agent { align-self: flex-start; align-items: flex-start; }
+
+.wa-msg-user .wa-msg-bubble {
+  background: var(--accent, #2c4a7a); color: #fff;
+  border-radius: 14px 14px 4px 14px;
+}
+.wa-msg-agent .wa-msg-bubble {
+  background: var(--surface-alt); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 14px 14px 14px 4px;
+}
+.wa-msg-bubble {
+  padding: 10px 14px; font-size: 13px; line-height: 1.6;
+  word-break: break-word;
+}
+.wa-msg-bubble code {
+  background: rgba(0,0,0,0.25); border-radius: 3px;
+  padding: 1px 5px; font-size: 11px; font-family: monospace;
+}
+
+.wa-msg-meta {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 4px;
+  font-size: 10px;
+}
+.wa-msg-model { color: var(--text-muted); }
+.wa-msg-fallback { color: #c5a020; }
+
+.wa-msg-sources { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.wa-source-chip {
+  font-size: 10px; padding: 2px 8px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted);
+}
+.wa-source-chip.wa-source-git     { border-color: #4d7a4d; color: #7cbf7c; }
+.wa-source-chip.wa-source-github  { border-color: #5a5aad; color: #8c8cdd; }
+.wa-source-chip.wa-source-memories{ border-color: #7a4d7a; color: #bf7cbf; }
+.wa-source-chip.wa-source-web     { border-color: #7a6a20; color: #c5aa40; }
+.wa-source-chip.wa-source-context { border-color: #2a6a7a; color: #4caabf; }
+
+/* ── Status ── */
+.wa-status {
+  padding: 0 20px 4px; font-size: 11px; color: var(--text-muted); min-height: 18px;
+}
+.wa-status-error { color: #c05050; }
+
+/* ── Input row ── */
+.wa-input-row {
+  display: flex; gap: 8px; align-items: flex-end;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+}
+.wa-input {
+  flex: 1; background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text-primary); font-size: 13px;
+  line-height: 1.5; min-height: 38px; max-height: 160px;
+  outline: none; padding: 8px 12px; resize: none;
+  font-family: inherit; transition: border-color 0.15s;
+}
+.wa-input:focus { border-color: var(--accent, #6c8ebf); }
+.wa-input::placeholder { color: var(--text-muted); }
+.wa-send-btn {
+  background: var(--accent, #2c4a7a); border: none; border-radius: 8px;
+  color: #fff; cursor: pointer; font-size: 14px; height: 38px; width: 38px;
+  flex-shrink: 0; transition: opacity 0.15s;
+}
+.wa-send-btn:hover { opacity: 0.85; }
+.wa-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .wa-body { grid-template-columns: 1fr; }
+  .wa-trace-pane { display: none; }
+}
