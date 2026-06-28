@@ -327,7 +327,8 @@ def _pick_litellm_model() -> tuple[str, str, str] | None:
     falling back to direct cloud key selection."""
     master_key = os.getenv("LITELLM_MASTER_KEY", "")
     if master_key:
-        return "litellm-proxy", f"openai/warden-fast", master_key
+        # warden-code (Groq llama-3.3-70b) has reliable tool-calling support
+        return "litellm-proxy", "openai/warden-code", master_key
     # Direct cloud fallback (no proxy)
     from src.marius.model_profiles import TOOL_CALL_CLOUD_CANDIDATES
     for cand in TOOL_CALL_CLOUD_CANDIDATES:
@@ -467,8 +468,19 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
                 fallback=False,
             )
 
-        # Append assistant message (with tool_calls)
-        messages.append(msg.model_dump() if hasattr(msg, "model_dump") else dict(msg))
+        # Append assistant message — only standard OpenAI fields (strip provider_specific_fields etc.)
+        tool_calls_raw = []
+        for tc in (msg.tool_calls or []):
+            tool_calls_raw.append({
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            })
+        messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": tool_calls_raw,
+        })
 
         # Execute each tool call
         for tc in msg.tool_calls:

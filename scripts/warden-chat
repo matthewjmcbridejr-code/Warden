@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""
+warden-chat — CLI for Warden Agent and Memory Agent
+
+Usage:
+  warden-chat ask  "Where we at with Warden?"   # single Warden Agent query
+  warden-chat mem  "What did I decide about X?"  # single Memory Agent query
+  warden-chat chat                               # interactive Warden Agent REPL
+  warden-chat memory                             # interactive Memory Agent REPL
+  warden-chat      [no args]                     # interactive Warden Agent REPL
+
+Flags:
+  --url  URL    API base (default: http://127.0.0.1:6969)
+  --plain       strip markdown formatting from output
+  --tools       show tool call trace (Warden Agent only)
+"""
+
+import sys
+import os
+import json
+import textwrap
+import argparse
+import urllib.request
+import urllib.error
+from typing import Optional
+
+DEFAULT_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:6969")
+MCH = "/api/mcharness"
+
+# ── ANSI colours (no-op if not a tty) ──────────────────────────────────────
+_TTY = sys.stdout.isatty()
+def _c(code: str, s: str) -> str:
+    return f"\033[{code}m{s}\033[0m" if _TTY else s
+
+DIM    = lambda s: _c("2", s)
+BOLD   = lambda s: _c("1", s)
+CYAN   = lambda s: _c("96", s)
+GREEN  = lambda s: _c("92", s)
+YELLOW = lambda s: _c("93", s)
+RED    = lambda s: _c("91", s)
+GREY   = lambda s: _c("90", s)
+
+
+# ── HTTP helper ─────────────────────────────────────────────────────────────
+def _post(url: str, payload: dict, timeout: int = 120) -> dict:
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        raise RuntimeError(f"HTTP {e.code}: {body[:200]}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Cannot reach Warden API at {url}\n  → {e.reason}\n  → Is Warden running?") from e
+
+
+def _get(url: str, timeout: int = 10) -> dict:
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception:
+        return {}
+
+
+# ── Formatting ───────────────────────────────────────────────────────────────
+def _wrap(text: str, width: int = 88) -> str:
+    lines = []
+    for para in text.split("\n"):
+        if para.strip() == "":
+            lines.append("")
+        elif para.startswith(("  ", "\t", "- ", "* ", "# ", "```", "|")):
+            lines.append(para)
+        else:
+            lines.extend(textwrap.wrap(para, width) or [""])
+    return "\n".join(lines)
+
+
+def _print_reply(text: str, plain: bool = False) -> None:
+    text = (text or "").strip()
+    if not text:
+        print(GREY("(empty response)"))
+        return
+    if plain:
+        # strip markdown bold/italic markers
+        import re
+        text = re.sub(r"\*{1,3}(.+?)\*{1,3}", r"\1", text)
+        text = re.sub(r"_{1,2}(.+?)_{1,2}", r"\1", text)
+        text = re.sub(r"`(.+?)`", r"\1", text)
+    print()
+    print(_wrap(text))
+    print()
+
+
+def _print_tools(tools: list) -> None:
+    if not tools:
+        return
+    print(DIM("── tools ──────────────────────"))
+    for t in tools:
+        name = t.get("name", "?")
+        args = t.get("args", {})
+        result_preview = str(t.get("result", "")).strip()[:80]
+        arg_str = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items())
+        print(f"  {CYAN(name)}({GREY(arg_str)})")
+        if result_preview:
+            print(f"    {DIM('→')} {GREY(result_preview)}")
+    print(DIM("────────────────────────────────"))
+
+
+def _print_model_badge(d: dict, agent: str) -> None:
+    model = d.get("model") or ""
+    provider = d.get("provider") or ""
+    fallback = d.get("fallback", False)
+    if model or provider:
+        badge = f"{provider}/{model}" if (model and provider) else (model or provider)
+        suffix = YELLOW(" [fallback]") if fallback else ""
+        print(GREY(f"  [{agent} · {badge}{suffix}]"))
+
+
+# ── Warden Agent ─────────────────────────────────────────────────────────────
+def warden_ask(message: str, history: list, base_url: str,
+               plain: bool = False, show_tools: bool = False) -> list:
+    url = f"{base_url}{MCH}/warden/agent/chat"
+    print(GREY("  thinking…"), end="\r", flush=True)
+    try:
+        d = _post(url, {"message": message, "history": history})
+    except RuntimeError as e:
+        print(RED(f"Error: {e}"))
+        return history
+
+    print(" " * 20, end="\r")  # clear "thinking…"
+
+    reply = d.get("reply") or d.get("response") or ""
+    tools = d.get("tools_used") or []
+
+    _print_reply(reply, plain=plain)
+    if show_tools and tools:
+        _print_tools(tools)
+    _print_model_badge(d, "warden-agent")
+
+    history = list(history) + [
+        {"role": "user", "content": message},
+        {"role": "assistant", "content": reply},
+    ]
+    return history
+
+
+# ── Memory Agent ─────────────────────────────────────────────────────────────
+def memory_ask(message: str, history: list, base_url: str, plain: bool = False) -> list:
+    url = f"{base_url}{MCH}/warden/memory-agent/chat"
+    print(GREY("  thinking…"), end="\r", flush=True)
+    try:
+        d = _post(url, {"message": message, "history": history})
+    except RuntimeError as e:
+        print(RED(f"Error: {e}"))
+        return history
+
+    print(" " * 20, end="\r")
+
+    reply = d.get("reply") or d.get("response") or ""
+    _print_reply(reply, plain=plain)
+    _print_model_badge(d, "memory-agent")
+
+    history = list(history) + [
+        {"role": "user", "content": message},
+        {"role": "assistant", "content": reply},
+    ]
+    return history
+
+
+# ── Status check ─────────────────────────────────────────────────────────────
+def _check_api(base_url: str) -> bool:
+    health = _get(f"{base_url}{MCH}/memory/health", timeout=4)
+    if health.get("ok"):
+        mem = health.get("memory_count", "?")
+        vec = health.get("vector_count", "?")
+        print(GREY(f"  Warden API online · {mem} memories · {vec} vectorized"))
+        return True
+    # try a simpler ping
+    h = _get(f"{base_url}/api/mcharness/health", timeout=4)
+    if h.get("ok"):
+        print(GREY("  Warden API online"))
+        return True
+    print(YELLOW("  Warning: Warden API health check failed — continuing anyway"))
+    return False
+
+
+# ── REPL ─────────────────────────────────────────────────────────────────────
+_WARDEN_STARTERS = [
+    "Where we at with Warden?",
+    "What's blocking us right now?",
+    "Show me recent commits and open PRs",
+    "What did I work on last?",
+    "What decisions have we made about Warden architecture?",
+]
+_MEMORY_STARTERS = [
+    "What was I working on last?",
+    "What did I decide about Warden?",
+    "What are my active projects and priorities?",
+    "Give me a handoff brief for today.",
+    "Any recent failures or blockers?",
+]
+
+def _repl(agent: str, base_url: str, plain: bool, show_tools: bool) -> None:
+    is_warden = agent == "warden"
+    name = "Warden Agent" if is_warden else "Memory Agent"
+    starters = _WARDEN_STARTERS if is_warden else _MEMORY_STARTERS
+    ask_fn = warden_ask if is_warden else memory_ask
+
+    print()
+    print(BOLD(f"  {name}"))
+    print(GREY("  Type your question. 'clear' to reset, 'quit' or Ctrl-C/D to exit."))
+    print(GREY("  Starters:"))
+    for i, s in enumerate(starters, 1):
+        print(GREY(f"    {i}. {s}"))
+    print()
+
+    _check_api(base_url)
+    print()
+
+    history: list = []
+    try:
+        while True:
+            try:
+                prompt = input(CYAN("you › ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+
+            if not prompt:
+                continue
+            if prompt.lower() in ("quit", "exit", "q", ":q"):
+                break
+            if prompt.lower() == "clear":
+                history = []
+                print(GREY("  conversation cleared"))
+                continue
+
+            # allow numeric starter shortcuts
+            if prompt.isdigit() and 1 <= int(prompt) <= len(starters):
+                prompt = starters[int(prompt) - 1]
+                print(CYAN(f"you › {prompt}"))
+
+            if is_warden:
+                history = ask_fn(prompt, history, base_url, plain=plain, show_tools=show_tools)
+            else:
+                history = ask_fn(prompt, history, base_url, plain=plain)
+
+    except KeyboardInterrupt:
+        print()
+
+    print(GREY("  bye"))
+
+
+# ── CLI entry ─────────────────────────────────────────────────────────────────
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="warden-chat",
+        description="Chat with Warden Agent or Memory Agent from the CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+        examples:
+          warden-chat ask "where we at with Warden?"
+          warden-chat mem "what did I decide about the gateway?"
+          warden-chat chat          # interactive Warden Agent
+          warden-chat memory        # interactive Memory Agent
+          warden-chat               # interactive Warden Agent (default)
+        """),
+    )
+    parser.add_argument("--url", default=DEFAULT_URL, metavar="URL",
+                        help=f"Warden API base URL (default: {DEFAULT_URL})")
+    parser.add_argument("--plain", action="store_true",
+                        help="strip markdown from output")
+    parser.add_argument("--tools", action="store_true",
+                        help="show tool call trace (Warden Agent only)")
+
+    sub = parser.add_subparsers(dest="cmd")
+
+    p_ask = sub.add_parser("ask", help="single Warden Agent query")
+    p_ask.add_argument("message", nargs="+")
+    p_ask.add_argument("--tools", action="store_true", help="show tool call trace")
+
+    p_mem = sub.add_parser("mem", help="single Memory Agent query")
+    p_mem.add_argument("message", nargs="+")
+
+    sub.add_parser("chat", help="interactive Warden Agent REPL")
+    sub.add_parser("memory", help="interactive Memory Agent REPL")
+
+    args = parser.parse_args()
+
+    if args.cmd == "ask":
+        show = getattr(args, "tools", False) or args.tools
+        warden_ask(" ".join(args.message), [], args.url,
+                   plain=args.plain, show_tools=show)
+
+    elif args.cmd == "mem":
+        memory_ask(" ".join(args.message), [], args.url, plain=args.plain)
+
+    elif args.cmd == "memory":
+        _repl("memory", args.url, plain=args.plain, show_tools=False)
+
+    else:
+        # "chat" or no subcommand → Warden Agent REPL
+        _repl("warden", args.url, plain=args.plain, show_tools=args.tools)
+
+
+if __name__ == "__main__":
+    main()
