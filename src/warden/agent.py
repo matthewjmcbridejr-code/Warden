@@ -21,6 +21,7 @@ CANONICAL_REPO = Path(
 ).expanduser()
 
 WARDEN_API_BASE = os.getenv("WARDEN_API_BASE", "http://127.0.0.1:6969/api/mcharness")
+CRAWL4AI_URL = os.getenv("CRAWL4AI_SERVICE_URL", "http://127.0.0.1:8099")
 
 AGENT_SYSTEM_PROMPT = """\
 You are Warden, a senior engineering assistant with access to tools that let you \
@@ -114,13 +115,45 @@ def tool_github_issues(state: str = "open", limit: int = 10, label: str = "") ->
 
 
 def tool_web_search(query: str, max_results: int = 5) -> dict:
-    """DuckDuckGo web search — free, no API key."""
+    """Web search — Tavily if key available, DuckDuckGo otherwise."""
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if tavily_key:
+        try:
+            import urllib.request as _ur
+            payload = json.dumps({
+                "api_key": tavily_key,
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic",
+            }).encode()
+            req = _ur.Request(
+                "https://api.tavily.com/search",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with _ur.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read())
+            results = data.get("results") or []
+            return {
+                "count": len(results),
+                "source": "tavily",
+                "results": [
+                    {"title": r.get("title"), "url": r.get("url"), "snippet": r.get("content", "")[:300]}
+                    for r in results
+                ],
+            }
+        except Exception as e:
+            logger.warning("Tavily search failed: %s — falling back to DDG", e)
+
+    # DDG fallback
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
         return {
             "count": len(results),
+            "source": "duckduckgo",
             "results": [
                 {"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body", "")[:300]}
                 for r in results
@@ -128,6 +161,29 @@ def tool_web_search(query: str, max_results: int = 5) -> dict:
         }
     except Exception as e:
         return {"error": str(e), "results": []}
+
+
+def tool_crawl_url(url: str, markdown_only: bool = True) -> dict:
+    """Crawl a URL and return its content as markdown. Uses local crawl4ai service."""
+    import urllib.request as _ur
+    payload = json.dumps({"url": url, "markdown_only": markdown_only}).encode()
+    req = _ur.Request(
+        f"{CRAWL4AI_URL}/crawl",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _ur.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+        return {
+            "url": url,
+            "title": data.get("title"),
+            "markdown": (data.get("markdown") or "")[:5000],
+            "ok": data.get("ok"),
+        }
+    except Exception as e:
+        return {"error": str(e), "url": url}
 
 
 def tool_warden_context(query: str = "") -> dict:
@@ -150,6 +206,7 @@ TOOL_FUNCTIONS = {
     "github_prs": tool_github_prs,
     "github_issues": tool_github_issues,
     "web_search": tool_web_search,
+    "crawl_url": tool_crawl_url,
     "warden_context": tool_warden_context,
 }
 
@@ -224,6 +281,21 @@ TOOL_SCHEMAS = [
                     "max_results": {"type": "integer", "default": 5},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "crawl_url",
+            "description": "Fetch and read a URL as clean markdown. Use for docs, GitHub pages, articles, or any link from search results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to crawl"},
+                    "markdown_only": {"type": "boolean", "default": True},
+                },
+                "required": ["url"],
             },
         },
     },
@@ -407,7 +479,7 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
                 "recall_memories": "memories", "warden_context": "memories",
                 "git_log": "git",
                 "github_prs": "github", "github_issues": "github",
-                "web_search": "web",
+                "web_search": "web", "crawl_url": "web",
             }
             if fn_name in _src_map:
                 sources.add(_src_map[fn_name])
