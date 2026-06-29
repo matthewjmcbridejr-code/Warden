@@ -4512,3 +4512,11 @@ textarea:focus-visible {
   font-size: 0.83rem;
   color: var(--warn, #f5c842);
 }
+
+/* Marius Trace note in Memory Agent header */
+.mem-trace-note {
+  font-size: 0.72rem;
+  color: var(--muted, #9cacbf);
+  margin-left: 8px;
+  opacity: 0.75;
+}

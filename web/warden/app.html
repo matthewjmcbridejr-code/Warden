@@ -25,7 +25,7 @@
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
         <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command</button>
-        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Warden Chat</button>
+        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Marius Agent</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory Chat</button>
         <button type="button" class="nav-item" data-section="gateway" data-testid="nav-gateway">Gateway Status</button>
       </nav>
@@ -220,8 +220,9 @@
         <div class="mem-chat-pane mem-chat-fullwidth">
           <div class="mem-chat-header">
             <div class="mem-chat-header-left">
-              <span class="mem-chat-title">Memory Agent</span>
+              <span class="mem-chat-title">Warden Memory Agent</span>
               <span id="mem-chat-model-label" class="mem-chat-model-label"></span>
+              <span class="mem-trace-note">Reports memory reads/writes into Marius Trace</span>
             </div>
             <div class="mem-chat-header-right">
               <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
@@ -269,7 +270,7 @@
       <section id="warden-section-agent" class="workspace-section wa-section" data-section="agent" data-testid="warden-section-agent">
         <header class="wa-topbar">
           <div class="wa-topbar-left">
-            <h2 class="wa-title">Warden Agent</h2>
+            <h2 class="wa-title">Marius Agent</h2>
             <span class="wa-subtitle">Ask anything — git, GitHub, memory, web</span>
           </div>
           <div class="wa-topbar-right">
@@ -282,7 +283,7 @@
           <!-- Tool trace sidebar -->
           <div class="wa-trace-pane" id="wa-trace-pane">
             <div class="wa-trace-header">
-              <span>Tool Calls</span>
+              <span>Marius Trace</span>
               <button type="button" id="wa-trace-toggle" class="wa-icon-btn" title="Hide">◀</button>
             </div>
             <div class="wa-trace-list" id="wa-trace-list">
@@ -296,7 +297,7 @@
             <div class="wa-welcome" id="wa-welcome">
               <div class="wa-welcome-icon">⬡</div>
               <h3 class="wa-welcome-title">What do you want to know?</h3>
-              <p class="wa-welcome-sub">I pull from git, GitHub PRs &amp; issues, project memory, and the web.</p>
+              <p class="wa-welcome-sub">Marius pulls from git, GitHub PRs &amp; issues, project memory, and the web.</p>
               <div class="wa-starters">
                 <button type="button" class="wa-starter-btn" data-prompt="Where we at with Warden?">Where we at with Warden?</button>
                 <button type="button" class="wa-starter-btn" data-prompt="What's blocking us right now?">What's blocking us right now?</button>

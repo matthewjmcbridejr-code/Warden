@@ -2571,7 +2571,7 @@ test("single-section nav: only one workspace section visible at a time", async (
   await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
   await expect(page.locator("[data-testid='nav-memory']")).toHaveClass(/active/);
 
-  // Click Warden Chat — only Warden Chat visible
+  // Click Marius Agent — only Marius Agent section visible
   await page.locator("[data-testid='nav-agent']").click();
   await expect(page.locator("[data-testid='warden-section-agent']")).toBeVisible();
   await expect(page.locator("[data-testid='warden-section-memory']")).toBeHidden();
