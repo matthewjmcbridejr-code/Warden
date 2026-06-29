@@ -195,9 +195,15 @@ def test_mcharness_captain_key_save_rejects_when_env_key_present(monkeypatch):
     assert "environment" in response.json()["detail"].lower()
 
 
-def test_mcharness_captain_plan_local_preview_when_no_key(monkeypatch):
+def test_mcharness_captain_plan_local_preview_when_no_key(monkeypatch, tmp_path):
     # Without a cloud key, endpoint falls back to local preview planner instead of 503
+    # Uses tmp_path so test plans don't pollute the real memory store
+    import src.warden.api as api_mod
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    # Stub WorkbenchStore to avoid writing real memories during test
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
     client = TestClient(app)
     response = client.post(
         "/api/mcharness/captain/plan",
@@ -244,11 +250,14 @@ def test_mcharness_captain_plan_rejects_unknown_lane(monkeypatch):
     assert "Unknown agent lane" in response.json()["detail"]
 
 
-def test_mcharness_captain_plan_parses_mocked_openrouter_json(monkeypatch):
+def test_mcharness_captain_plan_parses_mocked_openrouter_json(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("MCHARNESS_CAPTAIN_MODEL", "openrouter/auto")
 
     import src.warden.api as api_mod
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
 
     def fake_openrouter(*, messages, model, timeout):
         assert model == "openrouter/auto"
@@ -402,6 +411,102 @@ def test_mcharness_captain_plan_uses_saved_key_when_env_missing(monkeypatch, tmp
     assert data["ok"] is True
     assert data["title"] == "Saved-key Captain plan"
     assert "sk-or-saved-test-key" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5 — Memory recall hardening tests
+# ---------------------------------------------------------------------------
+
+def test_captain_recent_plans_returns_newest_first(monkeypatch, tmp_path):
+    """GET /captain/plans/recent returns plans sorted newest first."""
+    import src.warden.api as api_mod
+    import time
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    plan_root = tmp_path / "captain" / "plans"
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", plan_root)
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+    plan_root.mkdir(parents=True, exist_ok=True)
+
+    # Plans are stored in a plans.json index (newest-first by updated_at)
+    old_plan = {
+        "plan_id": "plan_old", "title": "Old Plan", "goal": "old goal",
+        "repo_id": "hybrid-agent-os", "lane_id": "codex_cli",
+        "source": "local_preview", "steps": [], "notes": [],
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    new_plan = {
+        "plan_id": "plan_new", "title": "New Plan", "goal": "new goal",
+        "repo_id": "hybrid-agent-os", "lane_id": "codex_cli",
+        "source": "local_preview", "steps": [], "notes": [],
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "updated_at": "2026-06-01T00:00:00+00:00",
+    }
+    # Write plans index (old first in file, new first in expected output)
+    plans_index = tmp_path / "captain" / "plans.json"
+    plans_index.parent.mkdir(parents=True, exist_ok=True)
+    plans_index.write_text(json.dumps([new_plan, old_plan]))
+
+    client = TestClient(app)
+    response = client.get("/api/mcharness/captain/plans/recent")
+    assert response.status_code == 200
+    plans = response.json()["plans"]
+    assert len(plans) >= 2
+    ids = [p["plan_id"] for p in plans]
+    assert ids.index("plan_new") < ids.index("plan_old"), "Newest plan should come first"
+
+
+def test_captain_local_preview_writes_searchable_memory(monkeypatch, tmp_path):
+    """Local preview plan memory call receives goal/plan_id/source in its kwargs."""
+    import src.warden.api as api_mod
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+
+    captured = {}
+
+    def capture_write(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(api_mod, "_write_plan_memory", capture_write)
+
+    client = TestClient(app)
+    unique_goal = "test-recall-hardening-unique-goal-abc123"
+    response = client.post(
+        "/api/mcharness/captain/plan",
+        json={"goal": unique_goal, "repo_id": "hybrid-agent-os", "lane_id": "codex_cli"},
+    )
+    assert response.status_code == 200
+    assert captured.get("goal") == unique_goal
+    assert captured.get("plan") is not None
+    plan = captured["plan"]
+    assert plan.get("plan_id", "").startswith("plan_")
+    assert plan.get("source") == "local_preview"
+    assert len(plan.get("steps", [])) >= 3
+
+
+def test_captain_local_preview_response_has_source_field(monkeypatch, tmp_path):
+    """Unconfigured Captain returns local_preview source instead of dead UI / 503."""
+    import src.warden.api as api_mod
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/mcharness/captain/plan",
+        json={"goal": "fix the login bug", "repo_id": "hybrid-agent-os", "lane_id": "codex_cli"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data.get("source") == "local_preview"
+    assert len(data["steps"]) >= 3
 
 
 def test_public_write_guard_blocks_private_captain_key_on_public_service(monkeypatch):

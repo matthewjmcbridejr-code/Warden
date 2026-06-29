@@ -21,3 +21,6 @@ docs/archive/legacy/src-tauri/gen/mcharness.egg-info/
 # Local Google Cloud SDK install
 google-cloud-sdk/
 google-cloud-cli-linux-x86_64.tar.gz
+
+# Build artifacts — not committed
+src/mcharness.egg-info/

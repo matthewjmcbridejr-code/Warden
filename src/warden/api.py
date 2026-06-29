@@ -462,6 +462,7 @@ class McHarnessCaptainPlanResponse(BaseModel):
     status: Optional[str] = None
     current_step_id: Optional[str] = None
     decision_log: list[dict[str, Any]] = Field(default_factory=list)
+    source: Optional[str] = None
 
 
 class McHarnessCaptainPlanPersistRequest(BaseModel):

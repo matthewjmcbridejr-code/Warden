@@ -82,11 +82,30 @@ class MemoryContext:
 
         if self.recent_memories:
             parts.append("\n## Stored Memories (most recent first)")
-            for m in self.recent_memories[:8]:
+            for m in self.recent_memories[:12]:
                 kind = m.get("kind", "context")
                 summary = m.get("summary", "")[:200]
                 source = m.get("source", "")
-                parts.append(f"  [{kind}] {summary}" + (f" — {source}" if source else ""))
+                line = f"  [{kind}] {summary}" + (f" — {source}" if source else "")
+                # For captain plan memories, surface structured metadata inline
+                meta = m.get("metadata") or {}
+                if source == "captain" and isinstance(meta, dict):
+                    plan_id = meta.get("plan_id", "")
+                    goal = meta.get("goal", "")
+                    src = meta.get("source", "")
+                    steps = meta.get("step_count", "")
+                    extras = []
+                    if plan_id:
+                        extras.append(f"plan_id={plan_id}")
+                    if goal:
+                        extras.append(f"goal={goal[:60]}")
+                    if src:
+                        extras.append(f"source={src}")
+                    if steps:
+                        extras.append(f"steps={steps}")
+                    if extras:
+                        line += f" [{', '.join(extras)}]"
+                parts.append(line)
 
         return "\n".join(parts)
 
@@ -174,11 +193,12 @@ def _board_tasks(limit: int = 15) -> list[dict]:
     return tasks[:limit]
 
 
-def _recent_memories(query: str = "", limit: int = 10) -> list[dict]:
+def _recent_memories(query: str = "", limit: int = 12) -> list[dict]:
     try:
         from .workbench import WorkbenchStore  # type: ignore
         store = WorkbenchStore()
-        mems = store.search_memories(query=query or "*", limit=limit)
+        # Pass empty string when no query — returns most-recent-first without term filtering
+        mems = store.search_memories(query=query or "", limit=limit)
         return [m if isinstance(m, dict) else m.__dict__ for m in mems]
     except Exception:
         return []
