@@ -497,6 +497,23 @@
           <div class="connectors-loading">Loading providers…</div>
         </div>
 
+        <!-- Mail test panel -->
+        <div class="settings-section-header" style="margin-top:24px;">
+          <h3 class="settings-section-title">Test Mail Search</h3>
+          <p class="settings-section-sub">Search your connected mail accounts. Results show subject, sender, and snippet — no message bodies by default.</p>
+        </div>
+        <div class="mail-test-panel" id="mail-test-panel">
+          <div class="mail-test-row">
+            <select id="mail-test-account" class="connector-select">
+              <option value="">— select account —</option>
+            </select>
+            <input type="text" id="mail-test-query" class="connector-input" placeholder="Search query (e.g. invoice, from:boss@co.com)" />
+            <button type="button" id="mail-test-search-btn" class="btn primary" style="white-space:nowrap;">Search Mail</button>
+          </div>
+          <div id="mail-test-results" class="mail-test-results" style="display:none;"></div>
+          <p class="connector-provider-note" style="margin-top:8px;">Agents never receive raw tokens or passwords. Mail send is disabled unless explicitly enabled.</p>
+        </div>
+
       </section>
         </div>
 

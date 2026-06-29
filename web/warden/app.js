@@ -2110,39 +2110,277 @@
       loadMemory().catch((e) => console.error(e));
     } else if (state.activeSection === "settings") {
       loadConnectorsProviders().catch((e) => console.error(e));
+      loadMailTestAccountOptions().catch((e) => console.error(e));
     }
+  }
+
+  async function loadMailTestAccountOptions() {
+    const select = document.getElementById("mail-test-account");
+    if (!select) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/mail/accounts`);
+      const accounts = (data && data.accounts) || [];
+      select.innerHTML = accounts.length
+        ? '<option value="">— select account —</option>' + accounts.map((a) =>
+            `<option value="${escapeHtml(a.account_id)}">${escapeHtml(a.display_email || a.account_id)} (${escapeHtml(a.provider)})</option>`
+          ).join("")
+        : '<option value="">No mail accounts connected</option>';
+    } catch (e) {
+      select.innerHTML = '<option value="">Could not load accounts</option>';
+    }
+  }
+
+  function wireMailTestPanel() {
+    const searchBtn = document.getElementById("mail-test-search-btn");
+    if (!searchBtn) return;
+    searchBtn.addEventListener("click", async () => {
+      const accountId = (document.getElementById("mail-test-account") || {}).value || "";
+      const query = ((document.getElementById("mail-test-query") || {}).value || "").trim();
+      const resultsEl = document.getElementById("mail-test-results");
+      if (!accountId) { if (resultsEl) { resultsEl.style.display = ""; resultsEl.innerHTML = '<p class="connectors-empty">Select an account first.</p>'; } return; }
+      searchBtn.disabled = true;
+      searchBtn.textContent = "Searching…";
+      if (resultsEl) resultsEl.style.display = "none";
+      try {
+        const params = new URLSearchParams({account_id: accountId, q: query || "ALL", limit: "10"});
+        const data = await requestJson(`${MCH}/warden/mail/search?${params}`);
+        const messages = data.messages || [];
+        if (resultsEl) {
+          resultsEl.style.display = "";
+          if (!messages.length) {
+            resultsEl.innerHTML = '<p class="connectors-empty">No messages found.</p>';
+          } else {
+            resultsEl.innerHTML = `<p class="connector-provider-note">${messages.length} result${messages.length !== 1 ? "s" : ""}</p>` +
+              messages.map((m) => `<div class="mail-result-card" data-message-id="${escapeHtml(m.id)}" data-account-id="${escapeHtml(m.account_id)}">
+                <div class="mail-result-top">
+                  <strong class="mail-result-subject">${escapeHtml(m.subject || "(no subject)")}</strong>
+                  <span class="mail-result-date">${escapeHtml(m.date || "")}</span>
+                </div>
+                <div class="mail-result-from">From: ${escapeHtml(m.from_addr || "")}</div>
+                <div class="mail-result-snippet">${escapeHtml(m.snippet || "")}</div>
+                <button type="button" class="btn mail-read-btn" style="font-size:0.75rem;margin-top:4px;"
+                  data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}">Read</button>
+                <div class="mail-read-body" style="display:none;"></div>
+              </div>`).join("");
+            // Wire read buttons
+            resultsEl.querySelectorAll(".mail-read-btn").forEach((btn) => {
+              btn.addEventListener("click", async () => {
+                const msgId = btn.getAttribute("data-msg-id");
+                const accId = btn.getAttribute("data-acc-id");
+                const bodyEl = btn.nextElementSibling;
+                btn.disabled = true;
+                btn.textContent = "Loading…";
+                try {
+                  const msgData = await requestJson(`${MCH}/warden/mail/messages/${encodeURIComponent(accId)}/${encodeURIComponent(msgId)}`);
+                  const body = (msgData.message && msgData.message.body_text) || "(empty body)";
+                  if (bodyEl) { bodyEl.style.display = ""; bodyEl.textContent = body.slice(0, 2000) + (body.length > 2000 ? "\n…[truncated]" : ""); }
+                  btn.style.display = "none";
+                } catch (e) {
+                  if (bodyEl) { bodyEl.style.display = ""; bodyEl.textContent = `Error: ${e.message}`; }
+                  btn.textContent = "Read";
+                  btn.disabled = false;
+                }
+              });
+            });
+          }
+        }
+      } catch (e) {
+        if (resultsEl) { resultsEl.style.display = ""; resultsEl.innerHTML = `<p class="connectors-empty">Error: ${e.message}</p>`; }
+      } finally {
+        searchBtn.disabled = false;
+        searchBtn.textContent = "Search Mail";
+      }
+    });
   }
 
   async function loadConnectorsProviders() {
     const listEl = document.getElementById("connectors-provider-list");
     if (!listEl) return;
     try {
-      const data = await requestJson(`${MCH}/warden/connectors/providers`);
-      const providers = (data && data.providers) || [];
+      const [provData, accData] = await Promise.all([
+        requestJson(`${MCH}/warden/connectors/providers`),
+        requestJson(`${MCH}/warden/connectors/accounts`),
+      ]);
+      const providers = (provData && provData.providers) || [];
+      const accounts = (accData && accData.accounts) || [];
+
       if (!providers.length) {
         listEl.innerHTML = '<p class="connectors-empty">No connector providers registered.</p>';
         return;
       }
+
+      // Index connected accounts by provider
+      const connectedByProvider = {};
+      accounts.forEach((a) => {
+        if (!connectedByProvider[a.provider]) connectedByProvider[a.provider] = [];
+        connectedByProvider[a.provider].push(a);
+      });
+
       listEl.innerHTML = providers.map((p) => {
         const authLabel = p.auth_type === "oauth2_authorization_code" ? "OAuth 2.0" : "App Password";
         const caps = (p.capabilities || []).join(", ") || "—";
-        const configuredClass = p.configured ? "connector-configured" : "connector-unconfigured";
-        const configuredLabel = p.configured ? "Configured" : "Not configured";
-        const risk = p.risk_level ? `<span class="connector-risk connector-risk-${escapeHtml(p.risk_level)}">${escapeHtml(p.risk_level.replace("_", " "))}</span>` : "";
+        const connected = connectedByProvider[p.provider_id] || [];
+        const isConnected = connected.length > 0;
+        const configuredClass = isConnected ? "connector-configured" : (p.configured ? "connector-ready" : "connector-unconfigured");
+        const statusLabel = isConnected ? `${connected.length} account${connected.length > 1 ? "s" : ""} connected` : (p.configured ? "Ready to connect" : "Setup required");
+        const statusPillClass = isConnected ? "status-connected" : (p.configured ? "status-ready" : "status-coming");
+
+        // Connected accounts rows
+        const accountsHtml = connected.map((a) => `
+          <div class="connector-account-row" data-account-id="${escapeHtml(a.account_id)}">
+            <span class="connector-account-email">${escapeHtml(a.display_email || a.account_id)}</span>
+            <span class="status-pill status-connected" style="font-size:0.72rem;">Connected</span>
+            <button type="button" class="btn connector-disconnect-btn"
+              data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
+          </div>`).join("");
+
+        // Connect action
+        let connectAction = "";
+        if (p.auth_type === "oauth2_authorization_code") {
+          if (!p.configured) {
+            connectAction = `
+              <div class="connector-setup-required">
+                <strong>Setup required:</strong>
+                <code>${p.provider_id === "gmail" ? "WARDEN_GOOGLE_OAUTH_CLIENT_ID\nWARDEN_GOOGLE_OAUTH_CLIENT_SECRET" :
+                       p.provider_id === "outlook" ? "WARDEN_MICROSOFT_OAUTH_CLIENT_ID\nWARDEN_MICROSOFT_OAUTH_CLIENT_SECRET" : ""}</code>
+                <p class="connector-provider-setup">Set these in <code>~/.config/warden/cloud_keys.env</code> and restart Warden.</p>
+              </div>`;
+          } else {
+            connectAction = `
+              <button type="button" class="btn primary connector-oauth-btn"
+                data-provider="${escapeHtml(p.provider_id)}">Connect ${escapeHtml(p.display_name)}</button>
+              <span class="connector-popup-note">Opens an authorization popup.</span>`;
+          }
+        } else if (p.auth_type === "app_password") {
+          connectAction = `
+            <div class="connector-icloud-form" data-provider="icloud">
+              <p class="connector-provider-note">Generate an app-specific password in <strong>appleid.apple.com → Sign-In and Security → App-Specific Passwords</strong>.</p>
+              <div class="connector-form-row">
+                <input type="email" class="connector-input" placeholder="your@icloud.com or me.com"
+                  id="icloud-email-input" autocomplete="email" />
+              </div>
+              <div class="connector-form-row">
+                <input type="password" class="connector-input" placeholder="xxxx-xxxx-xxxx-xxxx"
+                  id="icloud-pass-input" autocomplete="off" spellcheck="false" />
+              </div>
+              <button type="button" class="btn primary connector-icloud-submit-btn" style="margin-top:4px;">
+                Connect iCloud Mail
+              </button>
+              <div class="connector-icloud-status" id="icloud-connect-status"></div>
+            </div>`;
+        }
+
         return `<div class="connector-provider-card ${configuredClass}" data-provider-id="${escapeHtml(p.provider_id)}">
           <div class="connector-provider-top">
             <strong class="connector-provider-name">${escapeHtml(p.display_name)}</strong>
-            <span class="connector-status-pill ${p.configured ? "status-connected" : "status-coming"}">${configuredLabel}</span>
+            <span class="connector-status-pill ${statusPillClass}">${escapeHtml(statusLabel)}</span>
           </div>
           <div class="connector-provider-meta">
-            <span>${authLabel}</span>
+            <span>${escapeHtml(authLabel)}</span>
             <span>Capabilities: ${escapeHtml(caps)}</span>
-            ${risk}
           </div>
-          ${p.notes ? `<p class="connector-provider-note">${escapeHtml(p.notes)}</p>` : ""}
-          ${!p.configured ? `<p class="connector-provider-setup">To enable: add OAuth client credentials to your environment. See <code>.env.warden-connectors.example</code>.</p>` : ""}
+          ${accountsHtml ? `<div class="connector-accounts-list">${accountsHtml}</div>` : ""}
+          <div class="connector-action-area">${connectAction}</div>
         </div>`;
       }).join("");
+
+      // Wire OAuth connect buttons
+      listEl.querySelectorAll(".connector-oauth-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          btn.disabled = true;
+          btn.textContent = "Opening…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/connect/start`, {method: "POST"});
+            if (result.auth_url) {
+              const popup = window.open(result.auth_url, "warden_oauth", "width=520,height=720,noopener");
+              const fallbackLink = btn.parentElement.querySelector(".connector-popup-fallback");
+              if (fallbackLink) {
+                fallbackLink.href = result.auth_url;
+                fallbackLink.style.display = "";
+              } else {
+                const link = document.createElement("a");
+                link.href = result.auth_url;
+                link.target = "_blank";
+                link.rel = "noopener";
+                link.className = "connector-popup-fallback";
+                link.textContent = "Open consent page";
+                btn.after(link);
+              }
+              btn.textContent = `Connect ${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+              btn.disabled = false;
+              // Reload after popup closes
+              const pollTimer = setInterval(async () => {
+                if (popup && popup.closed) {
+                  clearInterval(pollTimer);
+                  await loadConnectorsProviders();
+                }
+              }, 800);
+            } else {
+              btn.textContent = result.error || "Setup required";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            btn.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire iCloud submit buttons
+      listEl.querySelectorAll(".connector-icloud-submit-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".connector-icloud-form");
+          const emailInput = form ? form.querySelector("#icloud-email-input") : null;
+          const passInput = form ? form.querySelector("#icloud-pass-input") : null;
+          const statusEl = form ? form.querySelector("#icloud-connect-status") : null;
+
+          const email = (emailInput && emailInput.value.trim()) || "";
+          const appPassword = (passInput && passInput.value.trim()) || "";
+
+          if (!email || !appPassword) {
+            if (statusEl) statusEl.textContent = "Email and app-specific password are required.";
+            return;
+          }
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = "Connecting…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/icloud/connect/app-password`, {
+              method: "POST",
+              body: JSON.stringify({email, app_password: appPassword}),
+            });
+            if (result.ok) {
+              if (passInput) passInput.value = "";  // clear password from DOM immediately
+              if (statusEl) statusEl.textContent = "";
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || "Connection failed.";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire disconnect buttons
+      listEl.querySelectorAll(".connector-disconnect-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const accountId = btn.getAttribute("data-disconnect-id");
+          if (!accountId) return;
+          btn.disabled = true;
+          btn.textContent = "Disconnecting…";
+          try {
+            await requestJson(`${MCH}/warden/connectors/accounts/${encodeURIComponent(accountId)}/disconnect`, {method: "POST"});
+            await loadConnectorsProviders();
+          } catch (e) {
+            btn.textContent = "Error";
+            btn.disabled = false;
+          }
+        });
+      });
+
     } catch (e) {
       listEl.innerHTML = '<p class="connectors-empty">Could not load connector providers.</p>';
     }
@@ -3683,6 +3921,7 @@
 
     wireSimpleUI();
     wireMariusEvents(); // Initialize Marius UI bindings
+    wireMailTestPanel();
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
