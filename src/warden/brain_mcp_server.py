@@ -1280,6 +1280,113 @@ def warden_connectors_accounts() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Mail tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_mail_accounts_status() -> str:
+    """Check status of connected mail accounts (Gmail, iCloud, Outlook).
+
+    Returns a list of connected accounts with provider, email, and status.
+    Tokens and passwords are never returned.
+    """
+    try:
+        import urllib.request, json
+        url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts"
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read())
+        accounts = data.get("accounts", [])
+        if not accounts:
+            return _ok("warden_mail_accounts_status", {
+                "connected": False,
+                "note": "No mail accounts connected. Connect Gmail or iCloud in Warden Settings.",
+            })
+        return _ok("warden_mail_accounts_status", {
+            "connected": True,
+            "count": len(accounts),
+            "accounts": [{"account_id": a.get("account_id"), "provider": a.get("provider"),
+                           "display_email": a.get("display_email"), "status": a.get("status")}
+                          for a in accounts],
+        })
+    except Exception as exc:
+        return _err("warden_mail_accounts_status", str(exc))
+
+
+@mcp.tool()
+def warden_mail_search(account_id: str, query: str, limit: int = 10) -> str:
+    """Search mail in a connected account. Returns message summaries (subject, from, snippet).
+
+    Args:
+        account_id: Connected account ID (from warden_mail_accounts_status)
+        query: Search terms (e.g. 'from:boss@company.com', 'invoice', 'project update')
+        limit: Max results (1-20, default 10)
+
+    Never returns message body, tokens, or passwords.
+    Always returns summaries only — use warden_mail_read_message to read full body.
+    """
+    if not account_id:
+        return _err("warden_mail_search", "account_id is required")
+    limit = max(1, min(limit, 20))
+    try:
+        import urllib.request, urllib.parse, json
+        params = urllib.parse.urlencode({"account_id": account_id, "q": query, "limit": limit})
+        url = f"{WARDEN_URL}/api/mcharness/warden/mail/search?{params}"
+        with urllib.request.urlopen(url, timeout=15) as r:
+            data = json.loads(r.read())
+        return _ok("warden_mail_search", {
+            "account_id": account_id,
+            "query": query,
+            "count": data.get("count", 0),
+            "messages": data.get("messages", []),
+        })
+    except Exception as exc:
+        return _err("warden_mail_search", str(exc))
+
+
+@mcp.tool()
+def warden_mail_read_message(account_id: str, message_id: str) -> str:
+    """Read a mail message body. Returns plain text body only — no HTML, no tokens.
+
+    Args:
+        account_id: Connected account ID
+        message_id: Message ID from warden_mail_search results
+
+    Body text is sanitized (no scripts, control chars). HTML body is never returned.
+    Ask the user before reading long bodies — prefer search summaries first.
+    """
+    if not account_id or not message_id:
+        return _err("warden_mail_read_message", "account_id and message_id required")
+    try:
+        import urllib.request, json
+        url = f"{WARDEN_URL}/api/mcharness/warden/mail/messages/{urllib.parse.quote(account_id)}/{urllib.parse.quote(message_id)}"
+        with urllib.request.urlopen(url, timeout=15) as r:
+            data = json.loads(r.read())
+        return _ok("warden_mail_read_message", {"message": data.get("message", {})})
+    except Exception as exc:
+        return _err("warden_mail_read_message", str(exc))
+
+
+@mcp.tool()
+def warden_mail_send_draft(account_id: str, to: str, subject: str, body: str) -> str:
+    """[BLOCKED] Send mail — disabled by default. Requires WARDEN_MAIL_ALLOW_SEND=1 and explicit user confirmation.
+
+    This tool is intentionally blocked in v0. To enable:
+    1. Set WARDEN_MAIL_ALLOW_SEND=1 in your environment
+    2. Restart the Warden API
+    3. Still requires explicit user confirmation before each send
+
+    For now: use warden_mail_search and warden_mail_read_message to read mail.
+    """
+    import os
+    if not os.getenv("WARDEN_MAIL_ALLOW_SEND"):
+        return _ok("warden_mail_send_draft", {
+            "blocked": True,
+            "reason": "Mail sending disabled. Set WARDEN_MAIL_ALLOW_SEND=1 and restart Warden to enable.",
+        })
+    return _err("warden_mail_send_draft", "Send not yet implemented even with WARDEN_MAIL_ALLOW_SEND=1")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -196,6 +196,47 @@ def tool_warden_context(query: str = "") -> dict:
         return {"error": str(e)}
 
 
+def tool_mail_accounts() -> dict:
+    """Check which mail accounts are connected (Gmail, iCloud, Outlook)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{WARDEN_API_BASE}/warden/mail/accounts", timeout=5) as r:
+            data = json.loads(r.read())
+        accounts = data.get("accounts", [])
+        return {"connected": bool(accounts), "count": len(accounts),
+                "accounts": [{"account_id": a.get("account_id"), "provider": a.get("provider"),
+                               "display_email": a.get("display_email"), "status": a.get("status")}
+                              for a in accounts]}
+    except Exception as e:
+        return {"error": str(e), "connected": False}
+
+
+def tool_mail_search(account_id: str, query: str, limit: int = 10) -> dict:
+    """Search mail in a connected account. Returns summaries — subject, from, snippet."""
+    import urllib.request, urllib.parse
+    if not account_id:
+        return {"error": "account_id required", "blocked": True}
+    try:
+        params = urllib.parse.urlencode({"account_id": account_id, "q": query, "limit": min(limit, 20)})
+        with urllib.request.urlopen(f"{WARDEN_API_BASE}/warden/mail/search?{params}", timeout=15) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_mail_read_message(account_id: str, message_id: str) -> dict:
+    """Read a mail message body (plain text only, no HTML, no tokens)."""
+    import urllib.request, urllib.parse
+    if not account_id or not message_id:
+        return {"error": "account_id and message_id required"}
+    try:
+        url = f"{WARDEN_API_BASE}/warden/mail/messages/{urllib.parse.quote(account_id)}/{urllib.parse.quote(message_id)}"
+        with urllib.request.urlopen(url, timeout=15) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — OpenAI function-calling schema
 # ---------------------------------------------------------------------------
@@ -208,6 +249,9 @@ TOOL_FUNCTIONS = {
     "web_search": tool_web_search,
     "crawl_url": tool_crawl_url,
     "warden_context": tool_warden_context,
+    "mail_accounts": tool_mail_accounts,
+    "mail_search": tool_mail_search,
+    "mail_read_message": tool_mail_read_message,
 }
 
 TOOL_SCHEMAS = [
@@ -309,6 +353,53 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "query": {"type": "string", "default": ""},
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mail_accounts",
+            "description": "Check which mail accounts are connected (Gmail, iCloud). Use this first before searching mail.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mail_search",
+            "description": (
+                "Search mail in a connected account. Returns subject, from, date, and snippet. "
+                "Use for: 'Search my email for X', 'Find emails from Y', 'Latest invoice emails'. "
+                "Always call mail_accounts first to get account_id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {"type": "string", "description": "Account ID from mail_accounts"},
+                    "query": {"type": "string", "description": "Search terms or Gmail-style query"},
+                    "limit": {"type": "integer", "default": 10, "description": "Max results (1-20)"},
+                },
+                "required": ["account_id", "query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mail_read_message",
+            "description": (
+                "Read a mail message body (plain text). Use after mail_search to read a specific message. "
+                "Never reads HTML. Never exposes tokens or passwords. "
+                "Prefer search summaries — only read full body when user explicitly asks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {"type": "string"},
+                    "message_id": {"type": "string", "description": "Message ID from mail_search results"},
+                },
+                "required": ["account_id", "message_id"],
             },
         },
     },
@@ -572,6 +663,7 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
                 "git_log": "git",
                 "github_prs": "github", "github_issues": "github",
                 "web_search": "web", "crawl_url": "web",
+                "mail_accounts": "mail", "mail_search": "mail", "mail_read_message": "mail",
             }
             if fn_name in _src_map:
                 sources.add(_src_map[fn_name])
