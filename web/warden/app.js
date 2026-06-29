@@ -610,9 +610,9 @@
 
     if (createBtn) {
       const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
-      const agentRunnable = selectedAgent.runnable !== false && selectedAgent.adapter === "codex_cli";
-      createBtn.disabled = !!deck.loading || !deck.configured || !agentRunnable;
-      createBtn.textContent = deck.loading ? "Captain is building the plan..." : "Create Plan";
+      // Planning only requires Captain to be configured — agent runability is for execution only
+      createBtn.disabled = !!deck.loading || !deck.configured;
+      createBtn.textContent = deck.loading ? "Building plan…" : "Create Plan";
     }
     if (deployBtn) {
       const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
@@ -623,10 +623,10 @@
     if (captainAgentNote) {
       const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
       if (selectedAgent.adapter === "jules_remote") {
-        captainAgentNote.textContent = "Jules Remote is configured for planning/status only. Execution comes next.";
+        captainAgentNote.textContent = "Jules Remote: planning available, execution coming soon.";
         captainAgentNote.style.display = "block";
       } else if (selectedAgent.id && !selectedAgent.runnable) {
-        captainAgentNote.textContent = "This agent is registered but not runnable yet.";
+        captainAgentNote.textContent = "Planning enabled. Agent execution requires private runner.";
         captainAgentNote.style.display = "block";
       } else {
         captainAgentNote.textContent = "";
