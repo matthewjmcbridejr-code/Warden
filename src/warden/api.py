@@ -4038,3 +4038,158 @@ def get_gateway_traces(limit: int = 50):
     """Recent gateway request traces — task, alias, provider, token savings."""
     from .gateway.traces import recent
     return {"ok": True, "traces": recent(limit=min(limit, 200))}
+
+
+# ── Browser extension ingest ──────────────────────────────────────────────────
+
+class BrowserIngestRequest(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@mcharness_router.post("/warden/browser/ingest", status_code=201)
+def browser_ingest(req: BrowserIngestRequest):
+    """Receive batched browser events from the Warden Chrome extension.
+
+    Each event has: source, kind, url, title, ts — plus kind-specific fields
+    (query, text, messages, fields, etc.). Stored as WorkbenchMemory entries
+    grouped by kind so they're searchable via Memory Agent.
+    """
+    from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+    import hashlib
+
+    if not req.events:
+        return {"ok": True, "stored": 0}
+
+    store = WorkbenchStore()
+    stored = 0
+    skipped = 0
+
+    # Group events by kind for richer memory summaries
+    kind_groups: dict[str, list[dict]] = {}
+    for ev in req.events[:500]:  # cap per batch
+        k = ev.get("kind", "browse")
+        kind_groups.setdefault(k, []).append(ev)
+
+    for kind, events in kind_groups.items():
+        for ev in events:
+            url = (ev.get("url") or "")[:300]
+            title = (ev.get("title") or "")[:200]
+            ts = ev.get("ts") or ""
+            source = ev.get("source") or "browser"
+
+            # Build a summary line per event kind
+            if kind == "search":
+                query = (ev.get("query") or "").strip()
+                if not query:
+                    skipped += 1
+                    continue
+                engine = ev.get("engine", "google")
+                summary = f"[{engine} search] {query}"
+                content = f"Searched {engine}: {query}\nURL: {url}"
+
+            elif kind == "ai_conversation":
+                messages = ev.get("messages") or []
+                if not messages:
+                    skipped += 1
+                    continue
+                service = ev.get("source", "ai").replace("_turn", "")
+                turns = "\n".join(
+                    f"{m.get('role','?').upper()}: {m.get('text','')[:400]}"
+                    for m in messages[:6]
+                )
+                summary = f"[{service}] conversation — {len(messages)} turn(s)"
+                content = f"Service: {service}\nURL: {url}\n\n{turns}"
+
+            elif kind == "selection":
+                text = (ev.get("selected_text") or "").strip()
+                if not text:
+                    skipped += 1
+                    continue
+                summary = f"[selected] {text[:120]}"
+                content = f"Selected on {title or url}:\n{text}\nURL: {url}"
+
+            elif kind == "input":
+                text = (ev.get("text") or "").strip()
+                fields = ev.get("fields") or {}
+                body = text or "; ".join(f"{k}={v}" for k, v in fields.items())
+                if not body:
+                    skipped += 1
+                    continue
+                summary = f"[typed] {body[:120]}"
+                content = f"Typed on {title or url}:\n{body}\nURL: {url}"
+
+            elif kind == "copy":
+                text = (ev.get("text") or "").strip()
+                if not text:
+                    skipped += 1
+                    continue
+                summary = f"[copied] {text[:120]}"
+                content = f"Copied from {title or url}:\n{text}\nURL: {url}"
+
+            elif kind == "github":
+                pr = ev.get("pr")
+                issue = ev.get("issue")
+                repo = f"{ev.get('owner','')}/{ev.get('repo','')}"
+                detail = f"PR #{pr}" if pr else (f"issue #{issue}" if issue else ev.get("path", ""))
+                summary = f"[github] {repo} {detail}".strip()
+                content = f"GitHub: {repo} {detail}\nURL: {url}"
+
+            elif kind == "media":
+                yt_title = ev.get("title") or title
+                channel = ev.get("channel") or ""
+                summary = f"[youtube] {yt_title}" + (f" — {channel}" if channel else "")
+                content = f"Watched: {yt_title}\nChannel: {channel}\nURL: {url}"
+
+            elif kind == "reference":
+                h1 = ev.get("title") or title
+                snippet = (ev.get("snippet") or "").strip()
+                summary = f"[docs] {h1[:120]}"
+                content = f"Docs: {h1}\nURL: {url}" + (f"\n\n{snippet}" if snippet else "")
+
+            elif kind == "browse":
+                if not title and not url:
+                    skipped += 1
+                    continue
+                dwell = ev.get("dwell_sec", 0)
+                if dwell < 5 and source != "navigation":
+                    skipped += 1
+                    continue
+                scroll = ev.get("scroll_pct", 0)
+                summary = f"[browsed] {title or url[:80]}"
+                content = f"Visited: {title or url}\nURL: {url}\nDwell: {dwell}s, scroll: {scroll}%"
+
+            else:
+                summary = f"[{kind}] {title or url[:80]}"
+                content = f"Kind: {kind}\nURL: {url}\nTitle: {title}"
+
+            # Dedup by content hash
+            dedup = hashlib.sha1(f"{summary}|{url}".encode()).hexdigest()[:12]
+            memory_id = f"browser-{dedup}"
+
+            try:
+                existing = store.search_memories(memory_id, limit=1)
+                if any(m.memory_id == memory_id for m in existing):
+                    skipped += 1
+                    continue
+                store.create_memory(WorkbenchMemoryCreateRequest(
+                    memory_id=memory_id,
+                    scope="warden",
+                    summary=summary,
+                    source="browser_extension",
+                    title=summary[:80],
+                    kind="user_note",
+                    tags=["auto", "browser", kind],
+                    metadata={
+                        "url": url,
+                        "title": title,
+                        "ts": ts,
+                        "source": source,
+                        "raw": {k: v for k, v in ev.items() if k not in ("url", "title", "ts", "source")
+                                and not isinstance(v, (dict, list))},
+                    },
+                ))
+                stored += 1
+            except Exception:
+                skipped += 1
+
+    return {"ok": True, "stored": stored, "skipped": skipped, "received": len(req.events)}
