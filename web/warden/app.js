@@ -609,9 +609,9 @@
     }
 
     if (createBtn) {
-      const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
-      // Planning only requires Captain to be configured — agent runability is for execution only
-      createBtn.disabled = !!deck.loading || !deck.configured;
+      // Planning works locally even without cloud key — only block while loading
+      const hasGoal = !!(deck.goal && deck.goal.trim());
+      createBtn.disabled = !!deck.loading;
       createBtn.textContent = deck.loading ? "Building plan…" : "Create Plan";
     }
     if (deployBtn) {
@@ -641,33 +641,45 @@
         statusEl.textContent = deck.error;
         statusEl.style.color = "var(--bad, #ff7e91)";
       } else if (deck.loading) {
-        statusEl.textContent = "Captain is building the plan...";
+        statusEl.textContent = deck.configured ? "Captain is building the plan…" : "Building local preview plan…";
         statusEl.style.color = "var(--muted, #9cacbf)";
       } else if (deck.plan) {
-        statusEl.textContent = `Plan ready: ${deck.plan.title}`;
-        statusEl.style.color = "var(--good, #63db9d)";
+        const src = deck.plan.source === "local_preview" ? " · Local preview" : "";
+        statusEl.textContent = `Plan ready: ${deck.plan.title}${src}`;
+        statusEl.style.color = deck.plan.source === "local_preview" ? "var(--warn, #f0c66a)" : "var(--good, #63db9d)";
       } else if (!deck.configured) {
-        statusEl.textContent = "Captain is not configured. Set OPENROUTER_API_KEY on the private service.";
-        statusEl.style.color = "var(--warn, #f0c66a)";
+        statusEl.textContent = "No cloud key — will use local preview planner. Enter a goal and click Create Plan.";
+        statusEl.style.color = "var(--muted, #9cacbf)";
       } else {
         statusEl.textContent = "";
       }
     }
     if (planBody) {
       if (!deck.plan) {
-        planBody.innerHTML = '<div class="muted" style="font-size:0.82em;">Create a plan to see the Captain steps here.</div>';
+        planBody.innerHTML = '<div class="muted" style="font-size:0.82em;">Enter a goal and click Create Plan.</div>';
       } else {
         const steps = deck.plan.steps || [];
-        const stepsHtml = steps.map((step) => `
-          <details class="captain-step">
-            <summary><strong>${escapeHtml(step.title || step.id)}</strong><span class="muted" style="margin-left:8px;">${escapeHtml(step.agent || "codex_cli")}</span></summary>
-            <div class="muted" style="font-size:0.76em; margin:4px 0 6px;">Status: ${escapeHtml(step.status || "queued")}</div>
-            <pre class="captain-step-prompt">${escapeHtml(step.prompt || "")}</pre>
+        const isLocal = deck.plan.source === "local_preview";
+        const sourceBadge = isLocal
+          ? '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(240,198,106,0.15);color:var(--warn,#f0c66a);border:1px solid var(--warn,#f0c66a);">Local Preview</span>'
+          : '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(99,219,157,0.12);color:var(--good,#63db9d);border:1px solid var(--good,#63db9d);">AI Plan</span>';
+        const stepsHtml = steps.map((step, i) => `
+          <details class="captain-step" style="margin-bottom:6px;">
+            <summary style="cursor:pointer;padding:6px 0;">
+              <strong style="margin-right:6px;">${i + 1}.</strong>
+              <strong>${escapeHtml(step.title || step.id || "Step")}</strong>
+              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(step.agent || step.recommended_agent || "codex_cli")}</span>
+              <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(step.status || "queued")}</span>
+            </summary>
+            <pre class="captain-step-prompt" style="margin:6px 0 4px;font-size:0.78em;white-space:pre-wrap;word-break:break-word;">${escapeHtml(step.prompt || "")}</pre>
+            <div style="margin-top:4px;">
+              <button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Agent dispatch coming in next sprint">Dispatch Step — Coming Next</button>
+            </div>
           </details>
         `).join("");
         planBody.innerHTML = `
-          <div class="captain-plan-title"><strong>${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
-          <div class="captain-plan-summary muted">${escapeHtml(deck.plan.summary || "")}</div>
+          <div style="margin-bottom:6px;">${sourceBadge}<strong style="margin-left:6px;">${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
+          <div class="muted" style="font-size:0.82em;margin-bottom:10px;">${escapeHtml(deck.plan.summary || deck.plan.goal || "")}</div>
           <div class="captain-plan-steps">${stepsHtml}</div>
         `;
       }
@@ -801,6 +813,20 @@
     renderCaptainAgentCard();
   }
 
+  async function loadLatestCaptainPlan() {
+    try {
+      const data = await requestJson(`${MCH}/captain/plans/recent`);
+      const plans = data.plans || [];
+      if (plans.length && !state.captainDeck.plan) {
+        const latest = plans[0];
+        state.captainDeck.plan = latest;
+        if (latest.goal) state.captainDeck.goal = latest.goal;
+        const goalEl = document.getElementById("captain-goal");
+        if (goalEl && latest.goal && !goalEl.value) goalEl.value = latest.goal;
+      }
+    } catch (e) { /* non-fatal */ }
+  }
+
   async function openCaptainDeckModal() {
     const modal = document.getElementById("captain-deck-modal");
     if (!modal) return;
@@ -811,6 +837,7 @@
     renderCaptainDeck();
     await Promise.all([populateCaptainDeckRepos(), loadCaptainDeckStatus(), loadAgents()]);
     populateCaptainAgents();
+    await loadLatestCaptainPlan();
     renderCaptainDeck();
   }
 

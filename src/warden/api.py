@@ -1778,38 +1778,184 @@ def delete_mcharness_captain_key():
     }
 
 
+def _local_preview_plan(*, goal: str, repo_id: str, lane_id: str) -> dict[str, Any]:
+    """Deterministic local plan generator — no cloud tokens, no API key required.
+
+    Produces 3-5 practical steps by parsing intent keywords from the goal.
+    Marked source=local_preview so UI can display an honest badge.
+    """
+    import hashlib
+
+    goal_lower = goal.lower()
+    plan_id = "plan_" + hashlib.sha1(f"local:{goal}:{repo_id}".encode()).hexdigest()[:8]
+
+    # Classify intent for step template selection
+    is_fix    = any(w in goal_lower for w in ("fix", "bug", "error", "broken", "crash", "fail"))
+    is_add    = any(w in goal_lower for w in ("add", "build", "create", "implement", "new", "feat"))
+    is_refact = any(w in goal_lower for w in ("refactor", "clean", "simplify", "rename", "move", "reorganize"))
+    is_test   = any(w in goal_lower for w in ("test", "spec", "coverage", "pytest", "playwright"))
+    is_docs   = any(w in goal_lower for w in ("doc", "readme", "comment", "explain"))
+    is_ui     = any(w in goal_lower for w in ("ui", "style", "css", "html", "button", "modal", "page"))
+
+    g = goal[:80]
+    r = repo_id
+
+    if is_fix:
+        steps = [
+            {"id": "step_1", "title": "Reproduce the issue", "prompt": f"In {r}: reproduce the bug described in '{g}'. Read the relevant file(s), identify the failing code path, and write down the exact error or wrong behaviour. Do not edit yet."},
+            {"id": "step_2", "title": "Identify root cause", "prompt": f"In {r}: trace the root cause of '{g}'. List the file(s) and line(s) involved. Confirm the fix scope before editing."},
+            {"id": "step_3", "title": "Apply minimal fix", "prompt": f"In {r}: apply the smallest correct fix for '{g}'. Edit only the identified lines. Do not refactor surrounding code."},
+            {"id": "step_4", "title": "Run tests and verify", "prompt": f"In {r}: run the relevant tests for the fix to '{g}'. Confirm passing. If tests fail, diagnose before retrying."},
+        ]
+    elif is_ui:
+        steps = [
+            {"id": "step_1", "title": "Audit current UI", "prompt": f"In {r}: read the relevant HTML/CSS/JS for '{g}'. List what needs to change. Do not edit yet."},
+            {"id": "step_2", "title": "Apply UI changes", "prompt": f"In {r}: implement the UI changes for '{g}'. Edit only the relevant web files. Keep it minimal."},
+            {"id": "step_3", "title": "Verify in browser", "prompt": f"In {r}: verify the UI change for '{g}' loads correctly. Check for console errors. Note any visual issues."},
+        ]
+    elif is_test:
+        steps = [
+            {"id": "step_1", "title": "Identify test gaps", "prompt": f"In {r}: review existing tests related to '{g}'. List what is missing or uncovered."},
+            {"id": "step_2", "title": "Write new tests", "prompt": f"In {r}: write the new tests for '{g}'. Follow the existing test style. Do not modify production code."},
+            {"id": "step_3", "title": "Run and confirm", "prompt": f"In {r}: run the new tests for '{g}'. Confirm all pass. Fix any test setup issues."},
+        ]
+    elif is_docs:
+        steps = [
+            {"id": "step_1", "title": "Read existing docs", "prompt": f"In {r}: read the existing documentation relevant to '{g}'. List what is outdated or missing."},
+            {"id": "step_2", "title": "Write documentation", "prompt": f"In {r}: write or update the documentation for '{g}'. Be concise and accurate. Do not add padding."},
+        ]
+    elif is_refact:
+        steps = [
+            {"id": "step_1", "title": "Audit target code", "prompt": f"In {r}: read the code to be refactored for '{g}'. List what changes are needed. Do not edit yet."},
+            {"id": "step_2", "title": "Refactor", "prompt": f"In {r}: apply the refactor for '{g}'. Preserve all existing behaviour. Run tests after each file changed."},
+            {"id": "step_3", "title": "Verify no regressions", "prompt": f"In {r}: run the full relevant test suite after refactoring '{g}'. Confirm no regressions."},
+        ]
+    else:
+        # Generic add/build/default
+        steps = [
+            {"id": "step_1", "title": "Inspect current state", "prompt": f"In {r}: read the relevant files for '{g}'. Understand the current structure. Do not edit yet."},
+            {"id": "step_2", "title": "Implement", "prompt": f"In {r}: implement '{g}'. Follow existing patterns. Make minimal, focused changes."},
+            {"id": "step_3", "title": "Test and verify", "prompt": f"In {r}: run relevant tests after implementing '{g}'. Confirm expected behaviour. Fix any issues before moving on."},
+            {"id": "step_4", "title": "Review and clean up", "prompt": f"In {r}: review the changes for '{g}'. Remove debug code, fix obvious style issues, ensure nothing is broken."},
+        ]
+
+    for step in steps:
+        step["agent"] = lane_id
+        step["status"] = "queued"
+        step["recommended_agent"] = lane_id
+
+    return {
+        "ok": True,
+        "plan_id": plan_id,
+        "title": f"Plan: {goal[:60]}",
+        "summary": f"Local preview plan for: {goal}",
+        "goal": goal,
+        "repo_id": repo_id,
+        "lane_id": lane_id,
+        "source": "local_preview",
+        "steps": steps,
+        "status": "active",
+        "notes": ["Local preview plan — no cloud tokens used. Set OPENROUTER_API_KEY for AI-generated plans."],
+    }
+
+
+def _write_plan_memory(*, plan: dict[str, Any], goal: str, repo_id: str, lane_id: str) -> Optional[str]:
+    """Write a Warden memory after a plan is created. Returns memory_id or None."""
+    try:
+        from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+        store = WorkbenchStore()
+        steps = plan.get("steps") or []
+        step_lines = "\n".join(
+            f"  {i+1}. {s.get('title','?')} ({s.get('agent','?')})"
+            for i, s in enumerate(steps)
+        )
+        source = plan.get("source", "real_captain")
+        summary = f"Captain created a {'local preview ' if source == 'local_preview' else ''}plan for: {goal[:80]}"
+        content = f"Plan: {plan.get('title','')}\n{plan.get('summary','')}\n\nSteps:\n{step_lines}"
+        plan_id = plan.get("plan_id", "")
+        import hashlib
+        mem_id = "captain-plan-" + hashlib.sha1(plan_id.encode()).hexdigest()[:12]
+        existing = store.search_memories(mem_id, limit=1)
+        if any(m.memory_id == mem_id for m in existing):
+            return mem_id
+        store.create_memory(WorkbenchMemoryCreateRequest(
+            memory_id=mem_id,
+            scope="warden",
+            summary=summary,
+            source="captain",
+            title=summary[:80],
+            kind="decision",
+            tags=["captain", "plan", source, lane_id],
+            metadata={
+                "plan_id": plan_id,
+                "goal": goal,
+                "repo_id": repo_id,
+                "lane_id": lane_id,
+                "step_count": len(steps),
+                "source": source,
+                "content": content,
+            },
+        ))
+        return mem_id
+    except Exception:
+        return None
+
+
 @mcharness_router.post("/captain/plan", response_model=McHarnessCaptainPlanResponse)
 def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
-    if not _captain_api_key():
-        raise HTTPException(
-            status_code=503,
-            detail="Captain is not configured. Set OPENROUTER_API_KEY on the private service.",
-        )
-    repo_path, repo = _resolve_allowlisted_repo(payload.repo_id)
-    agent = _resolve_captain_plan_agent(payload.lane_id)
+    # Resolve repo — fail hard on unknown repo when cloud key present (real planning needs valid path)
+    # fall back gracefully when local preview only
+    has_cloud_key = bool(_captain_api_key())
+    try:
+        repo_path, repo = _resolve_allowlisted_repo(payload.repo_id)
+    except HTTPException:
+        if has_cloud_key:
+            raise
+        repo = {"repo_id": payload.repo_id or "mcharness-public-export",
+                "path": str(SAFE_REPO_PATHS[1] if len(SAFE_REPO_PATHS) > 1 else SAFE_REPO_PATHS[0])}
 
-    lane_id = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
-    _validate_agent_lane(lane_id)
+    lane_id = payload.lane_id or "codex_cli"
 
-    plan, notes = _build_captain_plan(goal=payload.goal, repo=repo, lane_id=lane_id)
-    artifact_path = _save_captain_plan_artifact(plan, goal=payload.goal, repo=repo, lane_id=lane_id)
-    persisted = persist_plan(MCTABLE_ROOT, goal=payload.goal, repo_id=repo["repo_id"], plan_data=plan)
+    # Try cloud captain first; fall back to local preview
+    if _captain_api_key():
+        try:
+            agent = _resolve_captain_plan_agent(lane_id)
+            resolved_lane = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
+            _validate_agent_lane(resolved_lane)
+            plan, notes = _build_captain_plan(goal=payload.goal, repo=repo, lane_id=resolved_lane)
+            plan["source"] = "real_captain"
+        except HTTPException:
+            raise
+        except Exception as exc:
+            plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
+            notes = plan.get("notes", []) + [f"Cloud planning failed: {exc}"]
+            plan["notes"] = notes
+    else:
+        plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
+        notes = plan.get("notes", [])
+
+    # Persist plan (best-effort — don't fail the response if write fails)
+    persisted = None
+    try:
+        persisted = persist_plan(MCTABLE_ROOT, goal=payload.goal, repo_id=repo["repo_id"], plan_data=plan)
+    except Exception:
+        persisted = plan
+
+    # Write memory (best-effort)
+    _write_plan_memory(goal=payload.goal, plan=plan, repo_id=repo["repo_id"], lane_id=lane_id)
+
     response = _captain_plan_response(persisted, notes=notes)
-    if artifact_path is not None:
-        response["notes"] = list(response.get("notes") or []) + [f"Plan saved to {artifact_path}"]
+    response["source"] = plan.get("source", "local_preview")
     return response
 
 
 @mcharness_router.get("/captain/plans/recent")
 def get_mcharness_captain_plans_recent():
-    if not _run_history_read_enabled():
-        return {
-            "service": "mcharness-control-plane",
-            "service_mode": _service_mode_label(),
-            "plans": [],
-            "notes": ["Captain plans are available on the private runner service."],
-        }
-    plans = list_recent_plans(MCTABLE_ROOT)
+    # Plans are always readable — no runner required
+    try:
+        plans = list_recent_plans(MCTABLE_ROOT)
+    except Exception:
+        plans = []
     return {
         "service": "mcharness-control-plane",
         "service_mode": _service_mode_label(),

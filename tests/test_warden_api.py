@@ -195,7 +195,8 @@ def test_mcharness_captain_key_save_rejects_when_env_key_present(monkeypatch):
     assert "environment" in response.json()["detail"].lower()
 
 
-def test_mcharness_captain_plan_rejects_missing_key(monkeypatch):
+def test_mcharness_captain_plan_local_preview_when_no_key(monkeypatch):
+    # Without a cloud key, endpoint falls back to local preview planner instead of 503
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     client = TestClient(app)
     response = client.post(
@@ -206,8 +207,11 @@ def test_mcharness_captain_plan_rejects_missing_key(monkeypatch):
             "lane_id": "codex_cli",
         },
     )
-    assert response.status_code == 503
-    assert "Captain is not configured" in response.json()["detail"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert len(data["steps"]) >= 3
+    assert data.get("source") == "local_preview" or any("local preview" in n.lower() for n in (data.get("notes") or []))
 
 
 def test_mcharness_captain_plan_rejects_unknown_repo(monkeypatch):
