@@ -396,30 +396,57 @@ def _react_fallback(message: str, history: list[dict]) -> "AgentResponse":
 
     try:
         reply = _ollama_chat_sync(msgs, ollama_model)
+        _tu = [{"tool": k, "result_summary": "static gather"} for k in ctx]
+        _srcs = ["git", "github", "memories", "context"]
         return AgentResponse(
             reply=reply,
-            tools_used=[{"tool": k, "result_summary": "static gather"} for k in ctx],
-            sources=["git", "github", "memories", "context"],
+            tools_used=_tu,
+            sources=_srcs,
             model=ollama_model,
             provider="ollama",
             fallback=True,
+            trace=_build_trace(_tu, _srcs, fallback=True),
         )
     except Exception as e:
         from .memory_agent import _fallback_structured_answer, gather_context
         mc = gather_context(message)
+        _srcs = mc.source_labels()
         return AgentResponse(
             reply=_fallback_structured_answer(message, mc),
             tools_used=[],
-            sources=mc.source_labels(),
+            sources=_srcs,
             model="fallback",
             provider="fallback",
             fallback=True,
+            trace=_build_trace([], _srcs, fallback=True),
         )
 
 
 # ---------------------------------------------------------------------------
 # Main agent loop
 # ---------------------------------------------------------------------------
+
+@dataclass
+@dataclass
+class TraceStep:
+    """Single step in a Marius Trace."""
+    type: str  # context_read | memory_read | memory_write | tool_action | proof | blocked | note
+    label: str
+    status: str = "ok"  # ok | skipped | blocked | error
+    detail: str = ""
+    ref: str = ""
+
+
+@dataclass
+class MarusTrace:
+    """Response-level trace object for Marius Agent."""
+    trace_id: str
+    agent: str = "Marius Agent"
+    steps: list[dict] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"trace_id": self.trace_id, "agent": self.agent, "steps": self.steps}
+
 
 @dataclass
 class AgentResponse:
@@ -429,6 +456,41 @@ class AgentResponse:
     model: str = ""
     provider: str = ""
     fallback: bool = False
+    trace: dict | None = None
+
+
+def _build_trace(tools_used: list[dict], sources: list[str], fallback: bool) -> dict:
+    """Build a Marius Trace dict from the agent run result."""
+    import uuid as _uuid
+    steps: list[dict] = []
+    if fallback:
+        steps.append({"type": "note", "label": "Fallback mode", "status": "ok",
+                       "detail": "No cloud LLM available — using local context only.", "ref": ""})
+    if "memory" in sources or any(t.get("tool", "").startswith("recall") for t in tools_used):
+        steps.append({"type": "memory_read", "label": "Memory context loaded",
+                       "status": "ok", "detail": "", "ref": ""})
+    elif not fallback:
+        steps.append({"type": "memory_read", "label": "Memory context",
+                       "status": "skipped", "detail": "No memory queries issued", "ref": ""})
+    for t in tools_used:
+        tool_name = t.get("tool", "")
+        if not tool_name:
+            continue
+        steps.append({
+            "type": "tool_action",
+            "label": tool_name,
+            "status": "ok",
+            "detail": t.get("result_preview", "")[:120],
+            "ref": "",
+        })
+    if not tools_used and not fallback:
+        steps.append({"type": "context_read", "label": "Context gathered",
+                       "status": "ok", "detail": f"sources: {', '.join(sources) or 'none'}", "ref": ""})
+    return MarusTrace(
+        trace_id="trace-" + _uuid.uuid4().hex[:10],
+        agent="Marius Agent",
+        steps=steps,
+    ).to_dict()
 
 
 async def run_agent(message: str, history: list[dict] | None = None) -> AgentResponse:
@@ -459,13 +521,15 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
 
         # No tool calls → final answer
         if not getattr(msg, "tool_calls", None):
+            _srcs = sorted(sources)
             return AgentResponse(
                 reply=msg.content or "",
                 tools_used=tools_used,
-                sources=sorted(sources),
+                sources=_srcs,
                 model=model,
                 provider=provider,
                 fallback=False,
+                trace=_build_trace(tools_used, _srcs, fallback=False),
             )
 
         # Append assistant message — only standard OpenAI fields (strip provider_specific_fields etc.)
@@ -522,11 +586,13 @@ async def run_agent(message: str, history: list[dict] | None = None) -> AgentRes
     # Max iterations hit — ask for final summary
     messages.append({"role": "user", "content": "Summarise what you found so far."})
     final = await _litellm_chat(messages, model=model)
+    _srcs = sorted(sources)
     return AgentResponse(
         reply=final.choices[0].message.content or "",
         tools_used=tools_used,
-        sources=sorted(sources),
+        sources=_srcs,
         model=model,
         provider=provider,
         fallback=False,
+        trace=_build_trace(tools_used, _srcs, fallback=False),
     )

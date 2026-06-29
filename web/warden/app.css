@@ -4520,3 +4520,8 @@ textarea:focus-visible {
   margin-left: 8px;
   opacity: 0.75;
 }
+
+/* Marius Trace step status styles */
+.wa-trace-skipped { opacity: 0.5; }
+.wa-trace-blocked .wa-trace-tool-name { color: var(--warn, #f5c842); }
+.wa-trace-error .wa-trace-tool-name { color: var(--error, #e05a5a); }

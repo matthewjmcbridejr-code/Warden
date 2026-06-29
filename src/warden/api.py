@@ -4225,6 +4225,7 @@ async def post_warden_agent_chat(req: _AgentChatRequest):
         "model": result.model,
         "provider": result.provider,
         "fallback": result.fallback,
+        "trace": result.trace,
     }
 
 

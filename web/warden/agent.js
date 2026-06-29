@@ -36,10 +36,31 @@
     return res.json();
   }
 
-  /* ── tool trace sidebar ── */
-  function renderTrace(toolsUsed) {
+  /* ── Marius Trace sidebar ── */
+  const TRACE_ICONS = {
+    context_read: "◎", memory_read: "⧉", memory_write: "✦",
+    tool_action: "⬡", proof: "✓", blocked: "⊗", note: "·",
+  };
+  const TRACE_STATUS_CLASS = { ok: "", skipped: "wa-trace-skipped", blocked: "wa-trace-blocked", error: "wa-trace-error" };
+
+  function renderTrace(toolsUsed, trace) {
     const list = qs("#wa-trace-list");
     if (!list) return;
+
+    // Use Marius Trace steps if available
+    if (trace && trace.steps && trace.steps.length) {
+      list.innerHTML = trace.steps.map((s) => {
+        const icon = TRACE_ICONS[s.type] || "·";
+        const cls = TRACE_STATUS_CLASS[s.status] || "";
+        return `<div class="wa-trace-item ${cls}">
+          <div class="wa-trace-tool-name">${icon} ${escHtml(s.label)}</div>
+          ${s.detail ? `<div class="wa-trace-preview">${escHtml(s.detail.slice(0,120))}</div>` : ""}
+        </div>`;
+      }).join("");
+      return;
+    }
+
+    // Fallback: show raw tool calls
     if (!toolsUsed || !toolsUsed.length) {
       list.innerHTML = '<div class="wa-trace-empty">No tools called.</div>';
       return;
@@ -50,7 +71,7 @@
         .join(" ");
       return `
         <div class="wa-trace-item">
-          <div class="wa-trace-tool-name">${escHtml(t.tool)}</div>
+          <div class="wa-trace-tool-name">⬡ ${escHtml(t.tool)}</div>
           <div class="wa-trace-args">${argsStr || "<em>no args</em>"}</div>
           <div class="wa-trace-preview">${escHtml(t.result_preview || "")}</div>
         </div>`;
@@ -150,10 +171,11 @@
         model: data.model,
         fallback: data.fallback,
         tools_used: data.tools_used || [],
+        trace: data.trace || null,
       };
       _history.push(agentMsg);
       renderThread();
-      renderTrace(data.tools_used);
+      renderTrace(data.tools_used, data.trace);
 
       const badge = qs("#wa-model-badge");
       if (badge && data.model) badge.textContent = `${data.provider || ""} / ${data.model}`;
