@@ -4632,3 +4632,140 @@ def post_warden_connectors_disconnect(account_id: str):
     if not removed:
         raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
     return {"ok": True, "account_id": account_id, "status": "disconnected"}
+
+
+# ─── iCloud app-password connect ─────────────────────────────────────────────
+
+class ICloudConnectRequest(BaseModel):
+    email: str
+    app_password: str
+
+
+@mcharness_router.post("/warden/connectors/icloud/connect/app-password")
+def post_warden_icloud_connect(body: ICloudConnectRequest):
+    """Connect iCloud Mail via app-specific password. Password stored in vault only."""
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import re as _re
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+    import json as _json
+
+    email = (body.email or "").strip()
+    app_password = (body.app_password or "").strip()
+
+    if not email or not _re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="app_password is required")
+    # Basic app-specific password format: xxxx-xxxx-xxxx-xxxx
+    if len(app_password) < 8:
+        raise HTTPException(status_code=400, detail="app_password too short")
+
+    account_id = f"icloud-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    token_str = _json.dumps({"email": email, "app_password": app_password})
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider="icloud",
+        display_email=email,
+        status="connected",
+        scopes=[],
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+    )
+    store = ConnectorStore()
+    store.save_account(account, token=token_str)
+    return {"ok": True, "account_id": account_id, "provider": "icloud",
+            "display_email": email, "status": "connected",
+            "note": "App password stored in local vault only. Use /warden/mail/search to test."}
+
+
+# ─── Mail endpoints ───────────────────────────────────────────────────────────
+
+@mcharness_router.get("/warden/mail/accounts")
+def get_warden_mail_accounts():
+    """List connected mail accounts (no tokens returned)."""
+    from .connectors.store import ConnectorStore
+    from .connectors.registry import PROVIDERS
+    all_accounts = ConnectorStore().list_accounts(redact=True)
+    mail_providers = {"gmail", "outlook", "icloud"}
+    mail_accounts = [a for a in all_accounts
+                     if a.get("provider") in mail_providers]
+    return {"ok": True, "accounts": mail_accounts, "count": len(mail_accounts)}
+
+
+@mcharness_router.get("/warden/mail/search")
+def get_warden_mail_search(account_id: str, q: str = "", limit: int = 10):
+    """Search mail in a connected account. Returns summaries only."""
+    from .connectors.store import ConnectorStore
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id required")
+    if limit < 1 or limit > 50:
+        limit = 10
+
+    store = ConnectorStore()
+    acc = store.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+
+    provider_id = acc.get("provider", "")
+    query = (q or "").strip() or "ALL"
+
+    try:
+        if provider_id == "icloud":
+            from .mail.icloud import build_icloud_provider
+            provider = build_icloud_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
+        elif provider_id == "gmail":
+            from .mail.gmail import build_gmail_provider, TokenExpiredError
+            provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail token not found — reconnect account")
+        else:
+            raise HTTPException(status_code=422, detail=f"Mail search not supported for provider: {provider_id}")
+
+        summaries = provider.search(query, limit=limit)
+        return {"ok": True, "account_id": account_id, "provider": provider_id,
+                "query": query, "count": len(summaries),
+                "messages": [s.to_dict() for s in summaries]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail search error: {type(e).__name__}: {e}")
+
+
+@mcharness_router.get("/warden/mail/messages/{account_id}/{message_id:path}")
+def get_warden_mail_message(account_id: str, message_id: str):
+    """Read a mail message by ID. Returns normalized body_text (no HTML, no raw tokens)."""
+    from .connectors.store import ConnectorStore
+    store = ConnectorStore()
+    acc = store.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+
+    provider_id = acc.get("provider", "")
+    try:
+        if provider_id == "icloud":
+            from .mail.icloud import build_icloud_provider
+            provider = build_icloud_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
+        elif provider_id == "gmail":
+            from .mail.gmail import build_gmail_provider
+            provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail token not found — reconnect account")
+        else:
+            raise HTTPException(status_code=422, detail=f"Mail read not supported for: {provider_id}")
+
+        msg = provider.read_message(message_id)
+        return {"ok": True, "message": msg.to_dict(include_html=False)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail read error: {type(e).__name__}: {e}")
