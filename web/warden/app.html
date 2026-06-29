@@ -40,11 +40,28 @@
         <div class="warden-stage-main">
       <section id="warden-section-mission" class="workspace-section active cmd-section" data-section="mission" data-testid="warden-section-mission">
 
+        <!-- Onboarding card — dismissable, shown once per session -->
+        <div id="warden-onboarding-card" class="warden-onboarding-card" data-testid="warden-onboarding-card">
+          <div class="onboarding-card-header">
+            <span class="onboarding-badge">Beta</span>
+            <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
+          </div>
+          <h3 class="onboarding-title">Welcome to Warden</h3>
+          <p class="onboarding-copy">Warden is a local-first AI command center. Describe a goal, create a plan, and dispatch agent steps — all from your browser.</p>
+          <div class="onboarding-steps">
+            <div class="onboarding-step"><span class="onboarding-step-num">1</span><span>Type a goal and click <strong>Develop Plan</strong></span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">2</span><span>Review the plan steps and click <strong>Dispatch Step</strong></span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">3</span><span>Open <strong>Memory Chat</strong> to ask what happened</span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">4</span><span>Open <strong>Marius Agent</strong> to ask follow-up questions</span></div>
+          </div>
+          <p class="onboarding-note">Note: Agent execution requires a local runner. In beta, dispatched steps are saved as memory records.</p>
+        </div>
+
         <div class="cmd-hero">
           <h2 class="cmd-hero-title">What do you want to build?</h2>
           <p class="cmd-hero-sub">Warden breaks your goal into steps and dispatches supervised agent work.</p>
 
-          <div class="cmd-agent-chips">
+          <div class="cmd-agent-chips" title="Supported agent targets — local runner required for execution">
             <span class="cmd-agent-chip cmd-chip-active">Claude Code</span>
             <span class="cmd-agent-chip">Codex</span>
             <span class="cmd-agent-chip">Jules</span>
@@ -241,7 +258,7 @@
 
           <!-- Welcome state -->
           <div id="mem-chat-welcome" class="mem-chat-welcome" data-testid="mem-chat-welcome">
-            <h3 class="mem-chat-welcome-heading">Memory Agent</h3>
+            <h3 class="mem-chat-welcome-heading">Warden Memory Agent</h3>
             <p class="mem-chat-welcome-copy">Ask what you were working on, what changed, and what decisions were made.</p>
             <div class="mem-chat-starters">
               <button class="mem-starter-btn" data-msg="What was I working on last?">What was I working on last?</button>
@@ -330,6 +347,10 @@
 
       <!-- ════════════════════ MODEL GATEWAY CONTROL ROOM ════════════════════ -->
       <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
+
+        <div class="gw-intro-banner">
+          <strong>Gateway Status</strong> — Warden routes AI requests locally through a privacy-preserving model proxy. This page shows which AI providers are reachable and how requests are routed. You don't need to configure anything here to use Marius Agent or Memory Chat.
+        </div>
 
         <!-- ── Summary strip ──────────────────────────────────────────────── -->
         <div class="gw-summary-strip">

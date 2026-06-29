@@ -4525,3 +4525,128 @@ textarea:focus-visible {
 .wa-trace-skipped { opacity: 0.5; }
 .wa-trace-blocked .wa-trace-tool-name { color: var(--warn, #f5c842); }
 .wa-trace-error .wa-trace-tool-name { color: var(--error, #e05a5a); }
+
+/* ── Onboarding welcome card ─────────────────────────────────────────── */
+.warden-onboarding-card {
+  background: linear-gradient(135deg, rgba(30,50,82,0.9) 0%, rgba(20,36,60,0.95) 100%);
+  border: 1px solid rgba(100,160,255,0.25);
+  border-radius: 10px;
+  padding: 18px 20px 16px;
+  margin-bottom: 20px;
+}
+.onboarding-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.onboarding-badge {
+  background: rgba(100,160,255,0.15);
+  color: #7ab4ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.onboarding-dismiss-btn {
+  background: none;
+  border: none;
+  color: var(--muted, #9cacbf);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.onboarding-dismiss-btn:hover { color: var(--fg, #d4e4f5); background: rgba(255,255,255,0.06); }
+.onboarding-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--fg, #d4e4f5);
+}
+.onboarding-copy {
+  font-size: 0.84rem;
+  color: var(--text-secondary, #8faabf);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+.onboarding-steps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+@media (max-width: 600px) {
+  .onboarding-steps { grid-template-columns: 1fr; }
+}
+.onboarding-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #8faabf);
+}
+.onboarding-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  background: rgba(100,160,255,0.18);
+  color: #7ab4ff;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.onboarding-note {
+  font-size: 0.76rem;
+  color: var(--muted, #9cacbf);
+  margin: 0;
+  opacity: 0.8;
+  font-style: italic;
+}
+
+/* ── Blocked dispatch notice improvements ───────────────────────────── */
+.blocked-notice-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.blocked-notice-icon { font-size: 1rem; margin-top: 1px; }
+.blocked-id-pill {
+  display: inline-block;
+  background: rgba(255,180,60,0.12);
+  border: 1px solid rgba(255,180,60,0.25);
+  border-radius: 4px;
+  font-size: 0.73rem;
+  font-family: monospace;
+  padding: 1px 6px;
+  margin: 4px 4px 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+.blocked-id-pill:hover { background: rgba(255,180,60,0.2); }
+.blocked-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.blocked-notice-actions .btn { font-size: 0.78rem; padding: 4px 10px; }
+
+/* ── Gateway intro banner ────────────────────────────────────────────── */
+.gw-intro-banner {
+  background: rgba(20,36,60,0.6);
+  border: 1px solid rgba(60,100,160,0.2);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #8faabf);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}

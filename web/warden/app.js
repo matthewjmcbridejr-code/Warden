@@ -1887,9 +1887,21 @@
       const runId = result.run_id || "";
       const noticeEl = document.getElementById("captain-blocked-notice");
       if (noticeEl) {
-        noticeEl.textContent = `Runner unavailable — blocked attempt saved to Memory${memId ? " (" + memId + ")" : ""}.`;
+        noticeEl.innerHTML = `
+          <div class="blocked-notice-body">
+            <span class="blocked-notice-icon">⊗</span>
+            <div>
+              <strong>Runner unavailable</strong> — blocked attempt saved to Memory.
+              ${runId ? `<span class="blocked-id-pill" title="Copy run ID" onclick="navigator.clipboard.writeText('${escapeHtml(runId)}')">Run: ${escapeHtml(runId.slice(0,20))}</span>` : ""}
+              ${memId ? `<span class="blocked-id-pill" title="Copy memory ID" onclick="navigator.clipboard.writeText('${escapeHtml(memId)}')">Mem: ${escapeHtml(memId.slice(0,24))}</span>` : ""}
+            </div>
+          </div>
+          <div class="blocked-notice-actions">
+            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'memory\\']').click()">Ask Memory what happened</button>
+            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'agent\\']').click()">Ask Marius Agent</button>
+            <button type="button" class="onboarding-dismiss-btn" onclick="this.closest('.captain-blocked-notice').style.display='none'" title="Dismiss">✕</button>
+          </div>`;
         noticeEl.style.display = "";
-        setTimeout(() => { noticeEl.style.display = "none"; }, 8000);
       }
       await loadMissionWorklog();
       return;
@@ -3618,6 +3630,19 @@
     document.querySelectorAll("body > section.layout-stack, body > div.layout-stack").forEach((el) => {
       el.style.display = "none";
     });
+
+    // Onboarding card dismiss
+    const onboardingCard = document.getElementById("warden-onboarding-card");
+    const onboardingDismiss = document.getElementById("onboarding-dismiss-btn");
+    if (onboardingDismiss && onboardingCard) {
+      if (sessionStorage.getItem("warden-onboarding-dismissed")) {
+        onboardingCard.style.display = "none";
+      }
+      onboardingDismiss.addEventListener("click", () => {
+        onboardingCard.style.display = "none";
+        sessionStorage.setItem("warden-onboarding-dismissed", "1");
+      });
+    }
 
     wireSimpleUI();
     wireMariusEvents(); // Initialize Marius UI bindings
