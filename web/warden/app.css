@@ -4390,3 +4390,67 @@ textarea:focus-visible {
 .gw-tr-ok   { color: #5a9a5a; flex-shrink: 0; }
 .gw-tr-err  { color: #9a4040; flex-shrink: 0; }
 .gw-tr-warn { color: #9a8a20; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Command tab — hero + agent dispatch
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cmd-section {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-start;
+  padding: 60px 24px 40px; overflow-y: auto;
+}
+.cmd-hero {
+  width: 100%; max-width: 600px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 20px;
+}
+.cmd-hero-title {
+  font-size: 26px; font-weight: 700; color: var(--text-primary, #e8eaf0);
+  margin: 0; letter-spacing: -0.02em;
+}
+.cmd-hero-sub {
+  font-size: 14px; color: var(--text-muted, #8a9ab0); margin: 0; line-height: 1.5;
+}
+.cmd-agent-chips {
+  display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+}
+.cmd-agent-chip {
+  font-size: 12px; padding: 5px 14px; border-radius: 20px;
+  border: 1px solid var(--border, #2a3a52); color: var(--text-muted, #8a9ab0);
+  background: var(--surface, #162030); cursor: default; user-select: none;
+}
+.cmd-chip-active {
+  border-color: var(--accent, #2c4a7a); color: var(--text-primary, #e8eaf0);
+  background: rgba(44,74,122,0.2);
+}
+.cmd-cta {
+  font-size: 14px; padding: 10px 32px; border-radius: 8px; margin-top: 4px;
+}
+.cmd-plan-preview {
+  width: 100%; max-width: 700px; margin-top: 40px;
+  background: var(--surface, #162030); border: 1px solid var(--border, #2a3a52);
+  border-radius: 10px; padding: 20px 24px;
+}
+.cmd-plan-header {
+  font-size: 13px; color: var(--text-muted, #8a9ab0); margin-bottom: 12px;
+}
+
+/* Settings as a footer nav item */
+.nav-item-settings {
+  width: 100%; text-align: left;
+  font-size: 12px; color: var(--text-muted, #8a9ab0);
+  padding: 6px 12px;
+}
+.nav-item-settings:hover { color: var(--text-primary, #e8eaf0); background: var(--surface-alt, #1e3252); }
+
+/* Memory Chat full-width override */
+.mem-chat-fullwidth {
+  width: 100%; height: 100%;
+  border-left: none !important;
+}
+.mem-section { display: flex; flex-direction: column; }
+.mem-chat-welcome-icon { display: none; }
+.mem-chat-welcome-heading {
+  font-size: 18px; font-weight: 600; color: var(--text-primary, #e8eaf0); margin: 0 0 8px;
+}

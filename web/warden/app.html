@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Warden | Supervised AI Coding Agents</title>
+  <title>Warden — AI Agent Command Center</title>
   <meta
     name="description"
-    content="Warden by Marius Systems — supervised control room for AI coding agents. Powered by McHarness."
+    content="Warden — chat with your agents, recall project memory, and dispatch supervised CLI work."
   />
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./app.css" />
@@ -17,85 +17,66 @@
       <div class="sidebar-brand">
         <div class="warden-brand">
           <h1 class="warden-title">Warden</h1>
-          <span class="warden-byline" data-testid="warden-byline">by Marius Systems</span>
         </div>
-        <p class="sidebar-tagline">Supervised agent ops</p>
+        <p class="sidebar-tagline">AI Agent Command Center</p>
       </div>
 
       <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">Develop Plan</button>
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
-        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Mission</button>
-        <button type="button" class="nav-item" data-section="agents" data-testid="nav-agents">Agents</button>
-        <button type="button" class="nav-item" data-section="tasks" data-testid="nav-tasks">Tasks</button>
-        <button type="button" class="nav-item" data-section="runs" data-testid="nav-runs">Runs</button>
-        <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
-        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory</button>
-        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Agent</button>
-        <button type="button" class="nav-item" data-section="gateway" data-testid="nav-gateway">Gateway</button>
-        <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
+        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command</button>
+        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Warden Chat</button>
+        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory Chat</button>
+        <button type="button" class="nav-item" data-section="gateway" data-testid="nav-gateway">Gateway Status</button>
       </nav>
 
       <footer class="sidebar-footer">
-        <span class="warden-powered" data-testid="warden-powered">Powered by McHarness</span>
+        <button type="button" class="nav-item nav-item-settings" data-section="settings" data-testid="nav-settings">Settings</button>
       </footer>
     </aside>
 
     <main class="warden-workspace" data-testid="warden-workspace">
       <div class="warden-stage">
         <div class="warden-stage-main">
-      <section id="warden-section-mission" class="workspace-section active" data-section="mission" data-testid="warden-section-mission">
-        <header class="workspace-header">
-          <h2 class="workspace-title">Mission Command</h2>
-        </header>
+      <section id="warden-section-mission" class="workspace-section active cmd-section" data-section="mission" data-testid="warden-section-mission">
 
-        <div class="mission-command-panel" data-testid="mission-command">
-          <h3 class="hero-title">What do you want Warden to build?</h3>
-          <p class="hero-subtitle">Captain breaks goals into bounded agent steps. You approve what runs.</p>
-          <div class="mission-command-actions">
-            <button type="button" class="btn primary hero-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
-            <button type="button" class="btn" id="use-codex-directly" data-testid="use-codex-directly" style="display:none;">Use Codex Directly</button>
+        <div class="cmd-hero">
+          <h2 class="cmd-hero-title">What do you want to build?</h2>
+          <p class="cmd-hero-sub">Warden breaks your goal into steps and dispatches supervised agent work.</p>
+
+          <div class="cmd-agent-chips">
+            <span class="cmd-agent-chip cmd-chip-active">Claude Code</span>
+            <span class="cmd-agent-chip">Codex</span>
+            <span class="cmd-agent-chip">Jules</span>
+            <span class="cmd-agent-chip">Gemini</span>
+            <span class="cmd-agent-chip">Agy</span>
           </div>
-          <div class="hero-status-row" data-testid="hero-status-row">
-            <span class="hero-status-chip" id="hero-captain-status" data-testid="hero-captain-status">Captain: Not configured</span>
-            <span class="hero-status-chip" id="hero-codex-status" data-testid="hero-codex-status">Codex: Disabled</span>
-            <span class="hero-status-chip" id="hero-jules-status" data-testid="hero-jules-status">Jules: Planning only</span>
-          </div>
+
+          <button type="button" class="btn primary cmd-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
         </div>
 
-        <div class="mission-cards-grid">
-          <div class="mission-card mission-card-wide" data-testid="current-mission-card">
-            <div id="current-mission-empty" data-testid="current-mission-empty">
-              <h3 class="mission-card-title">Current Mission</h3>
-              <p id="current-mission-status" data-testid="current-mission-status" class="mission-card-lead">No active mission yet.</p>
-              <p class="mission-card-copy">Create a plan to start a supervised Warden run.</p>
-              <button type="button" class="btn primary" data-action="develop-plan" data-testid="develop-plan-mission">Develop Plan</button>
-            </div>
-            <div id="current-mission-plan" data-testid="current-mission-plan" style="display:none;">
-              <h3 class="mission-card-title">Current Mission</h3>
-              <div id="current-plan-header" data-testid="current-plan-header" class="mission-card-meta"></div>
-              <div id="captain-plan-steps" data-testid="captain-plan-steps" class="captain-plan-steps-list"></div>
-              <div id="captain-plan-controls" data-testid="captain-plan-controls" class="captain-plan-controls"></div>
-            </div>
-          </div>
-          <div class="mission-card mission-card-timeline" data-testid="mission-timeline-card">
-            <div class="mission-timeline-header">
-              <h3 class="mission-card-title">Mission Timeline</h3>
-              <div id="mission-timeline-filter" data-testid="mission-timeline-filter" class="mission-timeline-filter">
-                <button type="button" class="btn active" data-timeline-filter="all">All</button>
-                <button type="button" class="btn" data-timeline-filter="plans">Plans</button>
-                <button type="button" class="btn" data-timeline-filter="runs">Runs</button>
-                <button type="button" class="btn" data-timeline-filter="evidence">Evidence</button>
-                <button type="button" class="btn" data-timeline-filter="gates">Gates</button>
-              </div>
-            </div>
-            <div id="mission-worklog-list" data-testid="mission-timeline-list" class="mission-timeline-list"></div>
-            <p id="mission-worklog-empty" data-testid="mission-timeline-empty" class="mission-card-copy">No mission activity yet. Create a plan to start the timeline.</p>
-          </div>
+        <!-- Plan preview — only visible after a plan is created -->
+        <div id="current-mission-plan" data-testid="current-mission-plan" class="cmd-plan-preview" style="display:none;">
+          <div id="current-plan-header" data-testid="current-plan-header" class="cmd-plan-header"></div>
+          <div id="captain-plan-steps" data-testid="captain-plan-steps" class="captain-plan-steps-list"></div>
+          <div id="captain-plan-controls" data-testid="captain-plan-controls" class="captain-plan-controls"></div>
         </div>
+
+        <!-- Hidden legacy refs kept for JS compatibility -->
+        <div style="display:none;">
+          <span id="current-mission-status" data-testid="current-mission-status"></span>
+          <div id="current-mission-empty" data-testid="current-mission-empty"></div>
+          <div id="mission-worklog-list" data-testid="mission-timeline-list"></div>
+          <p id="mission-worklog-empty" data-testid="mission-timeline-empty"></p>
+          <span id="hero-captain-status" data-testid="hero-captain-status"></span>
+          <span id="hero-codex-status" data-testid="hero-codex-status"></span>
+          <span id="hero-jules-status" data-testid="hero-jules-status"></span>
+          <button id="use-codex-directly" data-testid="use-codex-directly"></button>
+        </div>
+
       </section>
 
-      <section id="warden-section-agents" class="workspace-section" data-section="agents" data-testid="warden-section-agents">
+      <section id="warden-section-agents" class="workspace-section" data-section="agents" data-testid="warden-section-agents" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <div class="workspace-header-row">
             <div>
@@ -158,7 +139,7 @@
 
       </section>
 
-      <section id="warden-section-tasks" class="workspace-section" data-section="tasks" data-testid="warden-section-tasks">
+      <section id="warden-section-tasks" class="workspace-section" data-section="tasks" data-testid="warden-section-tasks" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <h2 class="workspace-title">Tasks</h2>
           <p class="workspace-subhead">Captain plan steps and supervised work items.</p>
@@ -170,7 +151,7 @@
         </div>
       </section>
 
-      <section id="warden-section-runs" class="workspace-section" data-section="runs" data-testid="warden-section-runs">
+      <section id="warden-section-runs" class="workspace-section" data-section="runs" data-testid="warden-section-runs" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <h2 class="workspace-title">Runs</h2>
           <p class="workspace-subhead">Live and completed agent sessions.</p>
@@ -183,7 +164,7 @@
         </div>
       </section>
 
-      <section id="warden-section-evidence" class="workspace-section" data-section="evidence" data-testid="warden-section-evidence">
+      <section id="warden-section-evidence" class="workspace-section" data-section="evidence" data-testid="warden-section-evidence" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <h2 class="workspace-title">Evidence</h2>
           <p class="workspace-subhead">Proof artifacts from supervised agent work.</p>
@@ -203,145 +184,82 @@
       </section>
 
       <!-- ============================================================== -->
-      <!-- Memory Section                                                 -->
+      <!-- Memory Chat                                                   -->
       <!-- ============================================================== -->
       <section id="warden-section-memory" class="workspace-section mem-section" data-section="memory" data-testid="warden-section-memory">
 
-        <!-- Top bar -->
-        <header class="mem-topbar">
-          <div class="mem-topbar-left">
-            <h2 class="workspace-title mem-section-title">Memory</h2>
-            <div class="mem-stats-row">
-              <span class="mem-stat-chip" title="Total memories"><span id="mem-stat-total">—</span> total</span>
-              <span class="mem-stat-chip mem-stat-chip-muted" title="Vectorized"><span id="mem-stat-vectors">—</span> vectorized</span>
-              <span class="mem-stat-chip kind-decision" title="Decisions"><span id="mem-stat-decisions">0</span> decisions</span>
-              <span class="mem-stat-chip kind-proof" title="Proofs"><span id="mem-stat-proofs">0</span> proofs</span>
-              <span class="mem-stat-chip kind-failure" title="Failures"><span id="mem-stat-failures">0</span> failures</span>
-              <span class="mem-stat-chip kind-handoff" title="Handoffs"><span id="mem-stat-handoffs">0</span> handoffs</span>
+        <!-- Hidden legacy refs kept for JS compatibility -->
+        <div style="display:none;">
+          <span id="mem-stat-total"></span><span id="mem-stat-vectors"></span>
+          <span id="mem-stat-decisions"></span><span id="mem-stat-proofs"></span>
+          <span id="mem-stat-failures"></span><span id="mem-stat-handoffs"></span>
+          <button id="mem-refresh-btn"></button><button id="mem-new-btn"></button>
+          <span id="mem-identity-name"></span><span id="mem-identity-bio"></span>
+          <button id="mem-edit-identity-btn"></button>
+          <div id="mem-identity-projects"></div>
+          <input id="mem-search-input" /><button id="mem-search-btn"></button>
+          <div id="mem-filter-chips"></div>
+          <select id="mem-project-filter"></select>
+          <select id="mem-sort-select"></select>
+          <span id="mem-list-count"></span>
+          <div id="mem-list"></div>
+          <div id="mem-detail"></div>
+          <div id="mem-detail-kind-chip"></div>
+          <h4 id="mem-detail-title"></h4>
+          <button id="mem-detail-close"></button>
+          <div id="mem-detail-meta"></div>
+          <pre id="mem-detail-body"></pre>
+          <div id="mem-detail-tags"></div>
+          <button id="mem-forget-btn"></button>
+        </div>
+
+        <!-- Memory Chat (full width) -->
+        <div class="mem-chat-pane mem-chat-fullwidth">
+          <div class="mem-chat-header">
+            <div class="mem-chat-header-left">
+              <span class="mem-chat-title">Memory Agent</span>
+              <span id="mem-chat-model-label" class="mem-chat-model-label"></span>
             </div>
-          </div>
-          <div class="mem-topbar-actions">
-            <button type="button" id="mem-refresh-btn" class="btn" data-testid="mem-refresh-btn">Refresh</button>
-            <button type="button" id="mem-new-btn" class="btn primary" data-testid="mem-new-btn">+ Remember</button>
-          </div>
-        </header>
-
-        <!-- Two-pane body -->
-        <div class="mem-body">
-
-          <!-- ── LEFT: Vault ── -->
-          <div class="mem-vault-pane">
-
-            <!-- Identity card -->
-            <div class="mem-identity-card">
-              <div class="mem-identity-avatar">M</div>
-              <div class="mem-identity-info">
-                <span id="mem-identity-name" class="mem-identity-name">Matt McBride</span>
-                <span id="mem-identity-bio" class="mem-identity-bio">Software engineer &amp; builder. Local-first agent OS.</span>
-              </div>
-              <button type="button" id="mem-edit-identity-btn" class="btn mem-identity-edit-btn" title="Add profile note">Edit</button>
-            </div>
-            <div id="mem-identity-projects" class="mem-identity-projects"></div>
-
-            <!-- Search + filters -->
-            <div class="mem-search-row">
-              <input id="mem-search-input" class="mem-search-input" type="search" placeholder="Search memories…" autocomplete="off" data-testid="mem-search-input" />
-              <button id="mem-search-btn" class="btn" type="button">Search</button>
-            </div>
-
-            <div id="mem-filter-chips" class="mem-filter-chips" data-testid="mem-filter-chips">
-              <button class="mem-filter-chip active" data-kind="">All</button>
-              <button class="mem-filter-chip" data-kind="decision">Decisions</button>
-              <button class="mem-filter-chip" data-kind="proof">Proofs</button>
-              <button class="mem-filter-chip" data-kind="failure">Failures</button>
-              <button class="mem-filter-chip" data-kind="handoff">Handoffs</button>
-              <button class="mem-filter-chip" data-kind="user_note">Notes</button>
-              <button class="mem-filter-chip" data-kind="claim">Claims</button>
-            </div>
-
-            <div class="mem-controls-row">
-              <select id="mem-project-filter" class="btn mem-project-select" data-testid="mem-project-filter">
-                <option value="">All projects</option>
-              </select>
-              <select id="mem-sort-select" class="btn mem-sort-select" data-testid="mem-sort-select">
-                <option value="recent">Recent first</option>
-                <option value="kind">By kind</option>
-                <option value="project">By project</option>
-              </select>
-              <span id="mem-list-count" class="mem-list-count" data-testid="mem-list-count"></span>
-            </div>
-
-            <!-- Memory list -->
-            <div id="mem-list" class="mem-list" data-testid="mem-list">
-              <div class="mem-empty">Loading memories…</div>
-            </div>
-
-            <!-- Detail drawer (slides up when a card is selected) -->
-            <div id="mem-detail" class="mem-detail-drawer" style="display:none;" data-testid="mem-detail">
-              <div class="mem-detail-header">
-                <span id="mem-detail-kind-chip" class="mem-kind-chip"></span>
-                <h4 id="mem-detail-title" class="mem-detail-title"></h4>
-                <button id="mem-detail-close" class="btn mem-detail-close-btn" type="button" data-testid="mem-detail-close">✕</button>
-              </div>
-              <div id="mem-detail-meta" class="mem-detail-meta"></div>
-              <pre id="mem-detail-body" class="mem-detail-body"></pre>
-              <div id="mem-detail-tags" class="mem-detail-tags"></div>
-              <div class="mem-detail-actions">
-                <button id="mem-forget-btn" class="btn bad" type="button" data-testid="mem-forget-btn">Forget</button>
-              </div>
+            <div class="mem-chat-header-right">
+              <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
+              <button id="mem-chat-clear-btn" class="btn" type="button" data-testid="mem-chat-clear-btn">Clear</button>
             </div>
           </div>
 
-          <!-- ── RIGHT: Memory Agent Chat ── -->
-          <div class="mem-chat-pane">
-            <div class="mem-chat-header">
-              <div class="mem-chat-header-left">
-                <span class="mem-chat-title">Memory Agent</span>
-                <span id="mem-chat-model-label" class="mem-chat-model-label">local · ollama</span>
-              </div>
-              <div class="mem-chat-header-right">
-                <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
-                <button id="mem-chat-clear-btn" class="btn" type="button" data-testid="mem-chat-clear-btn">Clear</button>
-              </div>
+          <!-- Context snapshot (hidden by default) -->
+          <div id="mem-chat-context-panel" class="mem-chat-context-panel" style="display:none;" data-testid="mem-chat-context-panel">
+            <div class="mem-chat-context-header">
+              <strong>Current context snapshot</strong>
+              <button id="mem-chat-context-close" class="btn" type="button">✕</button>
             </div>
+            <pre id="mem-chat-context-body" class="mem-chat-context-body">Loading…</pre>
+          </div>
 
-            <!-- Context snapshot (hidden by default, toggled) -->
-            <div id="mem-chat-context-panel" class="mem-chat-context-panel" style="display:none;" data-testid="mem-chat-context-panel">
-              <div class="mem-chat-context-header">
-                <strong>Current context snapshot</strong>
-                <button id="mem-chat-context-close" class="btn" type="button">✕</button>
-              </div>
-              <pre id="mem-chat-context-body" class="mem-chat-context-body">Loading…</pre>
-            </div>
-
-            <!-- Welcome state -->
-            <div id="mem-chat-welcome" class="mem-chat-welcome" data-testid="mem-chat-welcome">
-              <div class="mem-chat-welcome-icon">⧉</div>
-              <h3 class="mem-chat-welcome-heading">Ask the Memory Agent</h3>
-              <p class="mem-chat-welcome-copy">I have access to your decisions, proofs, failures, git history, shell commands, and browser activity. Ask me anything about what you've been working on.</p>
-              <div class="mem-chat-starters">
-                <button class="mem-starter-btn" data-msg="What was I working on last?">What was I working on last?</button>
-                <button class="mem-starter-btn" data-msg="What did I decide about Warden?">What did I decide about Warden?</button>
-                <button class="mem-starter-btn" data-msg="What are my recent failures or blockers?">What are my recent failures or blockers?</button>
-                <button class="mem-starter-btn" data-msg="Give me a handoff brief for today.">Give me a handoff brief for today.</button>
-              </div>
-            </div>
-
-            <!-- Thread -->
-            <div id="mem-chat-thread" class="mem-chat-thread" data-testid="mem-chat-thread" style="display:none;"></div>
-
-            <!-- Input row -->
-            <div class="mem-chat-input-area">
-              <div id="mem-chat-status" class="mem-chat-status" style="display:none;"></div>
-              <div class="mem-chat-input-row">
-                <textarea id="mem-chat-input" class="mem-chat-input" placeholder="Ask the memory agent…" rows="2" data-testid="mem-chat-input"></textarea>
-                <button id="mem-chat-send-btn" class="btn primary mem-chat-send-btn" type="button" data-testid="mem-chat-send-btn">Ask</button>
-              </div>
-              <div class="mem-chat-input-hint">Draws on stored memories · git log · shell history · browser activity</div>
+          <!-- Welcome state -->
+          <div id="mem-chat-welcome" class="mem-chat-welcome" data-testid="mem-chat-welcome">
+            <h3 class="mem-chat-welcome-heading">Memory Agent</h3>
+            <p class="mem-chat-welcome-copy">Ask what you were working on, what changed, and what decisions were made.</p>
+            <div class="mem-chat-starters">
+              <button class="mem-starter-btn" data-msg="What was I working on last?">What was I working on last?</button>
+              <button class="mem-starter-btn" data-msg="What did I decide about Warden?">What did I decide about Warden?</button>
+              <button class="mem-starter-btn" data-msg="What are my recent failures or blockers?">Recent failures or blockers</button>
+              <button class="mem-starter-btn" data-msg="Give me a handoff brief for today.">Handoff brief for today</button>
             </div>
           </div>
 
-        </div><!-- /mem-body -->
+          <!-- Thread -->
+          <div id="mem-chat-thread" class="mem-chat-thread" data-testid="mem-chat-thread" style="display:none;"></div>
+
+          <!-- Input -->
+          <div class="mem-chat-input-area">
+            <div id="mem-chat-status" class="mem-chat-status" style="display:none;"></div>
+            <div class="mem-chat-input-row">
+              <textarea id="mem-chat-input" class="mem-chat-input" placeholder="Ask about past decisions, blockers, and project history…" rows="2" data-testid="mem-chat-input"></textarea>
+              <button id="mem-chat-send-btn" class="btn primary mem-chat-send-btn" type="button" data-testid="mem-chat-send-btn">Ask</button>
+            </div>
+          </div>
+        </div>
+
       </section>
 
       <!-- ═══════════════════════════ AGENT SECTION ═══════════════════════════ -->
@@ -547,7 +465,7 @@
       </section>
         </div>
 
-        <aside id="operator-inspector" class="operator-inspector" data-testid="operator-inspector">
+        <aside id="operator-inspector" class="operator-inspector" data-testid="operator-inspector" style="display:none;" aria-hidden="true">
           <div class="inspector-card" data-testid="inspector-next-move">
             <h3 class="inspector-title">Next Move</h3>
             <p id="inspector-next-move-copy" data-testid="inspector-next-move-copy" class="inspector-copy">Loading operator guidance...</p>
