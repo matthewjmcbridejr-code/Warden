@@ -287,6 +287,7 @@ def main() -> None:
 
     p_mem = sub.add_parser("mem", help="single Memory Agent query")
     p_mem.add_argument("message", nargs="+")
+    p_mem.add_argument("--plain", action="store_true", help="strip markdown from output")
 
     sub.add_parser("chat", help="interactive Warden Agent REPL")
     sub.add_parser("memory", help="interactive Memory Agent REPL")
