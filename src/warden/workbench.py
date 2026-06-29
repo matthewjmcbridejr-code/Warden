@@ -1229,7 +1229,11 @@ class WorkbenchStore:
     # Keywords that signal the user wants the most recent plan/decision
     _RECENCY_SIGNALS = frozenset({"just", "latest", "recent", "last", "new", "created", "today"})
     # Sources that get a relevance boost for plan-related queries
-    _PLAN_SOURCES = frozenset({"captain", "captain_dispatch"})
+    _PLAN_SOURCES = frozenset({"captain", "captain_dispatch", "agent_dispatcher"})
+    # Terms that signal interest in agent runs / dispatch actions
+    _RUN_SIGNALS = frozenset({"run", "agent", "dispatch", "dispatched", "blocked", "proof", "executed", "step", "did"})
+    # Memory kinds that represent dispatch/run outcomes
+    _DISPATCH_KINDS = frozenset({"blocked_attempt", "agent_result", "proof", "test_result"})
 
     def search_memories(
         self,
@@ -1250,6 +1254,7 @@ class WorkbenchStore:
         terms = [term for term in re.split(r"\s+", query) if term and len(term) > 1]
         wants_recent = bool(self._RECENCY_SIGNALS.intersection(terms))
         wants_plan = any(t in ("plan", "captain", "plans") for t in terms)
+        wants_run = any(t in self._RUN_SIGNALS for t in terms)
 
         scored: list[tuple[int, float, str, WorkbenchMemory]] = []
         for memory in rows:
@@ -1270,6 +1275,14 @@ class WorkbenchStore:
             # Boost: decision/handoff kind for plan queries
             if wants_plan and memory.kind in ("decision", "handoff", "agent_result"):
                 score += 15
+            # Boost: dispatch/run kinds for agent-run queries
+            if wants_run and memory.kind in self._DISPATCH_KINDS:
+                score += 30
+            if wants_run and memory.source in self._PLAN_SOURCES:
+                score += 20
+            # Always boost dispatch memories when recency is requested
+            if wants_recent and memory.kind in self._DISPATCH_KINDS:
+                score += 25
 
             scored.append((score, memory.updated_at.timestamp(), memory.memory_id, memory))
 

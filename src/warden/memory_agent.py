@@ -43,6 +43,7 @@ Rules:
 @dataclass
 class MemoryContext:
     recent_memories: list[dict] = field(default_factory=list)
+    latest_dispatch: dict | None = None  # newest blocked_attempt or agent_result
     git_log: list[str] = field(default_factory=list)
     git_diff_stat: str = ""
     shell_commands: list[str] = field(default_factory=list)
@@ -79,6 +80,30 @@ class MemoryContext:
                 title = t.get("title", "Untitled")
                 agent = t.get("agent", "")
                 parts.append(f"  [{status}] {title}" + (f" ({agent})" if agent else ""))
+
+        if self.latest_dispatch:
+            d = self.latest_dispatch
+            meta = d.get("metadata") or {}
+            parts.append("\n## Latest Dispatch Run")
+            parts.append(f"  kind: {d.get('kind','?')}")
+            parts.append(f"  summary: {d.get('summary','')[:120]}")
+            parts.append(f"  memory_id: {d.get('memory_id','?')}")
+            parts.append(f"  source: {d.get('source','?')}")
+            if meta.get("run_id"):
+                parts.append(f"  run_id: {meta['run_id']}")
+            if meta.get("plan_id"):
+                parts.append(f"  plan_id: {meta['plan_id']}")
+            if meta.get("step_id"):
+                parts.append(f"  step_id: {meta['step_id']}")
+            if meta.get("step_title"):
+                parts.append(f"  step_title: {meta['step_title'][:80]}")
+            if meta.get("lane_id"):
+                parts.append(f"  lane: {meta['lane_id']}")
+            if meta.get("reason"):
+                parts.append(f"  reason: {meta['reason']}")
+            if meta.get("goal"):
+                parts.append(f"  goal: {meta['goal'][:100]}")
+            parts.append(f"  timestamp: {d.get('created_at','?')}")
 
         if self.recent_memories:
             parts.append("\n## Stored Memories (most recent first)")
@@ -204,6 +229,21 @@ def _recent_memories(query: str = "", limit: int = 12) -> list[dict]:
         return []
 
 
+def _latest_dispatch() -> dict | None:
+    """Return the single most recent blocked_attempt/agent_result/proof memory."""
+    try:
+        from .workbench import WorkbenchStore  # type: ignore
+        store = WorkbenchStore()
+        # list_memories is already sorted newest-first
+        for m in store.list_memories():
+            if m.kind in ("blocked_attempt", "agent_result", "proof") and \
+               m.source in ("captain_dispatch", "agent_dispatcher", "captain"):
+                return m if isinstance(m, dict) else m.__dict__
+    except Exception:
+        pass
+    return None
+
+
 def gather_context(query: str = "") -> MemoryContext:
     """Pull data from all sources in parallel-ish (sequential, fast enough)."""
     from datetime import datetime, timezone
@@ -211,6 +251,7 @@ def gather_context(query: str = "") -> MemoryContext:
     diff_stat = _git_diff_stat(CANONICAL_REPO)
     ctx = MemoryContext(
         recent_memories=_recent_memories(query),
+        latest_dispatch=_latest_dispatch(),
         git_log=git_log,
         git_diff_stat=diff_stat,
         shell_commands=_recent_shell(),
@@ -248,7 +289,33 @@ def _ollama_chat(messages: list[dict], model: str = CHAT_MODEL, timeout: float =
 
 def _fallback_structured_answer(question: str, ctx: MemoryContext) -> str:
     """Return a structured plain-text answer without LLM — used when Ollama is down."""
+    q_lower = question.lower()
+    is_run_query = any(t in q_lower for t in ("agent run", "last run", "dispatch", "did the last", "proof", "blocked"))
+
     lines = [f"Warden Memory Snapshot — {ctx.gathered_at}", ""]
+
+    # Surface latest dispatch run first if the question is about agent runs
+    if ctx.latest_dispatch and is_run_query:
+        d = ctx.latest_dispatch
+        meta = d.get("metadata") or {}
+        kind = d.get("kind", "?")
+        lines.append("**Latest Agent Run:**")
+        lines.append(f"  Status: {kind}")
+        lines.append(f"  {d.get('summary','')[:120]}")
+        if meta.get("run_id"):
+            lines.append(f"  Run ID: {meta['run_id']}")
+        if meta.get("plan_id"):
+            lines.append(f"  Plan: {meta['plan_id']}")
+        if meta.get("step_title"):
+            lines.append(f"  Step: {meta['step_title'][:80]}")
+        if meta.get("lane_id"):
+            lines.append(f"  Lane: {meta['lane_id']}")
+        if meta.get("reason"):
+            lines.append(f"  Reason: {meta['reason']}")
+        if meta.get("goal"):
+            lines.append(f"  Goal: {meta['goal'][:100]}")
+        lines.append(f"  Memory ID: {d.get('memory_id','?')}")
+        lines.append("")
 
     if ctx.current_branch:
         lines.append(f"**Branch:** `{ctx.current_branch}`")
@@ -277,7 +344,7 @@ def _fallback_structured_answer(question: str, ctx: MemoryContext) -> str:
         for m in ctx.recent_memories[:4]:
             lines.append(f"  [{m.get('kind','?')}] {m.get('summary','')[:120]}")
 
-    if not any([ctx.git_log, ctx.shell_commands, ctx.browser_visits, ctx.board_tasks, ctx.recent_memories]):
+    if not any([ctx.git_log, ctx.shell_commands, ctx.browser_visits, ctx.board_tasks, ctx.recent_memories, ctx.latest_dispatch]):
         lines.append("No activity data collected yet. Start the memory watcher to begin capturing context.")
 
     return "\n".join(lines)
@@ -338,6 +405,7 @@ def chat(
             "browser_visits": len(ctx.browser_visits),
             "board_tasks": len(ctx.board_tasks),
             "memories": len(ctx.recent_memories),
+            "latest_dispatch": ctx.latest_dispatch.get("memory_id") if ctx.latest_dispatch else None,
             "gathered_at": ctx.gathered_at,
         },
         fallback=fallback,
