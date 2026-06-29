@@ -2556,3 +2556,127 @@ def test_marius_trace_in_agent_response(monkeypatch):
     assert trace is not None
     assert trace["agent"] == "Marius Agent"
     assert isinstance(trace["steps"], list)
+
+
+# ─── OAuth callback + token exchange tests ───────────────────────────────────
+
+def test_connectors_callback_handles_error_param():
+    """OAuth callback with error param returns ok=False without crashing."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/gmail/callback",
+                      params={"error": "access_denied"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "access_denied" in data["error"]
+
+
+def test_connectors_callback_missing_state_400():
+    """OAuth callback without state param returns 400."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/gmail/callback",
+                      params={"code": "some_code"})
+    assert resp.status_code == 400
+
+
+def test_connectors_callback_mocked_exchange_stores_account(tmp_path, monkeypatch):
+    """Mocked token exchange: valid callback stores account, returns HTML, redacts tokens."""
+    import src.warden.connectors.store as store_mod
+    import src.warden.connectors.oauth as oauth_mod
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(store_mod, "_vault_root", lambda: vault)
+
+    # Set up fake OAuth keys and start a flow to get a real state
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "fake-secret")
+
+    client = TestClient(app)
+    start_resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
+    assert start_resp.status_code == 200
+    state = start_resp.json()["state"]
+
+    # Inject a mock exchanger — no real Google network call
+    def mock_exchange(provider, code, redirect_uri):
+        return {
+            "access_token": "mock-access-token",
+            "refresh_token": "mock-refresh-token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+            "id_token": "eyJhbGciOiJSUzI1NiJ9.eyJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.sig",
+        }
+
+    oauth_mod.set_token_exchanger(mock_exchange)
+    try:
+        resp = client.get("/api/mcharness/warden/connectors/gmail/callback",
+                          params={"code": "fake_code", "state": state})
+    finally:
+        oauth_mod.set_token_exchanger(None)
+
+    assert resp.status_code == 200
+    assert "Connected" in resp.text  # HTML response
+
+    # Account was stored — token never in accounts list
+    from src.warden.connectors.store import ConnectorStore
+    accounts = ConnectorStore().list_accounts(redact=True)
+    assert any(a["provider"] == "gmail" for a in accounts)
+    assert "mock-access-token" not in str(accounts)
+    assert "mock-refresh-token" not in str(accounts)
+
+
+def test_connectors_disconnect_removes_account(tmp_path, monkeypatch):
+    """Disconnect endpoint removes account from store."""
+    import src.warden.connectors.store as store_mod
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(store_mod, "_vault_root", lambda: vault)
+
+    from src.warden.connectors.store import ConnectorStore
+    from src.warden.connectors.models import ConnectedAccount
+
+    store = ConnectorStore()
+    acc = ConnectedAccount(
+        account_id="test-disconnect-1", user_id="local",
+        provider="gmail", display_email="test@gmail.com", status="connected",
+    )
+    store.save_account(acc, token="some-token")
+    assert store.get_account("test-disconnect-1") is not None
+
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/warden/connectors/accounts/test-disconnect-1/disconnect")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    assert store.get_account("test-disconnect-1") is None
+
+
+def test_connectors_callback_no_raw_token_in_response(tmp_path, monkeypatch):
+    """Callback response HTML never contains raw access_token or refresh_token."""
+    import src.warden.connectors.store as store_mod
+    import src.warden.connectors.oauth as oauth_mod
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(store_mod, "_vault_root", lambda: vault)
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "fake-secret")
+
+    client = TestClient(app)
+    start_resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
+    state = start_resp.json()["state"]
+
+    def mock_exchange(provider, code, redirect_uri):
+        return {"access_token": "super-secret-token-xyz", "refresh_token": "refresh-xyz",
+                "expires_in": 3600, "token_type": "Bearer"}
+
+    oauth_mod.set_token_exchanger(mock_exchange)
+    try:
+        resp = client.get("/api/mcharness/warden/connectors/gmail/callback",
+                          params={"code": "code", "state": state})
+    finally:
+        oauth_mod.set_token_exchanger(None)
+
+    assert resp.status_code == 200
+    assert "super-secret-token-xyz" not in resp.text
+    assert "refresh-xyz" not in resp.text

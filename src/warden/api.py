@@ -4548,19 +4548,79 @@ def post_warden_connectors_connect_start(provider: str, request: Request):
 
 @mcharness_router.get("/warden/connectors/{provider}/callback")
 def get_warden_connectors_callback(provider: str, code: str = "", state: str = "", error: str = ""):
-    """OAuth2 callback — validates state, would exchange code for token in production."""
-    from .connectors.oauth import validate_callback_state
+    """OAuth2 callback — validates state, exchanges code for token, stores account."""
+    from .connectors.oauth import validate_callback_state, exchange_code_for_token, _extract_email_from_token
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+
     if error:
-        return {"ok": False, "error": error, "provider": provider}
+        return {"ok": False, "error": error, "provider": provider,
+                "message": f"OAuth denied: {error}"}
     if not state:
         raise HTTPException(status_code=400, detail="Missing state parameter")
     state_data = validate_callback_state(state)
     if state_data is None:
-        raise HTTPException(status_code=400, detail="Invalid or expired state")
-    # In production: exchange code for token, store via ConnectorStore
-    # For now: return proof that callback was received with valid state
-    return {"ok": True, "provider": provider, "status": "callback_received",
-            "note": "Token exchange not yet implemented. Code received but not stored."}
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    redirect_uri = state_data.get("redirect_uri", "")
+    token_response = exchange_code_for_token(provider, code, redirect_uri)
+
+    if "error" in token_response:
+        return {"ok": False, "provider": provider, "status": "token_exchange_failed",
+                "error": token_response.get("error"),
+                "message": token_response.get("error_description", "Token exchange failed")}
+
+    # Store token securely, record account
+    email = _extract_email_from_token(token_response, provider)
+    account_id = f"{provider}-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    scopes = state_data.get("scopes", [])
+
+    # Serialize token as JSON string for vault storage
+    import json as _json
+    token_str = _json.dumps({
+        "access_token": token_response.get("access_token", ""),
+        "refresh_token": token_response.get("refresh_token", ""),
+        "expires_in": token_response.get("expires_in"),
+        "token_type": token_response.get("token_type", "Bearer"),
+    })
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider=provider,
+        display_email=email or f"{provider}_user",
+        status="connected",
+        scopes=scopes,
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+        token_ref="",
+    )
+    store = ConnectorStore()
+    stored = store.save_account(account, token=token_str)
+
+    # Return success page (user may be in a popup window)
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Warden — Connected</title>
+<style>body{{font-family:sans-serif;background:#0d1b2e;color:#d4e4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+.card{{background:#14243c;border:1px solid rgba(100,160,255,.25);border-radius:10px;padding:32px 40px;text-align:center;max-width:360px;}}
+h2{{margin:0 0 8px;}}p{{color:#8faabf;margin:0 0 16px;}}
+.btn{{background:#2d5f9e;color:#d4e4f5;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:.9rem;}}
+.btn:hover{{background:#3a72b8;}}</style>
+</head>
+<body><div class="card">
+<h2>✓ {provider.title()} Connected</h2>
+<p>{email or "Account connected successfully."}</p>
+<button class="btn" onclick="window.close();if(window.opener)window.opener.location.reload();">Done</button>
+</div></body></html>"""
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_body)
 
 
 @mcharness_router.post("/warden/connectors/accounts/{account_id}/disconnect")
