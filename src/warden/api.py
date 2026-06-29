@@ -4242,6 +4242,7 @@ async def post_memory_agent_chat(req: _MemoryChatRequest):
         "model_used": result.model_used,
         "context_snapshot": result.context_snapshot,
         "fallback": result.fallback,
+        "trace": result.trace,
     }
 
 

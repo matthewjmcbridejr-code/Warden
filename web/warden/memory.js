@@ -545,7 +545,11 @@
         model: data.model_used || "",
         snapshot: snap,
         fallback: data.fallback || false,
+        trace: data.trace || null,
       });
+
+      // Render trace inspector if trace present
+      if (data.trace) renderMemoryTrace(data.trace);
 
       // Update model label
       const modelLabelEl = document.getElementById("mem-chat-model-label");
@@ -566,6 +570,49 @@
       if (sendBtn) sendBtn.disabled = false;
       renderChatThread();
     }
+  }
+
+  /* ── Trace Inspector ── */
+  const MEM_TRACE_ICONS = {
+    context_read: "◎", memory_read: "⧉", memory_write: "✦",
+    tool_action: "⬡", proof: "✓", blocked: "⊗", note: "·",
+  };
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function renderMemoryTrace(trace) {
+    const pane = document.getElementById("mem-trace-inspector-pane");
+    const list = document.getElementById("mem-trace-inspector-list");
+    if (!pane || !list) return;
+
+    if (!trace || !trace.steps || !trace.steps.length) {
+      list.innerHTML = '<div class="mem-trace-empty">No trace steps.</div>';
+      return;
+    }
+
+    // Filter: only show user-visible steps (hide debug by default)
+    const userSteps = trace.steps.filter((s) => !s.visibility || s.visibility === "user");
+
+    list.innerHTML = [
+      `<div class="mem-trace-agent-label">${escHtml(trace.agent || "Memory Agent")} · ${escHtml(trace.trace_id || "")}</div>`,
+      ...userSteps.map((s) => {
+        const icon = MEM_TRACE_ICONS[s.type] || "·";
+        const cls = s.status === "blocked" ? "wa-trace-blocked"
+                  : s.status === "skipped" ? "wa-trace-skipped"
+                  : s.status === "error"   ? "wa-trace-error" : "";
+        return `<div class="wa-trace-item ${cls}">
+          <div class="wa-trace-tool-name">${icon} ${escHtml(s.label)}</div>
+          ${s.detail ? `<div class="wa-trace-preview">${escHtml(s.detail.slice(0, 120))}</div>` : ""}
+          ${s.ref ? `<div class="wa-trace-ref">${escHtml(s.ref)}</div>` : ""}
+        </div>`;
+      }),
+    ].join("");
+
+    pane.style.display = "";
   }
 
   async function loadChatContext() {
@@ -730,6 +777,15 @@
 
     // Clear chat
     document.getElementById("mem-chat-clear-btn")?.addEventListener("click", clearChat);
+
+    // Trace inspector toggle
+    document.getElementById("mem-trace-toggle")?.addEventListener("click", () => {
+      const pane = document.getElementById("mem-trace-inspector-pane");
+      const btn = document.getElementById("mem-trace-toggle");
+      if (!pane) return;
+      const hidden = pane.classList.toggle("mem-trace-hidden");
+      if (btn) btn.textContent = hidden ? "▶" : "◀";
+    });
 
     // Context snapshot panel
     document.getElementById("mem-chat-context-btn")?.addEventListener("click", () => {

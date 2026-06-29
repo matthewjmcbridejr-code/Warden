@@ -354,6 +354,64 @@ def _fallback_structured_answer(question: str, ctx: MemoryContext) -> str:
 # Public chat API
 # ---------------------------------------------------------------------------
 
+def _build_memory_trace(ctx: "MemoryContext", sources: list[str], fallback: bool,
+                         model_used: str) -> dict:
+    """Build a Marius-compatible trace dict for a Memory Agent response."""
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+    now = datetime.now(_tz.utc).isoformat()
+    steps = []
+
+    if fallback:
+        steps.append({"type": "note", "label": "Fallback mode — Ollama unavailable",
+                       "status": "blocked", "detail": "Using static context only.", "ref": "",
+                       "visibility": "user", "timestamp": now})
+
+    # Context loaded
+    ctx_parts = []
+    if ctx.current_branch:
+        ctx_parts.append(f"branch: {ctx.current_branch}")
+    if ctx.git_log:
+        ctx_parts.append(f"{len(ctx.git_log)} recent commits")
+    if ctx.shell_commands:
+        ctx_parts.append(f"{len(ctx.shell_commands)} shell commands")
+    if ctx.browser_visits:
+        ctx_parts.append(f"{len(ctx.browser_visits)} browser visits")
+    if ctx_parts:
+        steps.append({"type": "context_read", "label": "Context loaded",
+                       "status": "ok", "detail": ", ".join(ctx_parts), "ref": "",
+                       "visibility": "user", "timestamp": now})
+
+    # Memories read
+    if ctx.recent_memories:
+        steps.append({"type": "memory_read", "label": f"{len(ctx.recent_memories)} memories loaded",
+                       "status": "ok", "detail": ", ".join(sources), "ref": "",
+                       "visibility": "user", "timestamp": now})
+    else:
+        steps.append({"type": "memory_read", "label": "Memory read",
+                       "status": "skipped", "detail": "No recent memories found.", "ref": "",
+                       "visibility": "user", "timestamp": now})
+
+    # Latest dispatch
+    if ctx.latest_dispatch:
+        steps.append({"type": "proof", "label": "Latest dispatch loaded",
+                       "status": "ok",
+                       "detail": f"{ctx.latest_dispatch.get('kind', 'blocked_attempt')} — {ctx.latest_dispatch.get('summary', '')[:80]}",
+                       "ref": ctx.latest_dispatch.get("memory_id", ""),
+                       "visibility": "user", "timestamp": now})
+
+    # Routing
+    steps.append({"type": "note", "label": f"Model: {model_used}",
+                   "status": "ok", "detail": "Warden Memory Agent", "ref": "",
+                   "visibility": "debug", "timestamp": now})
+
+    return {
+        "trace_id": "mem-trace-" + _uuid.uuid4().hex[:10],
+        "agent": "Warden Memory Agent",
+        "steps": steps,
+    }
+
+
 @dataclass
 class ChatResponse:
     reply: str
@@ -361,6 +419,7 @@ class ChatResponse:
     model_used: str
     context_snapshot: dict
     fallback: bool = False
+    trace: dict | None = None
 
 
 def chat(
@@ -394,6 +453,7 @@ def chat(
         fallback = True
         used_model = "fallback"
 
+    trace = _build_memory_trace(ctx, sources, fallback, used_model)
     return ChatResponse(
         reply=reply,
         sources=sources,
@@ -409,4 +469,5 @@ def chat(
             "gathered_at": ctx.gathered_at,
         },
         fallback=fallback,
+        trace=trace,
     )

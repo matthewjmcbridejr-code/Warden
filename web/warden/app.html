@@ -233,7 +233,21 @@
           <button id="mem-forget-btn"></button>
         </div>
 
-        <!-- Memory Chat (full width) -->
+        <!-- Memory Chat with Trace Inspector -->
+        <div class="mem-chat-outer">
+
+        <!-- Trace Inspector (right side, hidden until first response) -->
+        <div id="mem-trace-inspector-pane" class="mem-trace-inspector" style="display:none;">
+          <div class="mem-trace-inspector-header">
+            <span>Marius Trace</span>
+            <button type="button" id="mem-trace-toggle" class="wa-icon-btn" title="Hide trace">◀</button>
+          </div>
+          <div id="mem-trace-inspector-list" class="wa-trace-list">
+            <div class="mem-trace-empty">Trace will appear here after a response.</div>
+          </div>
+        </div>
+
+      <!-- Memory Chat (full width) -->
         <div class="mem-chat-pane mem-chat-fullwidth">
           <div class="mem-chat-header">
             <div class="mem-chat-header-left">
@@ -280,6 +294,8 @@
             </div>
           </div>
         </div>
+
+        </div><!-- /mem-chat-outer -->
 
       </section>
 

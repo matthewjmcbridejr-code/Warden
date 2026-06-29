@@ -4826,6 +4826,76 @@ textarea:focus-visible {
 }
 .blocked-notice-actions .btn { font-size: 0.78rem; padding: 4px 10px; }
 
+/* ── Memory section trace inspector layout ──────────────────────────── */
+.mem-chat-outer {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+.mem-trace-inspector {
+  width: 220px;
+  min-width: 180px;
+  max-width: 260px;
+  flex-shrink: 0;
+  background: var(--panel, #14243c);
+  border-left: 1px solid var(--line, #243854);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s;
+}
+.mem-trace-inspector.mem-trace-hidden {
+  width: 32px;
+  min-width: 32px;
+}
+.mem-trace-inspector.mem-trace-hidden .wa-trace-list,
+.mem-trace-inspector.mem-trace-hidden .mem-trace-agent-label {
+  display: none;
+}
+.mem-trace-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted, #9cacbf);
+  border-bottom: 1px solid var(--line, #243854);
+  flex-shrink: 0;
+}
+.mem-trace-agent-label {
+  font-size: 0.68rem;
+  color: var(--muted, #9cacbf);
+  padding: 6px 10px 2px;
+  opacity: 0.7;
+}
+.mem-trace-empty {
+  font-size: 0.78rem;
+  color: var(--muted, #9cacbf);
+  padding: 12px 10px;
+  opacity: 0.7;
+}
+.wa-trace-ref {
+  font-size: 0.68rem;
+  font-family: monospace;
+  color: var(--muted, #9cacbf);
+  opacity: 0.7;
+  padding-left: 16px;
+}
+@media (max-width: 680px) {
+  .mem-chat-outer { flex-direction: column-reverse; }
+  .mem-trace-inspector {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--line, #243854);
+    max-height: 140px;
+  }
+}
+
 /* ── Gateway intro banner ────────────────────────────────────────────── */
 .gw-intro-banner {
   background: rgba(20,36,60,0.6);
