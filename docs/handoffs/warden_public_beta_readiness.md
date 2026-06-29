@@ -63,7 +63,7 @@ Core loop works end-to-end. Non-developer can navigate and use the product witho
 | Memory Agent LLM | Ollama may be offline — fallback mode gives raw snapshot |
 | Gmail/Outlook OAuth | Keys not configured — providers list with configured: false |
 | iCloud IMAP | Scaffold only — mail tools not implemented |
-| Playwright e2e test | Not written — deferred to next sprint |
+| Playwright e2e test | ✅ 7/7 passing (`tests/e2e/test_dispatch_loop.py`) |
 
 ---
 
@@ -74,6 +74,8 @@ Core loop works end-to-end. Non-developer can navigate and use the product witho
 - `web/warden/app.css` — onboarding card styles, blocked notice enhancements, gateway banner
 - `docs/warden_public_beta_test_guide.md` — new
 - `docs/handoffs/warden_public_beta_readiness.md` — this file
+- `tests/e2e/test_dispatch_loop.py` — 7 Playwright tests for full dispatch loop
+- `web/warden/app.js` — `loadConnectorsProviders()` + Settings section trigger
 
 ---
 

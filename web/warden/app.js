@@ -2108,6 +2108,43 @@
       loadRecentEvidence().catch((e) => console.error(e));
     } else if (state.activeSection === "memory") {
       loadMemory().catch((e) => console.error(e));
+    } else if (state.activeSection === "settings") {
+      loadConnectorsProviders().catch((e) => console.error(e));
+    }
+  }
+
+  async function loadConnectorsProviders() {
+    const listEl = document.getElementById("connectors-provider-list");
+    if (!listEl) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/connectors/providers`);
+      const providers = (data && data.providers) || [];
+      if (!providers.length) {
+        listEl.innerHTML = '<p class="connectors-empty">No connector providers registered.</p>';
+        return;
+      }
+      listEl.innerHTML = providers.map((p) => {
+        const authLabel = p.auth_type === "oauth2_authorization_code" ? "OAuth 2.0" : "App Password";
+        const caps = (p.capabilities || []).join(", ") || "—";
+        const configuredClass = p.configured ? "connector-configured" : "connector-unconfigured";
+        const configuredLabel = p.configured ? "Configured" : "Not configured";
+        const risk = p.risk_level ? `<span class="connector-risk connector-risk-${escapeHtml(p.risk_level)}">${escapeHtml(p.risk_level.replace("_", " "))}</span>` : "";
+        return `<div class="connector-provider-card ${configuredClass}" data-provider-id="${escapeHtml(p.provider_id)}">
+          <div class="connector-provider-top">
+            <strong class="connector-provider-name">${escapeHtml(p.display_name)}</strong>
+            <span class="connector-status-pill ${p.configured ? "status-connected" : "status-coming"}">${configuredLabel}</span>
+          </div>
+          <div class="connector-provider-meta">
+            <span>${authLabel}</span>
+            <span>Capabilities: ${escapeHtml(caps)}</span>
+            ${risk}
+          </div>
+          ${p.notes ? `<p class="connector-provider-note">${escapeHtml(p.notes)}</p>` : ""}
+          ${!p.configured ? `<p class="connector-provider-setup">To enable: add OAuth client credentials to your environment. See <code>.env.warden-connectors.example</code>.</p>` : ""}
+        </div>`;
+      }).join("");
+    } catch (e) {
+      listEl.innerHTML = '<p class="connectors-empty">Could not load connector providers.</p>';
     }
   }
 
