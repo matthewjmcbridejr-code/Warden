@@ -1650,14 +1650,201 @@ def test_captain_plan_stop_updates_status(monkeypatch, tmp_path):
 
 def test_captain_plan_public_writes_rejected(monkeypatch):
     client = TestClient(app)
+    # dispatch is now ungated — returns 404 (plan not found) not 403
     blocked = client.post("/api/mcharness/captain/plans/plan_x/steps/step_1/dispatch")
-    assert blocked.status_code == 403
+    assert blocked.status_code == 404
+    # complete/revise/stop are still gated — return 403
     blocked_complete = client.post("/api/mcharness/captain/plans/plan_x/steps/step_1/complete", json={})
     assert blocked_complete.status_code == 403
     blocked_revise = client.post("/api/mcharness/captain/plans/plan_x/steps/step_1/revise", json={"prompt": "nope"})
     assert blocked_revise.status_code == 403
     blocked_stop = client.post("/api/mcharness/captain/plans/plan_x/stop", json={})
     assert blocked_stop.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Dispatch proof memory loop tests
+# ---------------------------------------------------------------------------
+
+def _persist_sample_plan_directly(tmp_path, plan_id="plan_loop01"):
+    """Persist a sample plan directly (bypasses API auth) for blocked-path tests."""
+    from src.warden.captain_plans import persist_plan
+    plan_data = {
+        "plan_id": plan_id,
+        "title": "Captain loop plan",
+        "summary": "Supervised step progression.",
+        "source": "local_preview",
+        "steps": [
+            {"step_id": "step_1", "title": "Inspect", "prompt": "Inspect the repo.", "agent": "codex_cli", "status": "queued"},
+            {"step_id": "step_2", "title": "Implement", "prompt": "Implement the change.", "agent": "codex_cli", "status": "queued"},
+        ],
+        "notes": [],
+    }
+    persist_plan(tmp_path, goal="Build the Captain loop", repo_id="mcharness-public-export", plan_data=plan_data)
+
+
+def _isolated_dispatch_env(monkeypatch, tmp_path):
+    """Set up isolated store for dispatch memory tests (no runner, tmp stores)."""
+    import src.warden.api as api_mod
+    import src.warden.workbench as wb_mod
+
+    monkeypatch.delenv("MCHARNESS_TMUX_RUNNER_ENABLED", raising=False)
+    monkeypatch.delenv("MCHARNESS_CODEX_RUNNER_ENABLED", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+    # WorkbenchStore uses its own WORKBENCH_ROOT — redirect to tmp_path too
+    monkeypatch.setattr(wb_mod, "WORKBENCH_ROOT", tmp_path / "workbench")
+
+
+def test_dispatch_blocked_saves_blocked_attempt_memory(monkeypatch, tmp_path):
+    """When runner is unavailable dispatch returns ok=True, blocked=True and writes blocked_attempt memory."""
+    from src.warden.workbench import WorkbenchStore
+    _isolated_dispatch_env(monkeypatch, tmp_path)
+    _persist_sample_plan_directly(tmp_path)
+    client = TestClient(app)
+
+    resp = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["blocked"] is True
+    assert data["run_id"].startswith("blocked-")
+    assert data["memory_id"] is not None
+    assert "Runner unavailable" in data["message"]
+
+    store = WorkbenchStore(root=tmp_path / "workbench")
+    mems = store.search_memories("blocked_attempt", limit=5)
+    assert any(
+        m.kind == "blocked_attempt" and m.source == "captain_dispatch"
+        for m in mems
+    ), "blocked_attempt memory not found"
+
+
+def test_dispatch_blocked_memory_includes_required_metadata(monkeypatch, tmp_path):
+    """blocked_attempt memory metadata contains plan_id, step_id, run_id, repo_id, lane_id."""
+    from src.warden.workbench import WorkbenchStore
+    _isolated_dispatch_env(monkeypatch, tmp_path)
+    _persist_sample_plan_directly(tmp_path)
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert resp.status_code == 200
+
+    store = WorkbenchStore(root=tmp_path / "workbench")
+    mems = store.search_memories("blocked_attempt", limit=5)
+    mem = next((m for m in mems if m.kind == "blocked_attempt"), None)
+    assert mem is not None, "blocked_attempt memory not found"
+    meta = mem.metadata or {}
+    assert meta.get("plan_id") == "plan_loop01"
+    assert meta.get("step_id") == "step_1"
+    assert meta.get("repo_id") == "mcharness-public-export"
+    assert meta.get("lane_id") == "codex_cli"
+    assert meta.get("reason") == "runner_unavailable"
+    assert meta.get("run_id", "").startswith("blocked-")
+
+
+def test_dispatch_creates_run_record_and_agent_result_memory(monkeypatch, tmp_path):
+    """When runner is available dispatch creates run record and agent_result memory."""
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    import src.warden.api as api_mod
+    import src.warden.workbench as wb_mod
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+    monkeypatch.setattr(wb_mod, "WORKBENCH_ROOT", tmp_path / "workbench")
+
+    from src.warden.workbench import WorkbenchStore
+    client = TestClient(app)
+    _sample_persisted_plan(client)
+
+    resp = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data.get("blocked") is False
+    assert data.get("run_id")
+    assert data.get("memory_id")
+
+    store = WorkbenchStore(root=tmp_path / "workbench")
+    mems = store.search_memories("agent_result", limit=5)
+    assert any(
+        m.kind == "agent_result" and m.source == "captain_dispatch"
+        for m in mems
+    ), "agent_result memory not found"
+
+
+def test_save_proof_memory_endpoint_for_blocked_run(monkeypatch, tmp_path):
+    """POST /runs/{run_id}/save-proof-memory writes a memory for an existing blocked run."""
+    import src.warden.api as api_mod
+    import src.warden.workbench as wb_mod
+    from src.warden.run_history import create_run_record
+
+    monkeypatch.delenv("MCHARNESS_TMUX_RUNNER_ENABLED", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(wb_mod, "WORKBENCH_ROOT", tmp_path / "workbench")
+
+    create_run_record(
+        tmp_path,
+        run_id="run_test_proof",
+        title="Test blocked run",
+        agent_id="codex_cli",
+        agent_adapter="codex_cli",
+        repo_id="mcharness-public-export",
+        branch=None,
+        prompt="Inspect the repo.",
+        status="blocked",
+        plan_id="plan_loop01",
+        created_by="captain_dispatch",
+        service_mode="public",
+    )
+
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/runs/run_test_proof/save-proof-memory")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["run_id"] == "run_test_proof"
+    assert data["kind"] == "blocked_attempt"
+    assert data["memory_id"] is not None
+
+
+def test_dispatch_proof_memory_redacts_secrets(monkeypatch, tmp_path):
+    """Response from dispatch does not expose raw secret values."""
+    import src.warden.api as api_mod
+    import src.warden.workbench as wb_mod
+
+    monkeypatch.delenv("MCHARNESS_TMUX_RUNNER_ENABLED", raising=False)
+    monkeypatch.delenv("MCHARNESS_CODEX_RUNNER_ENABLED", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+    monkeypatch.setattr(wb_mod, "WORKBENCH_ROOT", tmp_path / "workbench")
+
+    from src.warden.captain_plans import persist_plan
+    plan_data = {
+        "plan_id": "plan_secret_test",
+        "title": "Secret test plan",
+        "summary": "Testing redaction.",
+        "source": "local_preview",
+        "steps": [
+            {
+                "step_id": "step_1",
+                "title": "Inspect",
+                "prompt": "Inspect the repo.",
+                "agent": "codex_cli",
+                "status": "queued",
+            }
+        ],
+        "notes": [],
+    }
+    persist_plan(tmp_path, goal="Test sk-or-v1-abcdefghij redaction", repo_id="mcharness-public-export", plan_data=plan_data)
+
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/captain/plans/plan_secret_test/steps/step_1/dispatch")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # The dispatch-level fields (run_id, memory_id, message) must not expose raw secrets
+    for field in ("run_id", "memory_id", "message"):
+        val = str(data.get(field, ""))
+        assert "sk-or-v1-abcdefghij" not in val, f"secret leaked in field {field!r}"
 
 
 def test_captain_plan_invalid_step_returns_404(monkeypatch, tmp_path):

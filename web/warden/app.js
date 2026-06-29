@@ -1879,6 +1879,23 @@
       method: "POST",
     });
     if (result.plan) setActiveCaptainPlan(result.plan);
+
+    // Blocked path: runner unavailable — show message, don't open monitor
+    if (result.blocked) {
+      closeCaptainDeckModal();
+      const memId = result.memory_id || "";
+      const runId = result.run_id || "";
+      const noticeEl = document.getElementById("captain-blocked-notice");
+      if (noticeEl) {
+        noticeEl.textContent = `Runner unavailable — blocked attempt saved to Memory${memId ? " (" + memId + ")" : ""}.`;
+        noticeEl.style.display = "";
+        setTimeout(() => { noticeEl.style.display = "none"; }, 8000);
+      }
+      await loadMissionWorklog();
+      return;
+    }
+
+    // Happy path: runner started
     const dispatch = result.dispatch || {};
     state.selectedThreadId = dispatch.session_id || state.selectedThreadId;
     state.activeWardenRunId = dispatch.runner_id || state.activeWardenRunId;

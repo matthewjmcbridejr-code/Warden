@@ -1902,6 +1902,75 @@ def _write_plan_memory(*, plan: dict[str, Any], goal: str, repo_id: str, lane_id
         return None
 
 
+def _write_dispatch_memory(
+    *,
+    kind: str,
+    plan_id: str,
+    step_id: str,
+    step_title: str,
+    run_id: str,
+    repo_id: str,
+    lane_id: str,
+    goal: str,
+    reason: str = "",
+    transcript_excerpt: str = "",
+) -> Optional[str]:
+    """Write a blocked_attempt or agent_result memory after a dispatch attempt. Returns memory_id or None."""
+    try:
+        import hashlib
+        from . import workbench as _wb
+        from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+        store = WorkbenchStore(root=_wb.WORKBENCH_ROOT)
+        mem_id = "dispatch-" + hashlib.sha1(f"{plan_id}:{step_id}:{run_id}".encode()).hexdigest()[:12]
+        if kind == "blocked_attempt":
+            summary = (
+                f"Captain dispatch blocked — runner unavailable. "
+                f"Step: {step_title[:60]} (plan {plan_id[:12]}, step {step_id})"
+            )
+        else:
+            summary = (
+                f"Captain dispatched step: {step_title[:60]} "
+                f"(plan {plan_id[:12]}, step {step_id}, run {run_id[:12]})"
+            )
+        content_lines = [
+            f"kind: {kind}",
+            f"plan_id: {plan_id}",
+            f"step_id: {step_id}",
+            f"step_title: {step_title}",
+            f"run_id: {run_id}",
+            f"repo_id: {repo_id}",
+            f"lane_id: {lane_id}",
+            f"goal: {goal[:120]}",
+        ]
+        if reason:
+            content_lines.append(f"reason: {reason}")
+        if transcript_excerpt:
+            content_lines.append(f"transcript_excerpt: {transcript_excerpt[:400]}")
+        store.create_memory(WorkbenchMemoryCreateRequest(
+            memory_id=mem_id,
+            scope="warden",
+            summary=summary,
+            source="captain_dispatch",
+            title=summary[:80],
+            kind=kind,
+            tags=["captain", "dispatch", kind, lane_id, repo_id],
+            metadata={
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "step_title": step_title,
+                "run_id": run_id,
+                "repo_id": repo_id,
+                "lane_id": lane_id,
+                "goal": goal[:120],
+                "reason": reason,
+                "kind": kind,
+            },
+        ))
+        return mem_id
+    except Exception:
+        return None
+
+
 @mcharness_router.post("/captain/plan", response_model=McHarnessCaptainPlanResponse)
 def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
     # Resolve repo — fail hard on unknown repo when cloud key present (real planning needs valid path)
@@ -2002,8 +2071,13 @@ def post_mcharness_captain_plan_persist(payload: McHarnessCaptainPlanPersistRequ
     }
 
 
-@mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/dispatch", dependencies=[Depends(_require_run_history_write)])
+@mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/dispatch")
 def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
+    """Dispatch a Captain plan step to the local runner.
+
+    Always succeeds: when the runner is unavailable, saves a blocked_attempt
+    memory and returns blocked=True instead of raising 403.
+    """
     plan = get_plan_record(MCTABLE_ROOT, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
@@ -2012,29 +2086,91 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     step = next((item for item in plan.get("steps") or [] if item.get("step_id") == step_id), None)
     if step is None:
         raise HTTPException(status_code=404, detail=f"Captain plan step not found: {step_id}")
-    repo_id = plan.get("repo_id")
+    repo_id = str(plan.get("repo_id") or "")
     if not repo_id:
         raise HTTPException(status_code=400, detail="Captain plan is missing repo_id.")
+
+    step_title = str(step.get("title") or plan.get("title") or "Captain step")
+    prompt = str(step.get("prompt") or "")
+    goal = str(plan.get("goal") or plan.get("title") or "")
+    lane_id = "codex_cli"
+
+    # Blocked path: runner not available — save honest blocked_attempt memory
+    if not _codex_runner_ready():
+        import uuid
+        run_id = "blocked-" + str(uuid.uuid4())[:8]
+        create_run_record(
+            MCTABLE_ROOT,
+            run_id=run_id,
+            title=f"[blocked] {step_title}",
+            agent_id="codex_cli",
+            agent_adapter="codex_cli",
+            repo_id=repo_id,
+            branch=None,
+            prompt=prompt,
+            status="blocked",
+            plan_id=plan_id,
+            created_by="captain_dispatch",
+            service_mode="public",
+        )
+        mem_id = _write_dispatch_memory(
+            kind="blocked_attempt",
+            plan_id=plan_id,
+            step_id=step_id,
+            step_title=step_title,
+            run_id=run_id,
+            repo_id=repo_id,
+            lane_id=lane_id,
+            goal=goal,
+            reason="runner_unavailable",
+        )
+        return {
+            "ok": True,
+            "blocked": True,
+            "service": "mcharness-control-plane",
+            "run_id": run_id,
+            "memory_id": mem_id,
+            "message": "Runner unavailable — blocked attempt saved to Memory",
+            "plan": _captain_plan_response(plan),
+            "dispatch": {},
+        }
+
+    # Happy path: runner ready — dispatch and write agent_result memory
     dispatch = _execute_codex_dispatch_for_step(
-        title=step.get("title") or plan.get("title") or "Captain step",
-        prompt=str(step.get("prompt") or ""),
-        repo_id=str(repo_id),
+        title=step_title,
+        prompt=prompt,
+        repo_id=repo_id,
         plan_id=plan_id,
         step_id=step_id,
     )
+    runner_id = str(dispatch.get("runner_id") or "")
     updated = mark_step_dispatched(
         MCTABLE_ROOT,
         plan_id,
         step_id,
-        run_id=str(dispatch.get("runner_id") or ""),
+        run_id=runner_id,
         status="dispatched",
     )
-    return {
+    mem_id = _write_dispatch_memory(
+        kind="agent_result",
+        plan_id=plan_id,
+        step_id=step_id,
+        step_title=step_title,
+        run_id=runner_id,
+        repo_id=repo_id,
+        lane_id=lane_id,
+        goal=goal,
+    )
+    resp = {
         "ok": True,
+        "blocked": False,
         "service": "mcharness-control-plane",
+        "run_id": runner_id,
+        "memory_id": mem_id,
         "plan": _captain_plan_response(updated),
         "dispatch": dispatch,
     }
+    return resp
 
 
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/complete", dependencies=[Depends(_require_run_history_write)])
@@ -3361,6 +3497,42 @@ def post_mcharness_run_gate(run_id: str, payload: McHarnessProofGateCreateReques
         "ok": True,
         "service": "mcharness-control-plane",
         "gate": gate,
+    }
+
+
+@mcharness_router.post("/runs/{run_id}/save-proof-memory")
+def post_mcharness_run_save_proof_memory(run_id: str):
+    """Write a proof or blocked_attempt memory for an existing run record.
+
+    Useful when the run was created by a runner and the caller wants to
+    ensure a Warden Memory entry exists for later recall.
+    """
+    run = get_run_record(MCTABLE_ROOT, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    plan_id = str(run.get("plan_id") or "")
+    repo_id = str(run.get("repo_id") or "")
+    status = str(run.get("status") or "")
+    title = str(run.get("title") or run_id)
+    kind = "blocked_attempt" if status == "blocked" else "proof"
+    mem_id = _write_dispatch_memory(
+        kind=kind,
+        plan_id=plan_id,
+        step_id="",
+        step_title=title,
+        run_id=run_id,
+        repo_id=repo_id,
+        lane_id=str(run.get("agent_id") or "codex_cli"),
+        goal=title,
+        reason=status,
+        transcript_excerpt=str(run.get("transcript_excerpt") or ""),
+    )
+    return {
+        "ok": True,
+        "service": "mcharness-control-plane",
+        "run_id": run_id,
+        "memory_id": mem_id,
+        "kind": kind,
     }
 
 
