@@ -110,10 +110,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
 
 // ── Periodic flush ────────────────────────────────────────────────────────────
 
-chrome.alarms.create("warden_flush", { periodInMinutes: 0.25 }); // every 15s
+// Create alarm only on install/update — not every SW wake-up
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create("warden_flush", { periodInMinutes: 0.25 });
+  flush().catch(() => {});
+});
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "warden_flush") flush().catch(() => {});
 });
 
-// Flush on startup too
-flush().catch(() => {});
+// Also flush on SW startup (tab open, browser start)
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create("warden_flush", { periodInMinutes: 0.25 });
+  flush().catch(() => {});
+});

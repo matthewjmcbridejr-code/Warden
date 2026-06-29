@@ -8,7 +8,9 @@
     "activeTab",
     "webNavigation",
     "storage",
-    "scripting"
+    "scripting",
+    "alarms",
+    "clipboardRead"
   ],
   "host_permissions": [
     "<all_urls>"
