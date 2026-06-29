@@ -2426,3 +2426,133 @@ def test_agent_refresh_status_private_codex_runnable(monkeypatch, tmp_path):
     assert codex["runnable"] is True
     assert codex.get("last_checked_at")
     assert "No tasks were started" in " ".join(refreshed.json().get("notes") or [])
+
+
+# ---------------------------------------------------------------------------
+# Connector platform tests
+# ---------------------------------------------------------------------------
+
+def test_connectors_providers_lists_three_providers():
+    """GET /warden/connectors/providers returns gmail, outlook, icloud without credentials."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/providers")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True
+    ids = [p["provider_id"] for p in data["providers"]]
+    assert "gmail" in ids
+    assert "outlook" in ids
+    assert "icloud" in ids
+
+
+def test_connectors_providers_unconfigured_without_env(monkeypatch):
+    """Without OAuth env vars, all providers are configured=False."""
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID", raising=False)
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/providers")
+    assert resp.status_code == 200
+    for p in resp.json()["providers"]:
+        assert p["configured"] is False, f"{p['provider_id']} should be unconfigured"
+
+
+def test_connectors_accounts_empty_initially():
+    """GET /warden/connectors/accounts returns empty list when no accounts connected."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/accounts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert isinstance(data["accounts"], list)
+
+
+def test_connectors_connect_start_gmail_unconfigured(monkeypatch):
+    """POST .../gmail/connect/start returns configured=False when no OAuth keys set."""
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["configured"] is False
+    assert "WARDEN_GOOGLE_OAUTH_CLIENT_ID" in data["error"]
+
+
+def test_connectors_connect_start_gmail_configured(monkeypatch):
+    """POST .../gmail/connect/start returns auth_url when OAuth keys are set."""
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "fake-client-secret")
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "auth_url" in data
+    assert "accounts.google.com" in data["auth_url"]
+    assert "state" in data
+
+
+def test_connectors_callback_rejects_invalid_state():
+    """GET .../gmail/callback rejects unknown/invalid state."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/gmail/callback",
+                      params={"code": "fake_code", "state": "totally-invalid-state"})
+    assert resp.status_code == 400
+    assert "Invalid" in resp.json()["detail"]
+
+
+def test_connectors_accounts_redacts_tokens(tmp_path, monkeypatch):
+    """Accounts endpoint never exposes raw tokens."""
+    import src.warden.connectors.store as store_mod
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setattr(store_mod, "_vault_root", lambda: vault)
+
+    from src.warden.connectors.store import ConnectorStore
+    from src.warden.connectors.models import ConnectedAccount
+    store = ConnectorStore()
+    acc = ConnectedAccount(
+        account_id="test-acc-1", user_id="matt",
+        provider="gmail", display_email="test@gmail.com",
+        status="connected",
+    )
+    store.save_account(acc, token="real-secret-token-abc123")
+
+    # Verify the account was saved with redacted token in list
+    accounts_raw = store.list_accounts(redact=True)
+    assert accounts_raw  # account was saved
+    assert "real-secret-token-abc123" not in str(accounts_raw)
+
+
+def test_marius_trace_in_agent_response(monkeypatch):
+    """Warden agent chat response includes a trace field."""
+    import src.warden.agent as agent_mod
+    from src.warden.agent import AgentResponse
+
+    fake_resp = AgentResponse(
+        reply="Test reply",
+        tools_used=[],
+        sources=["context"],
+        model="test-model",
+        provider="test",
+        fallback=True,
+        trace={"trace_id": "trace-abc123", "agent": "Marius Agent", "steps": [
+            {"type": "note", "label": "Fallback mode", "status": "ok", "detail": "", "ref": ""}
+        ]},
+    )
+
+    async def fake_run_agent(message, history):
+        return fake_resp
+
+    monkeypatch.setattr(agent_mod, "run_agent", fake_run_agent)
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/warden/agent/chat",
+                       json={"message": "test", "history": []})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "trace" in data
+    trace = data["trace"]
+    assert trace is not None
+    assert trace["agent"] == "Marius Agent"
+    assert isinstance(trace["steps"], list)

@@ -4513,3 +4513,62 @@ def browser_ingest(req: BrowserIngestRequest):
                 skipped += 1
 
     return {"ok": True, "stored": stored, "skipped": skipped, "received": len(req.events)}
+
+
+# ---------------------------------------------------------------------------
+# Warden Connectors — account connection platform
+# ---------------------------------------------------------------------------
+
+@mcharness_router.get("/warden/connectors/providers")
+def get_warden_connectors_providers():
+    """List available connector providers with configuration status."""
+    from .connectors.registry import list_providers
+    return {"ok": True, "providers": list_providers()}
+
+
+@mcharness_router.get("/warden/connectors/accounts")
+def get_warden_connectors_accounts():
+    """List connected user accounts. Tokens are never returned."""
+    from .connectors.store import list_accounts
+    return {"ok": True, "accounts": list_accounts(redact=True)}
+
+
+@mcharness_router.post("/warden/connectors/{provider}/connect/start")
+def post_warden_connectors_connect_start(provider: str, request: Request):
+    """Begin an OAuth2 connection flow for the given provider."""
+    from .connectors.oauth import start_oauth_flow
+    base_url = str(request.base_url).rstrip("/")
+    result = start_oauth_flow(provider, base_url)
+    if result.get("configured") is False:
+        return {"ok": False, "configured": False, "provider": provider,
+                "error": result.get("error", "Provider not configured")}
+    return {"ok": True, "provider": provider, "auth_url": result.get("auth_url"),
+            "state": result.get("state")}
+
+
+@mcharness_router.get("/warden/connectors/{provider}/callback")
+def get_warden_connectors_callback(provider: str, code: str = "", state: str = "", error: str = ""):
+    """OAuth2 callback — validates state, would exchange code for token in production."""
+    from .connectors.oauth import validate_callback_state
+    if error:
+        return {"ok": False, "error": error, "provider": provider}
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
+    state_data = validate_callback_state(state)
+    if state_data is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+    # In production: exchange code for token, store via ConnectorStore
+    # For now: return proof that callback was received with valid state
+    return {"ok": True, "provider": provider, "status": "callback_received",
+            "note": "Token exchange not yet implemented. Code received but not stored."}
+
+
+@mcharness_router.post("/warden/connectors/accounts/{account_id}/disconnect")
+def post_warden_connectors_disconnect(account_id: str):
+    """Disconnect a connected account and remove its stored token."""
+    from .connectors.store import ConnectorStore
+    store = ConnectorStore()
+    removed = store.disconnect_account(account_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+    return {"ok": True, "account_id": account_id, "status": "disconnected"}

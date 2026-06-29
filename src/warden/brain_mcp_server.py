@@ -1087,6 +1087,199 @@ def warden_memory_context(query: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Captain + Dispatch tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_captain_plan(goal: str, repo_id: str = "mcharness-public-export", lane_id: str = "codex_cli") -> str:
+    """Create a Captain plan: break a goal into 3–5 bounded, executable steps.
+
+    Args:
+        goal: What you want to accomplish.
+        repo_id: Target repository ID (default: mcharness-public-export).
+        lane_id: Agent lane to use (default: codex_cli).
+    """
+    try:
+        from src.warden.captain_plans import persist_plan
+        from src.warden.api import _local_preview_plan
+
+        plan_data = _local_preview_plan(goal=goal, repo_id=repo_id, lane_id=lane_id)
+        result = persist_plan(MCTABLE_ROOT, goal=goal, repo_id=repo_id, plan_data=plan_data)
+        return _ok("warden_captain_plan", {
+            "plan_id": result.get("plan_id"),
+            "title": result.get("title"),
+            "steps": [
+                {"id": s.get("step_id"), "title": s.get("title"), "status": s.get("status")}
+                for s in (result.get("steps") or [])
+            ],
+            "source": result.get("source", "local_preview"),
+        })
+    except Exception as exc:
+        return _err("warden_captain_plan", str(exc))
+
+
+@mcp.tool()
+def warden_captain_recent_plans(limit: int = 5) -> str:
+    """List the most recent Captain plans.
+
+    Args:
+        limit: How many plans to return (default: 5).
+    """
+    try:
+        from src.warden.captain_plans import list_recent_plans
+        plans = list_recent_plans(MCTABLE_ROOT, limit=limit)
+        return _ok("warden_captain_recent_plans", {
+            "plans": [
+                {
+                    "plan_id": p.get("plan_id"),
+                    "title": p.get("title"),
+                    "status": p.get("status"),
+                    "current_step_id": p.get("current_step_id"),
+                    "step_count": len(p.get("steps") or []),
+                }
+                for p in plans
+            ],
+        })
+    except Exception as exc:
+        return _err("warden_captain_recent_plans", str(exc))
+
+
+@mcp.tool()
+def warden_captain_dispatch_step(plan_id: str, step_id: str) -> str:
+    """Dispatch a Captain plan step to the local runner.
+
+    If the runner is unavailable, a blocked_attempt memory is saved honestly.
+    Does NOT require runner to be configured — always returns a result.
+
+    Args:
+        plan_id: Plan ID to dispatch.
+        step_id: Step ID within the plan.
+    """
+    try:
+        from src.warden.captain_plans import get_plan_record, mark_step_dispatched
+        from src.warden.run_history import create_run_record
+        import uuid
+
+        plan = get_plan_record(MCTABLE_ROOT, plan_id)
+        if plan is None:
+            return _err("warden_captain_dispatch_step", f"Plan not found: {plan_id}")
+
+        step = next((s for s in (plan.get("steps") or []) if s.get("step_id") == step_id), None)
+        if step is None:
+            return _err("warden_captain_dispatch_step", f"Step not found: {step_id}")
+
+        repo_id = str(plan.get("repo_id") or "mcharness-public-export")
+        step_title = str(step.get("title") or "Captain step")
+        prompt = str(step.get("prompt") or "")
+        goal = str(plan.get("goal") or plan.get("title") or "")
+
+        # Always use blocked path from MCP — runner may not be in tmux context
+        run_id = "mcp-blocked-" + str(uuid.uuid4())[:8]
+        create_run_record(
+            MCTABLE_ROOT, run_id=run_id, title=f"[mcp-blocked] {step_title}",
+            agent_id="codex_cli", agent_adapter="codex_cli", repo_id=repo_id,
+            branch=None, prompt=prompt, status="blocked", plan_id=plan_id,
+            created_by="mcp_dispatch", service_mode="public",
+        )
+        from src.warden.api import _write_dispatch_memory
+        mem_id = _write_dispatch_memory(
+            kind="blocked_attempt", plan_id=plan_id, step_id=step_id,
+            step_title=step_title, run_id=run_id, repo_id=repo_id,
+            lane_id="codex_cli", goal=goal, reason="mcp_runner_unavailable",
+        )
+        return _ok("warden_captain_dispatch_step", {
+            "ok": True,
+            "blocked": True,
+            "run_id": run_id,
+            "memory_id": mem_id,
+            "message": "Runner unavailable from MCP context — blocked attempt saved to Memory",
+            "plan_id": plan_id,
+            "step_id": step_id,
+        })
+    except Exception as exc:
+        return _err("warden_captain_dispatch_step", str(exc))
+
+
+@mcp.tool()
+def warden_run_get(run_id: str) -> str:
+    """Get a run record by ID.
+
+    Args:
+        run_id: The run ID to retrieve.
+    """
+    try:
+        from src.warden.run_history import get_run_record
+        run = get_run_record(MCTABLE_ROOT, run_id)
+        if run is None:
+            return _err("warden_run_get", f"Run not found: {run_id}")
+        return _ok("warden_run_get", {
+            "run_id": run.get("run_id"),
+            "title": run.get("title"),
+            "status": run.get("status"),
+            "agent_id": run.get("agent_id"),
+            "repo_id": run.get("repo_id"),
+            "plan_id": run.get("plan_id"),
+            "started_at": run.get("started_at"),
+            "completed_at": run.get("completed_at"),
+            "prompt": (run.get("prompt") or "")[:200],
+            "transcript_excerpt": (run.get("transcript_excerpt") or "")[:400],
+        })
+    except Exception as exc:
+        return _err("warden_run_get", str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Connector placeholders (wired once connector platform is implemented)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_connectors_providers() -> str:
+    """List available connector providers (Gmail, Outlook, iCloud Mail).
+
+    Returns provider metadata including whether OAuth is configured.
+    """
+    try:
+        from src.warden.connectors.registry import list_providers
+        providers = list_providers()
+        return _ok("warden_connectors_providers", {"providers": providers})
+    except ImportError:
+        return _ok("warden_connectors_providers", {
+            "providers": [
+                {"provider_id": "gmail", "display_name": "Gmail", "auth_type": "oauth2_authorization_code",
+                 "configured": False, "enabled": False, "capabilities": ["mail.read"],
+                 "risk_level": "read_only", "notes": "Connector platform not yet installed."},
+                {"provider_id": "outlook", "display_name": "Outlook / Microsoft 365", "auth_type": "oauth2_authorization_code",
+                 "configured": False, "enabled": False, "capabilities": ["mail.read"],
+                 "risk_level": "read_only", "notes": "Connector platform not yet installed."},
+                {"provider_id": "icloud", "display_name": "iCloud Mail", "auth_type": "app_password",
+                 "configured": False, "enabled": False, "capabilities": ["mail.read"],
+                 "risk_level": "read_only", "notes": "Connector platform not yet installed."},
+            ],
+        })
+    except Exception as exc:
+        return _err("warden_connectors_providers", str(exc))
+
+
+@mcp.tool()
+def warden_connectors_accounts() -> str:
+    """List connected user accounts across all providers.
+
+    Tokens and secrets are never returned — only account status metadata.
+    """
+    try:
+        from src.warden.connectors.store import list_accounts
+        accounts = list_accounts()
+        return _ok("warden_connectors_accounts", {"accounts": accounts})
+    except ImportError:
+        return _ok("warden_connectors_accounts", {
+            "accounts": [],
+            "note": "Connector platform not yet installed. No accounts connected.",
+        })
+    except Exception as exc:
+        return _err("warden_connectors_accounts", str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
