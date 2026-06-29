@@ -424,20 +424,41 @@
       // assistant
       const sources = msg.sources || [];
       const snap = msg.snapshot || {};
-      const fallback = msg.fallback ? `<span class="mem-source-chip mem-source-fallback" title="Ollama not available — structured answer only">⚠ offline</span>` : "";
-      const modelLabel = msg.model ? `<span class="mem-chat-msg-model">${msg.model}</span>` : "";
+      const offlineChip = msg.fallback ? `<span class="mem-source-chip mem-source-fallback" title="Ollama not available — raw context shown">⚠ offline</span>` : "";
+      const modelLabel = msg.model && !msg.fallback ? `<span class="mem-chat-msg-model">${msg.model}</span>` : "";
       const sourceChips = sources.map(s => {
         const m = SOURCE_META[s] || { label: s, icon: "·" };
         const detail = snap[s] ? ` (${Array.isArray(snap[s]) ? snap[s].length : snap[s]})` : "";
         return `<span class="mem-source-chip mem-source-${s}" title="${m.label}${detail}">${m.icon} ${m.label}${detail}</span>`;
       }).join("");
       const sourceBar = (sources.length || msg.fallback)
-        ? `<div class="mem-msg-sources">${sourceChips}${fallback}${modelLabel}</div>`
+        ? `<div class="mem-msg-sources">${sourceChips}${offlineChip}${modelLabel}</div>`
         : "";
+
+      // When Ollama is offline the reply IS the raw snapshot — collapse it
+      const isRawSnapshot = msg.fallback && msg.content.includes("Warden Memory Snapshot");
+      let bubbleContent;
+      if (isRawSnapshot) {
+        bubbleContent = `<p class="mem-msg-offline-note">Memory agent is offline. Raw context collected:</p>
+          <details class="mem-raw-context">
+            <summary>View raw context</summary>
+            <pre class="mem-raw-context-body">${escapeHtml(msg.content)}</pre>
+          </details>`;
+      } else {
+        // Normal conversational reply — append collapsible raw context if snapshot exists
+        const hasSnap = Object.keys(snap).length > 0;
+        const rawContextToggle = hasSnap ? `
+          <details class="mem-raw-context">
+            <summary>View raw context</summary>
+            <pre class="mem-raw-context-body">${escapeHtml(buildSnapshotText(snap))}</pre>
+          </details>` : "";
+        bubbleContent = `<div class="mem-reply-text">${formatReply(msg.content)}</div>${rawContextToggle}`;
+      }
+
       return `<div class="mem-msg mem-msg-agent" data-idx="${i}">
         <div class="mem-msg-avatar">⧉</div>
         <div class="mem-msg-body">
-          <div class="mem-msg-bubble mem-msg-bubble-agent">${formatReply(msg.content)}</div>
+          <div class="mem-msg-bubble mem-msg-bubble-agent">${bubbleContent}</div>
           ${sourceBar}
         </div>
       </div>`;
@@ -459,6 +480,17 @@
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/`(.+?)`/g, "<code>$1</code>")
       .replace(/\n/g, "<br>");
+  }
+
+  function buildSnapshotText(snap) {
+    const lines = [];
+    if (snap.branch)   lines.push(`branch: ${snap.branch}`);
+    if (snap.git)      lines.push(`commits: ${snap.git}`);
+    if (snap.shell)    lines.push(`shell commands: ${snap.shell}`);
+    if (snap.chrome)   lines.push(`browser visits: ${snap.chrome}`);
+    if (snap.board)    lines.push(`board tasks: ${snap.board}`);
+    if (snap.memories) lines.push(`stored memories: ${snap.memories}`);
+    return lines.join("\n") || "(no context captured)";
   }
 
   function setChatStatus(msg, isError = false) {
@@ -496,14 +528,15 @@
         body: JSON.stringify({ message: msg, history: apiHistory.slice(0, -1) }),
       });
 
-      // Build snapshot summary for source chips
+      // Build snapshot summary for source chips (cs keys match memory_agent.py ChatResponse)
       const snap = {};
       const cs = data.context_snapshot || {};
-      if (cs.recent_commits?.length)  snap.git     = cs.recent_commits;
-      if (cs.shell_commands?.length)  snap.shell   = cs.shell_commands;
-      if (cs.browser_visits?.length)  snap.chrome  = cs.browser_visits;
-      if (cs.board_tasks?.length)     snap.board   = cs.board_tasks;
-      if (cs.memory_count)            snap.memories = cs.memory_count;
+      if (cs.commits)        snap.git      = cs.commits;
+      if (cs.shell_commands) snap.shell    = cs.shell_commands;
+      if (cs.browser_visits) snap.chrome   = cs.browser_visits;
+      if (cs.board_tasks)    snap.board    = cs.board_tasks;
+      if (cs.memories)       snap.memories = cs.memories;
+      if (cs.branch)         snap.branch   = cs.branch;
 
       _chatHistory.push({
         role: "assistant",

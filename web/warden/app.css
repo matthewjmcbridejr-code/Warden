@@ -4454,3 +4454,50 @@ textarea:focus-visible {
 .mem-chat-welcome-heading {
   font-size: 18px; font-weight: 600; color: var(--text-primary, #e8eaf0); margin: 0 0 8px;
 }
+
+/* Single-section nav: hide ALL workspace sections unless .active is present.
+   This must come last to win over .wa-section, .gw-section, .mem-section
+   which all set display:flex earlier in the file. */
+.workspace-section:not(.active) {
+  display: none !important;
+}
+.workspace-section.active {
+  display: block;
+}
+.workspace-section.active.wa-section,
+.workspace-section.active.mem-section,
+.workspace-section.active.gw-section {
+  display: flex;
+}
+
+/* Memory chat — offline note + raw context collapse */
+.mem-msg-offline-note {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: var(--muted, #9cacbf);
+}
+.mem-raw-context {
+  margin-top: 8px;
+}
+.mem-raw-context summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted, #9cacbf);
+  user-select: none;
+}
+.mem-raw-context summary:hover {
+  color: var(--text-primary, #e8eaf0);
+}
+.mem-raw-context-body {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--bg-1, #0d1b2a);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  color: var(--text-secondary, #8faabf);
+}
+.mem-reply-text { line-height: 1.55; }
