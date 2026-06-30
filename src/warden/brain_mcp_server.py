@@ -1387,6 +1387,126 @@ def warden_mail_send_draft(account_id: str, to: str, subject: str, body: str) ->
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Warden Brain tools — local vault + Google hybrid
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def brain_status() -> str:
+    """Return status of the Warden Brain (local vault + Google provider)."""
+    try:
+        from src.warden.brain import local_provider, google_provider
+        return _ok("brain_status", {
+            "local": local_provider.status(),
+            "google": google_provider.status(),
+        })
+    except Exception as e:
+        return _err("brain_status", str(e))
+
+
+@mcp.tool()
+def brain_init_vault() -> str:
+    """Initialize the local Obsidian-compatible Markdown vault."""
+    try:
+        from src.warden.brain.vault import init_vault
+        return _ok("brain_init_vault", init_vault())
+    except Exception as e:
+        return _err("brain_init_vault", str(e))
+
+
+@mcp.tool()
+def brain_reindex() -> str:
+    """Scan local vault and reindex all Markdown sources into SQLite FTS."""
+    try:
+        from src.warden.brain import local_provider
+        return _ok("brain_reindex", local_provider.reindex())
+    except Exception as e:
+        return _err("brain_reindex", str(e))
+
+
+@mcp.tool()
+def brain_list_sources(limit: int = 50) -> str:
+    """List indexed brain sources."""
+    try:
+        from src.warden.brain.index import list_sources
+        return _ok("brain_list_sources", {"sources": list_sources(limit=limit)})
+    except Exception as e:
+        return _err("brain_list_sources", str(e))
+
+
+@mcp.tool()
+def brain_search(query: str, limit: int = 10) -> str:
+    """Search the brain (local + Google if enabled). Returns citations."""
+    try:
+        from src.warden.brain import hybrid
+        results = hybrid.search(query, limit=limit)
+        return _ok("brain_search", {"query": query, "results": results, "count": len(results)})
+    except Exception as e:
+        return _err("brain_search", str(e))
+
+
+@mcp.tool()
+def brain_ask(question: str, limit: int = 6) -> str:
+    """Ask the brain a question. Returns extractive answer with citations."""
+    try:
+        from src.warden.brain import hybrid
+        answer = hybrid.answer(question, limit=limit)
+        return _ok("brain_ask", answer.to_dict())
+    except Exception as e:
+        return _err("brain_ask", str(e))
+
+
+@mcp.tool()
+def brain_write_note(title: str, body: str, tags: str = "warden,auto") -> str:
+    """Write a new Markdown note to the vault inbox. Never overwrites existing files."""
+    try:
+        from src.warden.brain.vault import write_note
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        result = write_note(title=title, body=body, tags=tag_list)
+        return _ok("brain_write_note", result)
+    except FileExistsError as e:
+        return _err("brain_write_note", f"Note already exists: {e}")
+    except ValueError as e:
+        return _err("brain_write_note", f"Invalid path: {e}")
+    except Exception as e:
+        return _err("brain_write_note", str(e))
+
+
+@mcp.tool()
+def brain_google_status() -> str:
+    """Return Google Brain provider status."""
+    try:
+        from src.warden.brain import google_provider
+        return _ok("brain_google_status", google_provider.status())
+    except Exception as e:
+        return _err("brain_google_status", str(e))
+
+
+@mcp.tool()
+def brain_google_mirror(dry_run: bool = True, limit: int = 50) -> str:
+    """Mirror local vault sources to Google Discovery Engine."""
+    try:
+        from src.warden.brain import google_provider
+        from src.warden.brain.mirror import mirror_sources
+        if not google_provider.is_enabled():
+            return _err("brain_google_mirror", "Google Brain not enabled (WARDEN_GOOGLE_BRAIN_ENABLED=1 required)")
+        result = mirror_sources(limit=limit, dry_run=dry_run)
+        return _ok("brain_google_mirror", result)
+    except Exception as e:
+        return _err("brain_google_mirror", str(e))
+
+
+@mcp.tool()
+def brain_mirror_status() -> str:
+    """Return mirror sync status for local→Google."""
+    try:
+        from src.warden.brain.mirror import mirror_status
+        return _ok("brain_mirror_status", mirror_status())
+    except Exception as e:
+        return _err("brain_mirror_status", str(e))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

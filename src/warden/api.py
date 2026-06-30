@@ -4840,3 +4840,168 @@ def get_warden_mail_message(account_id: str, message_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mail read error: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Warden Brain — local vault + Google hybrid
+# ---------------------------------------------------------------------------
+
+class BrainWriteNoteRequest(BaseModel):
+    title: str
+    body: str
+    tags: list[str] = []
+    filename: Optional[str] = None
+
+
+class BrainAskRequest(BaseModel):
+    question: str
+    limit: int = 6
+
+
+class BrainMirrorRequest(BaseModel):
+    dry_run: bool = True
+    source_ids: list[str] = []
+    limit: int = 50
+
+
+class BrainProviderConfigSaveRequest(BaseModel):
+    pass  # config is via env only; this endpoint just reads status
+
+
+@mcharness_router.get("/warden/brain/health")
+def get_brain_health():
+    """Brain health: local vault + Google provider status."""
+    from .brain import local_provider, google_provider
+    local_st = local_provider.status()
+    google_st = google_provider.status()
+    return {
+        "ok": True,
+        "local": local_st,
+        "google": google_st,
+        "hybrid_enabled": google_provider.is_enabled() and google_provider.is_configured(),
+    }
+
+
+@mcharness_router.get("/warden/brain/providers")
+def get_brain_providers():
+    """List brain providers and their configuration status."""
+    from .brain import local_provider, google_provider
+    return {
+        "ok": True,
+        "providers": [
+            {
+                "provider_id": "local",
+                "display_name": "Local Brain (Obsidian-compatible vault)",
+                "free": True,
+                "status": local_provider.status(),
+            },
+            {
+                "provider_id": "google_discovery_engine",
+                "display_name": "Google Brain (Vertex AI Search)",
+                "free": False,
+                "status": google_provider.status(),
+            },
+        ],
+    }
+
+
+@mcharness_router.post("/warden/brain/init-vault")
+def post_brain_init_vault():
+    """Initialize the local Markdown vault directory structure."""
+    from .brain.vault import init_vault
+    result = init_vault()
+    return {"ok": True, **result}
+
+
+@mcharness_router.post("/warden/brain/reindex")
+def post_brain_reindex():
+    """Scan vault and reindex all Markdown sources into SQLite FTS."""
+    from .brain import local_provider
+    result = local_provider.reindex()
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/sources")
+def get_brain_sources(limit: int = 50):
+    """List indexed brain sources."""
+    from .brain.index import list_sources
+    sources = list_sources(limit=limit)
+    return {"ok": True, "sources": sources, "count": len(sources)}
+
+
+@mcharness_router.get("/warden/brain/search")
+def get_brain_search(q: str = "", limit: int = 10):
+    """Hybrid search: local FTS + Google (if enabled)."""
+    if not q:
+        raise HTTPException(status_code=400, detail="q is required")
+    from .brain import hybrid
+    results = hybrid.search(q, limit=limit)
+    return {"ok": True, "query": q, "results": results, "count": len(results)}
+
+
+@mcharness_router.post("/warden/brain/ask")
+def post_brain_ask(body: BrainAskRequest):
+    """Hybrid ask: extractive answer with citations from local + Google."""
+    from .brain import hybrid
+    answer = hybrid.answer(body.question, limit=body.limit)
+    return {"ok": True, **answer.to_dict()}
+
+
+@mcharness_router.post("/warden/brain/write-note")
+def post_brain_write_note(body: BrainWriteNoteRequest):
+    """Write a new Markdown note to the vault inbox."""
+    from .brain.vault import write_note
+    try:
+        result = write_note(
+            title=body.title,
+            body=body.body,
+            tags=body.tags or [],
+            filename=body.filename,
+        )
+        return {"ok": True, **result}
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@mcharness_router.post("/warden/brain/google/mirror")
+def post_brain_google_mirror(body: BrainMirrorRequest):
+    """Mirror local vault sources to Google Discovery Engine."""
+    from .brain import google_provider
+    from .brain.mirror import mirror_sources
+    if not google_provider.is_enabled():
+        return {
+            "ok": False,
+            "reason": "Google Brain not enabled. Set WARDEN_GOOGLE_BRAIN_ENABLED=1.",
+            "dry_run": body.dry_run,
+        }
+    result = mirror_sources(
+        source_ids=body.source_ids or None,
+        limit=body.limit,
+        dry_run=body.dry_run,
+    )
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/google/mirror-status")
+def get_brain_mirror_status():
+    """Return mirror sync status for all sources."""
+    from .brain.mirror import mirror_status
+    result = mirror_status()
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/google/status")
+def get_brain_google_status():
+    """Google Brain provider status and configuration."""
+    from .brain import google_provider
+    return {"ok": True, **google_provider.status()}
+
+
+@mcharness_router.post("/warden/brain/google/verify")
+def post_brain_google_verify():
+    """Verify Google Brain credentials with a lightweight search."""
+    from .brain import google_provider
+    result = google_provider.verify_config()
+    return {"ok": result["ok"], **result}
