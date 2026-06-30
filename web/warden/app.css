@@ -1088,8 +1088,105 @@ textarea {
   font-size: 0.82rem;
 }
 .connector-account-email { flex: 1; color: var(--fg, #d4e4f5); }
+/* Setup wizard */
+.connector-setup-wizard {
+  border: 1px solid rgba(100,160,255,0.2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.connector-setup-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  color: var(--fg, #d4e4f5);
+  background: rgba(100,160,255,0.06);
+  list-style: none;
+  user-select: none;
+}
+.connector-setup-summary::-webkit-details-marker { display: none; }
+.connector-setup-icon { margin-right: 5px; }
+.connector-setup-body {
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+.connector-setup-desc { color: var(--muted, #9cacbf); margin: 0; }
+.connector-setup-desc a { color: #7ab4ff; }
+.connector-setup-step { margin: 0; font-size: 0.8rem; color: var(--muted, #9cacbf); }
+.connector-redirect-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line, #243854);
+  border-radius: 5px;
+  padding: 5px 10px;
+}
+.connector-redirect-uri {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #a0c8ff;
+  word-break: break-all;
+}
+.connector-label {
+  font-size: 0.78rem;
+  color: var(--muted, #9cacbf);
+  margin-bottom: 3px;
+  display: block;
+}
+.connector-setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.connector-setup-note {
+  font-size: 0.75rem;
+  color: var(--muted, #9cacbf);
+  font-style: italic;
+}
+.connector-setup-status {
+  font-size: 0.8rem;
+  color: #f0c66a;
+  min-height: 1em;
+}
+.connector-signin-note {
+  font-size: 0.78rem;
+  color: var(--muted, #9cacbf);
+  margin: 0 0 8px;
+}
+.connector-popup-fallback {
+  display: none;
+  font-size: 0.78rem;
+  color: #7ab4ff;
+  margin-left: 10px;
+}
+.connector-advanced-details {
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+.connector-advanced-details summary {
+  cursor: pointer;
+  color: var(--muted, #9cacbf);
+  font-size: 0.78rem;
+  list-style: none;
+}
+.connector-advanced-details summary::-webkit-details-marker { display: none; }
+.connector-advanced-body {
+  padding: 8px 4px 0;
+  color: var(--muted, #9cacbf);
+}
+.connector-icloud-help {
+  font-size: 0.82rem;
+  color: var(--muted, #9cacbf);
+  background: rgba(255,255,255,0.03);
+  border-radius: 5px;
+  padding: 6px 10px;
+}
+.connector-icloud-help a { color: #7ab4ff; }
 .connector-icloud-form { display: grid; gap: 8px; }
-.connector-form-row { display: flex; gap: 8px; }
+.connector-form-row { display: flex; flex-direction: column; gap: 3px; }
 .connector-input {
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line, #243854);

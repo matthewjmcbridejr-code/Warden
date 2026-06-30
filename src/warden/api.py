@@ -4524,7 +4524,13 @@ def browser_ingest(req: BrowserIngestRequest):
 def get_warden_connectors_providers():
     """List available connector providers with configuration status."""
     from .connectors.registry import list_providers
-    return {"ok": True, "providers": list_providers()}
+    from .connectors.oauth import is_provider_configured
+    providers = list_providers()
+    # Override configured flag to reflect vault-stored configs too
+    for p in providers:
+        if p.get("auth_type") == "oauth2_authorization_code":
+            p["configured"] = is_provider_configured(p["provider_id"])
+    return {"ok": True, "providers": providers}
 
 
 @mcharness_router.get("/warden/connectors/accounts")
@@ -4616,10 +4622,20 @@ h2{{margin:0 0 8px;}}p{{color:#8faabf;margin:0 0 16px;}}
 .btn:hover{{background:#3a72b8;}}</style>
 </head>
 <body><div class="card">
-<h2>✓ {provider.title()} Connected</h2>
+<h2>&#10003; {provider.title()} Connected</h2>
 <p>{email or "Account connected successfully."}</p>
-<button class="btn" onclick="window.close();if(window.opener)window.opener.location.reload();">Done</button>
-</div></body></html>"""
+<button class="btn" id="doneBtn">Done</button>
+</div>
+<script>
+(function(){{
+  var origin = location.origin;
+  if(window.opener){{
+    try{{window.opener.postMessage({{type:"warden_connector_connected",provider:{json.dumps(provider)}}},origin);}}catch(e){{}}
+  }}
+  document.getElementById("doneBtn").onclick = function(){{ window.close(); }};
+}})();
+</script>
+</body></html>"""
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_body)
 
@@ -4633,6 +4649,60 @@ def post_warden_connectors_disconnect(account_id: str):
     if not removed:
         raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
     return {"ok": True, "account_id": account_id, "status": "disconnected"}
+
+
+# ─── Provider OAuth config (stored in vault, not env vars) ───────────────────
+
+class ProviderConfigRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@mcharness_router.get("/warden/connectors/{provider}/config")
+def get_provider_oauth_config(provider: str):
+    """Return masked provider OAuth config. Never returns the raw client_secret."""
+    from .connectors.oauth import load_provider_config, is_provider_configured, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    cfg = load_provider_config(provider)
+    client_id = cfg.get("client_id", "")
+    has_secret = bool(cfg.get("client_secret", ""))
+    return {
+        "ok": True,
+        "provider": provider,
+        "configured": bool(client_id),
+        "client_id": client_id,
+        "has_secret": has_secret,
+        "source": "vault" if client_id else "none",
+    }
+
+
+@mcharness_router.post("/warden/connectors/{provider}/config")
+def post_provider_oauth_config(provider: str, body: ProviderConfigRequest):
+    """Save provider OAuth client credentials to the local vault."""
+    from .connectors.oauth import save_provider_config, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    client_id = (body.client_id or "").strip()
+    client_secret = (body.client_secret or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id is required")
+    if not client_secret:
+        raise HTTPException(status_code=400, detail="client_secret is required")
+    save_provider_config(provider, client_id, client_secret)
+    masked = client_id[:6] + "..." if len(client_id) > 6 else client_id
+    return {"ok": True, "provider": provider, "configured": True,
+            "client_id_preview": masked, "has_secret": True}
+
+
+@mcharness_router.delete("/warden/connectors/{provider}/config")
+def delete_provider_oauth_config(provider: str):
+    """Remove stored provider OAuth config from vault."""
+    from .connectors.oauth import clear_provider_config, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    clear_provider_config(provider)
+    return {"ok": True, "provider": provider, "configured": False}
 
 
 # ─── iCloud app-password connect ─────────────────────────────────────────────

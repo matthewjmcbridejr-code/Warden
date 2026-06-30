@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pathlib
 import secrets
+import stat
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -15,6 +17,82 @@ _STATES: dict[str, dict] = {}  # state -> {provider, redirect_uri, ...}
 # Injected in tests to skip real HTTP calls
 _token_exchanger = None  # callable(provider, code, redirect_uri) -> dict | None
 
+# ---------------------------------------------------------------------------
+# Provider config vault — stores OAuth client_id/secret set via Warden UI
+# ---------------------------------------------------------------------------
+
+_PROVIDER_CONFIG_SUPPORTED = {"gmail", "outlook"}
+
+
+def _provider_config_dir() -> pathlib.Path:
+    base = pathlib.Path(os.getenv("WARDEN_VAULT_ROOT", pathlib.Path.home() / ".local" / "share" / "warden" / "connectors"))
+    d = base / "provider_configs"
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, stat.S_IRWXU)
+    except OSError:
+        pass
+    return d
+
+
+def _provider_config_path(provider: str) -> pathlib.Path:
+    return _provider_config_dir() / f"{provider}.json"
+
+
+def load_provider_config(provider: str) -> dict:
+    """Return stored provider config dict or {}. Never raises."""
+    path = _provider_config_path(provider)
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_provider_config(provider: str, client_id: str, client_secret: str) -> None:
+    """Store provider OAuth config in local vault with 600 perms."""
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise ValueError(f"Unsupported provider: {provider}")
+    path = _provider_config_path(provider)
+    path.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}))
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+
+
+def clear_provider_config(provider: str) -> None:
+    """Remove stored provider OAuth config."""
+    path = _provider_config_path(provider)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def get_provider_credentials(provider: str) -> tuple[str, str]:
+    """Return (client_id, client_secret) from env vars or vault config. Env vars take precedence."""
+    if provider == "gmail":
+        env_id = os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "")
+        env_secret = os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "")
+        if env_id:
+            return env_id, env_secret
+        cfg = load_provider_config("gmail")
+        return cfg.get("client_id", ""), cfg.get("client_secret", "")
+    if provider == "outlook":
+        env_id = os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID", "")
+        env_secret = os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_SECRET", "")
+        if env_id:
+            return env_id, env_secret
+        cfg = load_provider_config("outlook")
+        return cfg.get("client_id", ""), cfg.get("client_secret", "")
+    return "", ""
+
+
+def is_provider_configured(provider: str) -> bool:
+    client_id, _ = get_provider_credentials(provider)
+    return bool(client_id)
+
 
 def set_token_exchanger(fn) -> None:
     """Override the token exchange function (for testing)."""
@@ -24,8 +102,7 @@ def set_token_exchanger(fn) -> None:
 
 def _exchange_gmail_token(code: str, redirect_uri: str) -> dict:
     """Exchange an authorization code for Gmail tokens via Google's token endpoint."""
-    client_id = os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "")
+    client_id, client_secret = get_provider_credentials("gmail")
     payload = urllib.parse.urlencode({
         "code": code,
         "client_id": client_id,
@@ -53,8 +130,7 @@ def _exchange_gmail_token(code: str, redirect_uri: str) -> dict:
 
 def _exchange_outlook_token(code: str, redirect_uri: str) -> dict:
     """Exchange an authorization code for Outlook tokens via Microsoft's token endpoint."""
-    client_id = os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID", "")
-    client_secret = os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_SECRET", "")
+    client_id, client_secret = get_provider_credentials("outlook")
     tenant = "common"
     payload = urllib.parse.urlencode({
         "code": code,
@@ -114,7 +190,7 @@ def exchange_code_for_token(provider: str, code: str, redirect_uri: str) -> dict
 
 
 def _gmail_auth_url(state: str, redirect_uri: str) -> str:
-    client_id = os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "")
+    client_id, _ = get_provider_credentials("gmail")
     scopes = " ".join([
         "https://www.googleapis.com/auth/gmail.readonly",
         "openid", "email",
@@ -132,7 +208,7 @@ def _gmail_auth_url(state: str, redirect_uri: str) -> str:
 
 
 def _outlook_auth_url(state: str, redirect_uri: str) -> str:
-    client_id = os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID", "")
+    client_id, _ = get_provider_credentials("outlook")
     scopes = " ".join(["openid", "email", "offline_access", "Mail.Read"])
     tenant = "common"
     return (
@@ -151,15 +227,15 @@ def start_oauth_flow(provider: str, base_url: str) -> dict:
     redirect_uri = f"{base_url.rstrip('/')}/api/mcharness/warden/connectors/{provider}/callback"
 
     if provider == "gmail":
-        if not os.getenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID"):
-            return {"configured": False, "error": "WARDEN_GOOGLE_OAUTH_CLIENT_ID not set"}
+        if not is_provider_configured("gmail"):
+            return {"configured": False, "error": "Gmail OAuth app not configured. Use Warden Settings to add your Google OAuth client ID."}
         state = secrets.token_urlsafe(24)
         _STATES[state] = {"provider": provider, "redirect_uri": redirect_uri}
         return {"auth_url": _gmail_auth_url(state, redirect_uri), "state": state, "provider": provider}
 
     if provider == "outlook":
-        if not os.getenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID"):
-            return {"configured": False, "error": "WARDEN_MICROSOFT_OAUTH_CLIENT_ID not set"}
+        if not is_provider_configured("outlook"):
+            return {"configured": False, "error": "Outlook OAuth app not configured. Use Warden Settings to add your Microsoft OAuth client ID."}
         state = secrets.token_urlsafe(24)
         _STATES[state] = {"provider": provider, "redirect_uri": redirect_uri}
         return {"auth_url": _outlook_auth_url(state, redirect_uri), "state": state, "provider": provider}

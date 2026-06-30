@@ -161,4 +161,47 @@ def test_settings_shows_connectors(page: Page, api_alive):
     # Should show at least Gmail
     expect(connector_list).to_contain_text("Gmail")
     # All unconfigured in test env
-    expect(connector_list).to_contain_text("Not configured")
+    expect(connector_list).to_contain_text("Setup required")
+
+
+def test_connector_setup_wizard_shown_for_unconfigured(page: Page, api_alive):
+    """Unconfigured OAuth providers show the setup wizard, not CLI instructions."""
+    page.goto(APP_URL, timeout=60000)
+    page.wait_for_load_state("networkidle", timeout=30000)
+
+    page.locator('[data-testid="nav-settings"]').click()
+    expect(page.locator('[data-testid="warden-section-settings"]')).to_be_visible()
+
+    connector_list = page.locator('[data-testid="connectors-provider-list"]')
+    expect(connector_list).to_be_visible()
+    page.wait_for_timeout(2000)
+
+    # Should show wizard toggle, not raw env var names
+    expect(connector_list).to_contain_text("Set up Gmail connection")
+    expect(connector_list).not_to_contain_text("WARDEN_GOOGLE_OAUTH_CLIENT_ID")
+    expect(connector_list).not_to_contain_text("cloud_keys.env")
+
+
+def test_connector_setup_wizard_expand_shows_fields(page: Page, api_alive):
+    """Clicking the setup wizard summary reveals client ID / client secret fields."""
+    page.goto(APP_URL, timeout=60000)
+    page.wait_for_load_state("networkidle", timeout=30000)
+
+    page.locator('[data-testid="nav-settings"]').click()
+    expect(page.locator('[data-testid="warden-section-settings"]')).to_be_visible()
+    page.wait_for_timeout(2000)
+
+    # Open the Gmail setup wizard
+    gmail_wizard = page.locator('.connector-setup-wizard[data-provider="gmail"]')
+    expect(gmail_wizard).to_be_visible()
+    gmail_wizard.locator("summary").click()
+    page.wait_for_timeout(300)
+
+    # Fields should now be visible
+    expect(gmail_wizard.locator(".connector-client-id-input")).to_be_visible()
+    expect(gmail_wizard.locator(".connector-client-secret-input")).to_be_visible()
+    expect(gmail_wizard.locator(".connector-redirect-uri")).to_be_visible()
+    expect(gmail_wizard.locator(".connector-save-config-btn")).to_be_visible()
+    # Redirect URI should contain the callback path
+    uri_text = gmail_wizard.locator(".connector-redirect-uri").inner_text()
+    assert "connectors/gmail/callback" in uri_text

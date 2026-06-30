@@ -2193,6 +2193,13 @@
     });
   }
 
+  // Listen for postMessage from OAuth popup — refresh connectors immediately
+  window.addEventListener("message", (evt) => {
+    if (evt.data && evt.data.type === "warden_connector_connected") {
+      loadConnectorsProviders().catch(() => {});
+    }
+  });
+
   async function loadConnectorsProviders() {
     const listEl = document.getElementById("connectors-provider-list");
     if (!listEl) return;
@@ -2217,7 +2224,6 @@
       });
 
       listEl.innerHTML = providers.map((p) => {
-        const authLabel = p.auth_type === "oauth2_authorization_code" ? "OAuth 2.0" : "App Password";
         const caps = (p.capabilities || []).join(", ") || "—";
         const connected = connectedByProvider[p.provider_id] || [];
         const isConnected = connected.length > 0;
@@ -2234,40 +2240,109 @@
               data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
           </div>`).join("");
 
-        // Connect action
+        // Connect action area
         let connectAction = "";
         if (p.auth_type === "oauth2_authorization_code") {
+          const connectBtnLabel = p.display_name.startsWith("Gmail") ? "Sign in with Google"
+            : p.display_name.includes("Outlook") ? "Sign in with Microsoft"
+            : `Connect ${p.display_name}`;
+          const signInNote = p.display_name.startsWith("Gmail")
+            ? "Warden stores read-only access locally. Your email password is never shared."
+            : "Warden stores read-only access locally. Your Microsoft password is never shared.";
+
           if (!p.configured) {
+            // Show admin setup wizard — no CLI instructions
+            const guideUrl = p.provider_id === "gmail"
+              ? "https://console.cloud.google.com/apis/credentials"
+              : "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps";
+            const redirectUri = `${location.origin}/api/mcharness/warden/connectors/${p.provider_id}/callback`;
             connectAction = `
-              <div class="connector-setup-required">
-                <strong>Setup required:</strong>
-                <code>${p.provider_id === "gmail" ? "WARDEN_GOOGLE_OAUTH_CLIENT_ID\nWARDEN_GOOGLE_OAUTH_CLIENT_SECRET" :
-                       p.provider_id === "outlook" ? "WARDEN_MICROSOFT_OAUTH_CLIENT_ID\nWARDEN_MICROSOFT_OAUTH_CLIENT_SECRET" : ""}</code>
-                <p class="connector-provider-setup">Set these in <code>~/.config/warden/cloud_keys.env</code> and restart Warden.</p>
-              </div>`;
+              <details class="connector-setup-wizard" data-provider="${escapeHtml(p.provider_id)}">
+                <summary class="connector-setup-summary">
+                  <span class="connector-setup-icon">&#9881;</span> Set up ${escapeHtml(p.display_name)} connection
+                </summary>
+                <div class="connector-setup-body">
+                  <p class="connector-setup-desc">
+                    Warden needs a free OAuth app to connect to ${escapeHtml(p.display_name)}.
+                    ${p.provider_id === "gmail"
+                      ? "Create one at <a href=\"" + guideUrl + "\" target=\"_blank\" rel=\"noopener\">Google Cloud Console</a> (free)."
+                      : "Register one at <a href=\"" + guideUrl + "\" target=\"_blank\" rel=\"noopener\">Azure App Registrations</a> (free)."}
+                  </p>
+                  <p class="connector-setup-step"><strong>Redirect URI</strong> to add in the OAuth app:</p>
+                  <div class="connector-redirect-row">
+                    <code class="connector-redirect-uri">${escapeHtml(redirectUri)}</code>
+                    <button type="button" class="btn connector-copy-uri-btn" data-uri="${escapeHtml(redirectUri)}">Copy</button>
+                  </div>
+                  <div class="connector-form-row">
+                    <label class="connector-label">Client ID</label>
+                    <input type="text" class="connector-input connector-client-id-input"
+                      placeholder="Paste your Client ID here" autocomplete="off" spellcheck="false" />
+                  </div>
+                  <div class="connector-form-row">
+                    <label class="connector-label">Client Secret</label>
+                    <input type="password" class="connector-input connector-client-secret-input"
+                      placeholder="Paste your Client Secret here" autocomplete="off" spellcheck="false" />
+                  </div>
+                  <div class="connector-setup-actions">
+                    <button type="button" class="btn primary connector-save-config-btn"
+                      data-provider="${escapeHtml(p.provider_id)}">Save and activate</button>
+                    <span class="connector-setup-note">Saved to local vault only. Never sent to any server.</span>
+                  </div>
+                  <div class="connector-setup-status" id="setup-status-${escapeHtml(p.provider_id)}"></div>
+                </div>
+              </details>`;
           } else {
             connectAction = `
+              <p class="connector-signin-note">${escapeHtml(signInNote)}</p>
               <button type="button" class="btn primary connector-oauth-btn"
-                data-provider="${escapeHtml(p.provider_id)}">Connect ${escapeHtml(p.display_name)}</button>
-              <span class="connector-popup-note">Opens an authorization popup.</span>`;
+                data-provider="${escapeHtml(p.provider_id)}">${escapeHtml(connectBtnLabel)}</button>
+              <a href="#" class="connector-popup-fallback" style="display:none;"
+                data-provider="${escapeHtml(p.provider_id)}">Open sign-in page</a>
+              <details class="connector-advanced-details">
+                <summary>Advanced setup</summary>
+                <div class="connector-advanced-body">
+                  <p>OAuth app configured. <button type="button" class="btn connector-clear-config-btn"
+                    data-provider="${escapeHtml(p.provider_id)}" style="font-size:.8rem;padding:2px 8px;">Clear app config</button></p>
+                </div>
+              </details>`;
           }
         } else if (p.auth_type === "app_password") {
-          connectAction = `
-            <div class="connector-icloud-form" data-provider="icloud">
-              <p class="connector-provider-note">Generate an app-specific password in <strong>appleid.apple.com → Sign-In and Security → App-Specific Passwords</strong>.</p>
-              <div class="connector-form-row">
-                <input type="email" class="connector-input" placeholder="your@icloud.com or me.com"
-                  id="icloud-email-input" autocomplete="email" />
-              </div>
-              <div class="connector-form-row">
-                <input type="password" class="connector-input" placeholder="xxxx-xxxx-xxxx-xxxx"
-                  id="icloud-pass-input" autocomplete="off" spellcheck="false" />
-              </div>
-              <button type="button" class="btn primary connector-icloud-submit-btn" style="margin-top:4px;">
-                Connect iCloud Mail
-              </button>
-              <div class="connector-icloud-status" id="icloud-connect-status"></div>
-            </div>`;
+          if (!isConnected) {
+            connectAction = `
+              <div class="connector-icloud-form" data-provider="icloud">
+                <p class="connector-provider-note">
+                  Enter your iCloud email and an
+                  <a href="https://appleid.apple.com/account/manage/section/security" target="_blank" rel="noopener">app-specific password</a>
+                  (not your main Apple password).
+                  <a href="#" class="connector-icloud-help-toggle" style="font-size:.8rem;">How to create one</a>
+                </p>
+                <div class="connector-icloud-help" style="display:none;">
+                  <ol style="margin:.5rem 0 .5rem 1.2rem;padding:0;font-size:.85rem;color:var(--text-secondary);">
+                    <li>Go to <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a></li>
+                    <li>Sign in → Sign-In and Security → App-Specific Passwords</li>
+                    <li>Click + and name it "Warden"</li>
+                    <li>Copy the password shown (xxxx-xxxx-xxxx-xxxx)</li>
+                  </ol>
+                </div>
+                <div class="connector-form-row">
+                  <label class="connector-label">iCloud Email</label>
+                  <input type="email" class="connector-input" placeholder="your@icloud.com or me.com"
+                    id="icloud-email-input" autocomplete="email" />
+                </div>
+                <div class="connector-form-row">
+                  <label class="connector-label">App-Specific Password</label>
+                  <input type="password" class="connector-input" placeholder="xxxx-xxxx-xxxx-xxxx"
+                    id="icloud-pass-input" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="connector-setup-actions">
+                  <button type="button" class="btn primary connector-icloud-submit-btn">
+                    Connect iCloud Mail
+                  </button>
+                  <span class="connector-setup-note">Password stored locally only. Never sent anywhere.</span>
+                </div>
+                <div class="connector-icloud-status" id="icloud-connect-status"></div>
+              </div>`;
+          }
         }
 
         return `<div class="connector-provider-card ${configuredClass}" data-provider-id="${escapeHtml(p.provider_id)}">
@@ -2276,13 +2351,79 @@
             <span class="connector-status-pill ${statusPillClass}">${escapeHtml(statusLabel)}</span>
           </div>
           <div class="connector-provider-meta">
-            <span>${escapeHtml(authLabel)}</span>
             <span>Capabilities: ${escapeHtml(caps)}</span>
           </div>
           ${accountsHtml ? `<div class="connector-accounts-list">${accountsHtml}</div>` : ""}
           <div class="connector-action-area">${connectAction}</div>
         </div>`;
       }).join("");
+
+      // Wire "Copy redirect URI" buttons
+      listEl.querySelectorAll(".connector-copy-uri-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const uri = btn.getAttribute("data-uri");
+          if (uri && navigator.clipboard) {
+            navigator.clipboard.writeText(uri).then(() => {
+              btn.textContent = "Copied!";
+              setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+            });
+          }
+        });
+      });
+
+      // Wire "Save and activate" (provider OAuth config) buttons
+      listEl.querySelectorAll(".connector-save-config-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          const wizard = btn.closest(".connector-setup-wizard");
+          const clientIdInput = wizard ? wizard.querySelector(".connector-client-id-input") : null;
+          const clientSecretInput = wizard ? wizard.querySelector(".connector-client-secret-input") : null;
+          const statusEl = document.getElementById(`setup-status-${provider}`);
+
+          const clientId = (clientIdInput && clientIdInput.value.trim()) || "";
+          const clientSecret = (clientSecretInput && clientSecretInput.value.trim()) || "";
+
+          if (!clientId || !clientSecret) {
+            if (statusEl) statusEl.textContent = "Both Client ID and Client Secret are required.";
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = "Saving…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/config`, {
+              method: "POST",
+              body: JSON.stringify({client_id: clientId, client_secret: clientSecret}),
+            });
+            if (result.ok) {
+              if (clientSecretInput) clientSecretInput.value = "";  // clear secret from DOM
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || "Save failed.";
+              btn.disabled = false;
+              btn.textContent = "Save and activate";
+            }
+          } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+            btn.textContent = "Save and activate";
+          }
+        });
+      });
+
+      // Wire "Clear app config" buttons
+      listEl.querySelectorAll(".connector-clear-config-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          if (!confirm(`Remove the saved ${provider} OAuth app config? You will need to re-enter the credentials to reconnect.`)) return;
+          btn.disabled = true;
+          try {
+            await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/config`, {method: "DELETE"});
+            await loadConnectorsProviders();
+          } catch (e) {
+            btn.disabled = false;
+          }
+        });
+      });
 
       // Wire OAuth connect buttons
       listEl.querySelectorAll(".connector-oauth-btn").forEach((btn) => {
@@ -2293,23 +2434,17 @@
           try {
             const result = await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/connect/start`, {method: "POST"});
             if (result.auth_url) {
-              const popup = window.open(result.auth_url, "warden_oauth", "width=520,height=720,noopener");
+              const popup = window.open(result.auth_url, "warden_oauth", "width=560,height=760");
+              // Show fallback link for popup blockers
               const fallbackLink = btn.parentElement.querySelector(".connector-popup-fallback");
               if (fallbackLink) {
                 fallbackLink.href = result.auth_url;
                 fallbackLink.style.display = "";
-              } else {
-                const link = document.createElement("a");
-                link.href = result.auth_url;
-                link.target = "_blank";
-                link.rel = "noopener";
-                link.className = "connector-popup-fallback";
-                link.textContent = "Open consent page";
-                btn.after(link);
               }
-              btn.textContent = `Connect ${provider.charAt(0).toUpperCase() + provider.slice(1)}`;
+              const displayName = provider.charAt(0).toUpperCase() + provider.slice(1);
+              btn.textContent = `Sign in with ${displayName}`;
               btn.disabled = false;
-              // Reload after popup closes
+              // Poll in case postMessage doesn't fire (popup blocked/cross-origin)
               const pollTimer = setInterval(async () => {
                 if (popup && popup.closed) {
                   clearInterval(pollTimer);
@@ -2317,12 +2452,25 @@
                 }
               }, 800);
             } else {
-              btn.textContent = result.error || "Setup required";
+              btn.textContent = "Setup required — see above";
               btn.disabled = false;
             }
           } catch (e) {
             btn.textContent = `Error: ${e.message}`;
             btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire iCloud help toggle
+      listEl.querySelectorAll(".connector-icloud-help-toggle").forEach((link) => {
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          const help = link.closest(".connector-icloud-form").querySelector(".connector-icloud-help");
+          if (help) {
+            const hidden = help.style.display === "none";
+            help.style.display = hidden ? "" : "none";
+            link.textContent = hidden ? "Hide instructions" : "How to create one";
           }
         });
       });

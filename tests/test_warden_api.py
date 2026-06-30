@@ -2476,7 +2476,7 @@ def test_connectors_connect_start_gmail_unconfigured(monkeypatch):
     data = resp.json()
     assert data["ok"] is False
     assert data["configured"] is False
-    assert "WARDEN_GOOGLE_OAUTH_CLIENT_ID" in data["error"]
+    assert data["error"]  # error message present
 
 
 def test_connectors_connect_start_gmail_configured(monkeypatch):
@@ -2680,3 +2680,102 @@ def test_connectors_callback_no_raw_token_in_response(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "super-secret-token-xyz" not in resp.text
     assert "refresh-xyz" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Provider OAuth config (vault-stored client_id / client_secret)
+# ---------------------------------------------------------------------------
+
+def test_provider_config_save_and_get(tmp_path, monkeypatch):
+    """Saving provider config stores credentials; GET returns masked info."""
+    monkeypatch.setenv("WARDEN_VAULT_ROOT", str(tmp_path / "vault"))
+    client = TestClient(app)
+
+    # Initially not configured
+    get_resp = client.get("/api/mcharness/warden/connectors/gmail/config")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["configured"] is False
+
+    # Save config
+    post_resp = client.post("/api/mcharness/warden/connectors/gmail/config",
+                            json={"client_id": "my-client-id-12345", "client_secret": "TOPSECRET"})
+    assert post_resp.status_code == 200
+    data = post_resp.json()
+    assert data["ok"] is True
+    assert data["configured"] is True
+    assert "TOPSECRET" not in str(data)  # secret never returned
+
+    # GET shows masked
+    get2 = client.get("/api/mcharness/warden/connectors/gmail/config")
+    d2 = get2.json()
+    assert d2["configured"] is True
+    assert d2["has_secret"] is True
+    assert "TOPSECRET" not in str(d2)
+    assert d2["client_id"] == "my-client-id-12345"  # client_id not secret
+
+
+def test_provider_config_updates_providers_configured(tmp_path, monkeypatch):
+    """After saving config, /providers reflects configured=True."""
+    monkeypatch.setenv("WARDEN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    client = TestClient(app)
+
+    # Save config
+    client.post("/api/mcharness/warden/connectors/gmail/config",
+                json={"client_id": "cid123", "client_secret": "csec"})
+
+    resp = client.get("/api/mcharness/warden/connectors/providers")
+    gmail = next(p for p in resp.json()["providers"] if p["provider_id"] == "gmail")
+    assert gmail["configured"] is True
+
+
+def test_provider_config_delete_clears(tmp_path, monkeypatch):
+    """DELETE /config removes config; provider returns configured=False."""
+    monkeypatch.setenv("WARDEN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    client = TestClient(app)
+
+    client.post("/api/mcharness/warden/connectors/gmail/config",
+                json={"client_id": "cid", "client_secret": "cs"})
+    del_resp = client.delete("/api/mcharness/warden/connectors/gmail/config")
+    assert del_resp.json()["configured"] is False
+
+    get_resp = client.get("/api/mcharness/warden/connectors/gmail/config")
+    assert get_resp.json()["configured"] is False
+
+
+def test_provider_config_unsupported_provider_404():
+    """iCloud does not have a config endpoint (uses app_password)."""
+    client = TestClient(app)
+    resp = client.get("/api/mcharness/warden/connectors/icloud/config")
+    assert resp.status_code == 404
+
+
+def test_provider_config_missing_fields():
+    """POST without client_id or client_secret returns 400."""
+    client = TestClient(app)
+    resp = client.post("/api/mcharness/warden/connectors/gmail/config",
+                       json={"client_id": "", "client_secret": "secret"})
+    assert resp.status_code == 400
+
+    resp2 = client.post("/api/mcharness/warden/connectors/gmail/config",
+                        json={"client_id": "cid", "client_secret": ""})
+    assert resp2.status_code == 400
+
+
+def test_provider_config_connect_start_uses_vault_config(tmp_path, monkeypatch):
+    """connect/start uses vault config when env var is absent."""
+    import src.warden.connectors.oauth as oauth_mod
+    monkeypatch.setenv("WARDEN_VAULT_ROOT", str(tmp_path / "vault"))
+    monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    client = TestClient(app)
+
+    # Save config via API
+    client.post("/api/mcharness/warden/connectors/gmail/config",
+                json={"client_id": "vault-client-id", "client_secret": "vault-secret"})
+
+    resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
+    data = resp.json()
+    assert data["ok"] is True
+    assert "auth_url" in data
+    assert "vault-client-id" in data["auth_url"]
