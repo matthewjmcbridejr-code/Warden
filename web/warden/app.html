@@ -47,30 +47,81 @@
             <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
           </div>
           <h3 class="onboarding-title">Welcome to Warden</h3>
-          <p class="onboarding-copy">Warden is a local-first AI command center. Describe a goal, create a plan, and dispatch agent steps — all from your browser.</p>
+          <p class="onboarding-copy">Warden is your local-first AI operating desk — everything you capture, connect, and ask lives here.</p>
           <div class="onboarding-steps">
-            <div class="onboarding-step"><span class="onboarding-step-num">1</span><span>Type a goal and click <strong>Develop Plan</strong></span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">2</span><span>Review the plan steps and click <strong>Dispatch Step</strong></span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">3</span><span>Open <strong>Memory Chat</strong> to ask what happened</span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">4</span><span>Open <strong>Marius Agent</strong> to ask follow-up questions</span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">1</span><span>Ask Marius anything in the box above</span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">2</span><span>Save pages, mail, and notes with Warden Watcher — they land in <strong>Recent Captures</strong></span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">3</span><span>Connect Gmail or iCloud in <strong>Settings</strong> to bring mail into Brain</span></div>
+            <div class="onboarding-step"><span class="onboarding-step-num">4</span><span>Every action leaves proof in <strong>Recent Proof</strong> — nothing happens silently</span></div>
           </div>
-          <p class="onboarding-note">Note: Agent execution requires a local runner. In beta, dispatched steps are saved as memory records.</p>
+          <p class="onboarding-note">Advanced: build a multi-step agent plan below when you need supervised, multi-step execution.</p>
         </div>
 
-        <div class="cmd-hero">
-          <h2 class="cmd-hero-title">What do you want to build?</h2>
-          <p class="cmd-hero-sub">Warden breaks your goal into steps and dispatches supervised agent work.</p>
-
-          <div class="cmd-agent-chips" title="Supported agent targets — local runner required for execution">
-            <span class="cmd-agent-chip cmd-chip-active">Claude Code</span>
-            <span class="cmd-agent-chip">Codex</span>
-            <span class="cmd-agent-chip">Jules</span>
-            <span class="cmd-agent-chip">Gemini</span>
-            <span class="cmd-agent-chip">Agy</span>
-          </div>
-
-          <button type="button" class="btn primary cmd-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
+        <!-- Command Center: Marius quick ask -->
+        <div class="cc-ask-card" data-testid="cc-ask-card">
+          <form id="cc-ask-form" class="cc-ask-form" data-testid="cc-ask-form">
+            <span class="cc-ask-icon" aria-hidden="true">◈</span>
+            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Marius anything — what did I capture today? what's in my inbox?" autocomplete="off" data-testid="cc-ask-input" />
+            <button type="submit" class="btn primary cc-ask-submit" data-testid="cc-ask-submit">Ask</button>
+          </form>
+          <div id="cc-ask-reply" class="cc-ask-reply" style="display:none;" data-testid="cc-ask-reply"></div>
         </div>
+
+        <!-- Command Center: status strip -->
+        <div id="cc-status-strip" class="cc-status-strip" data-testid="cc-status-strip"></div>
+
+        <!-- Command Center: grid -->
+        <div class="cc-grid" data-testid="cc-grid">
+          <section class="cc-card" data-testid="cc-card-captures">
+            <header class="cc-card-header">
+              <h3>Recent Captures</h3>
+              <span class="cc-card-sub">Brain vault</span>
+            </header>
+            <div id="cc-captures-list" class="cc-card-body"><p class="muted">Loading…</p></div>
+          </section>
+
+          <section class="cc-card" data-testid="cc-card-connections">
+            <header class="cc-card-header">
+              <h3>Connections</h3>
+              <span class="cc-card-sub">Accounts &amp; vault</span>
+            </header>
+            <div id="cc-connections-list" class="cc-card-body"><p class="muted">Loading…</p></div>
+          </section>
+
+          <section class="cc-card" data-testid="cc-card-trace">
+            <header class="cc-card-header">
+              <h3>Recent Proof</h3>
+              <span class="cc-card-sub">What just happened</span>
+            </header>
+            <div id="cc-trace-list" class="cc-card-body"><p class="muted">Loading…</p></div>
+          </section>
+
+          <section class="cc-card cc-card-next" data-testid="cc-card-next">
+            <header class="cc-card-header">
+              <h3>Next Action</h3>
+              <span class="cc-card-sub">Suggested</span>
+            </header>
+            <div id="cc-next-action" class="cc-card-body"><p class="muted">Loading…</p></div>
+          </section>
+        </div>
+
+        <!-- Plan builder — advanced, collapsed by default -->
+        <details class="cc-plan-details" data-testid="cc-plan-details">
+          <summary class="cc-plan-summary">Build a multi-step agent plan (advanced)</summary>
+          <div class="cmd-hero cmd-hero-inline">
+            <p class="cmd-hero-sub">Warden breaks your goal into steps and dispatches supervised agent work.</p>
+
+            <div class="cmd-agent-chips" title="Supported agent targets — local runner required for execution">
+              <span class="cmd-agent-chip cmd-chip-active">Claude Code</span>
+              <span class="cmd-agent-chip">Codex</span>
+              <span class="cmd-agent-chip">Jules</span>
+              <span class="cmd-agent-chip">Gemini</span>
+              <span class="cmd-agent-chip">Agy</span>
+            </div>
+
+            <button type="button" class="btn primary cmd-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
+          </div>
+        </details>
 
         <!-- Blocked dispatch notice -->
         <div id="captain-blocked-notice" class="captain-blocked-notice" style="display:none;" data-testid="captain-blocked-notice"></div>

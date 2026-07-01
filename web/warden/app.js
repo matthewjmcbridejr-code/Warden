@@ -4152,6 +4152,231 @@
   }
 
   // Init
+  // ─── Command Center dashboard ────────────────────────────────────────────
+
+  function timeAgo(iso) {
+    if (!iso) return "";
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "";
+    const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (diffSec < 60) return "just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return `${diffDay}d ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  const CC_TYPE_BADGE = {
+    webpage: { label: "Webpage", cls: "cc-badge-web" },
+    selection: { label: "Selection", cls: "cc-badge-selection" },
+    youtube: { label: "YouTube", cls: "cc-badge-youtube" },
+    pdf: { label: "PDF", cls: "cc-badge-pdf" },
+    mail: { label: "Mail", cls: "cc-badge-mail" },
+  };
+
+  function ccSourceTypeOf(source) {
+    let tags = source.tags;
+    if (typeof tags === "string") {
+      try {
+        const parsed = JSON.parse(tags);
+        tags = Array.isArray(parsed) ? parsed : String(tags).split(/[\s,]+/);
+      } catch (_) {
+        tags = tags.split(/[\s,]+/);
+      }
+    }
+    tags = Array.isArray(tags) ? tags : [];
+    if (tags.includes("video")) return "youtube";
+    const found = tags.find((t) => CC_TYPE_BADGE[t]);
+    return found || "webpage";
+  }
+
+  function ccAskMariusAbout(label) {
+    const input = document.getElementById("cc-ask-input");
+    if (input) {
+      input.value = `Tell me about "${label}"`;
+      input.focus();
+    }
+    document.querySelector(".cc-ask-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function loadCommandCenterCaptures() {
+    const el = document.getElementById("cc-captures-list");
+    if (!el) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/brain/sources?limit=6`);
+      const sources = data.sources || [];
+      if (!sources.length) {
+        el.innerHTML = `<div class="cc-empty">
+          <p>No captures yet.</p>
+          <p class="muted">Install <strong>Warden Watcher</strong> and save a page, selection, or video — it'll show up here.</p>
+        </div>`;
+        return;
+      }
+      el.innerHTML = sources.map((s) => {
+        const type = ccSourceTypeOf(s);
+        const badge = CC_TYPE_BADGE[type] || CC_TYPE_BADGE.webpage;
+        const title = escapeHtml(s.title || s.path || "Untitled");
+        return `<div class="cc-row">
+          <div class="cc-row-main">
+            <span class="cc-type-badge ${badge.cls}">${badge.label}</span>
+            <span class="cc-row-title" title="${title}">${title}</span>
+          </div>
+          <div class="cc-row-meta">
+            <span class="muted">${escapeHtml(timeAgo(s.indexed_at))}</span>
+            <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+          </div>
+        </div>`;
+      }).join("");
+      el.querySelectorAll("[data-cc-ask]").forEach((btn) => {
+        btn.addEventListener("click", () => ccAskMariusAbout(btn.getAttribute("data-cc-ask")));
+      });
+    } catch (e) {
+      el.innerHTML = `<div class="cc-empty"><p class="muted">Brain vault isn't reachable yet.</p></div>`;
+    }
+  }
+
+  async function loadCommandCenterConnections() {
+    const el = document.getElementById("cc-connections-list");
+    const strip = document.getElementById("cc-status-strip");
+    if (!el) return;
+    try {
+      const [accountsRes, brainRes] = await Promise.all([
+        requestJson(`${MCH}/warden/connectors/accounts`).catch(() => ({ accounts: [] })),
+        requestJson(`${MCH}/warden/brain/health`).catch(() => null),
+      ]);
+      const accounts = accountsRes.accounts || [];
+      const rows = [];
+      const vaultOk = !!(brainRes && brainRes.local && brainRes.local.vault_exists);
+      rows.push({
+        label: "Local Brain vault",
+        ok: !!vaultOk,
+        detail: vaultOk ? "Indexed & ready" : "Not initialized",
+      });
+      if (brainRes && brainRes.hybrid_enabled) {
+        rows.push({ label: "Google Brain mirror", ok: true, detail: "Enabled" });
+      }
+      if (!accounts.length) {
+        rows.push({ label: "Mail accounts", ok: false, detail: "None connected — add in Settings" });
+      } else {
+        accounts.forEach((a) => {
+          rows.push({
+            label: `${a.provider || "account"} · ${a.display_email || a.account_id || ""}`,
+            ok: a.status === "connected" || a.status === "active",
+            detail: a.status || "unknown",
+          });
+        });
+      }
+      el.innerHTML = rows.map((r) => `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-dot ${r.ok ? "cc-dot-good" : "cc-dot-warn"}"></span>
+          <span class="cc-row-title">${escapeHtml(r.label)}</span>
+        </div>
+        <span class="muted cc-row-meta">${escapeHtml(r.detail)}</span>
+      </div>`).join("");
+
+      if (strip) {
+        const connectedCount = accounts.filter((a) => a.status === "connected" || a.status === "active").length;
+        strip.innerHTML = [
+          `<span class="cc-strip-item ${vaultOk ? "good" : "warn"}">● Brain ${vaultOk ? "ready" : "not set up"}</span>`,
+          `<span class="cc-strip-item ${connectedCount ? "good" : "muted"}">● ${connectedCount} mail account${connectedCount === 1 ? "" : "s"} connected</span>`,
+        ].join("");
+      }
+    } catch (e) {
+      el.innerHTML = `<p class="muted">Could not load connection status.</p>`;
+    }
+  }
+
+  function renderCommandCenterTrace() {
+    const el = document.getElementById("cc-trace-list");
+    if (!el) return;
+    const items = (state.recentEvidence || []).slice(0, 5);
+    if (!items.length) {
+      el.innerHTML = `<div class="cc-empty"><p class="muted">No proof recorded yet. Once an agent runs or a capture is saved, it shows up here.</p></div>`;
+      return;
+    }
+    el.innerHTML = items.map((ev) => {
+      const label = ev.title || ev.kind || ev.evidence_type || "Run artifact";
+      const ok = ev.status ? ev.status !== "failed" && ev.status !== "error" : true;
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-dot ${ok ? "cc-dot-good" : "cc-dot-bad"}"></span>
+          <span class="cc-row-title">${escapeHtml(label)}</span>
+        </div>
+        <span class="muted cc-row-meta">${escapeHtml(timeAgo(ev.created_at || ev.timestamp))}</span>
+      </div>`;
+    }).join("");
+  }
+
+  function renderCommandCenterNextAction() {
+    const el = document.getElementById("cc-next-action");
+    if (!el) return;
+    const accounts = (state.cc && state.cc.accounts) || [];
+    let suggestion;
+    if (!accounts.length) {
+      suggestion = { text: "Connect Gmail or iCloud so Marius can search your mail.", cta: "Open Settings", section: "settings" };
+    } else if (!(state.recentEvidence || []).length) {
+      suggestion = { text: "Save your first page with Warden Watcher to build up Brain memory.", cta: "Open Settings", section: "settings" };
+    } else {
+      suggestion = { text: "Ask Marius what changed recently, or open the plan builder for multi-step work.", cta: "Ask Marius", section: null };
+    }
+    el.innerHTML = `<div class="cc-next">
+      <p>${escapeHtml(suggestion.text)}</p>
+      <button type="button" class="btn primary" id="cc-next-cta">${escapeHtml(suggestion.cta)}</button>
+    </div>`;
+    document.getElementById("cc-next-cta")?.addEventListener("click", () => {
+      if (suggestion.section) setActiveSection(suggestion.section);
+      else document.getElementById("cc-ask-input")?.focus();
+    });
+  }
+
+  async function loadCommandCenter() {
+    state.cc = state.cc || {};
+    await Promise.all([loadCommandCenterCaptures(), loadCommandCenterConnections()]);
+    renderCommandCenterTrace();
+    try {
+      const accountsRes = await requestJson(`${MCH}/warden/connectors/accounts`);
+      state.cc.accounts = accountsRes.accounts || [];
+    } catch (e) {
+      state.cc.accounts = [];
+    }
+    renderCommandCenterNextAction();
+  }
+
+  function wireCommandCenter() {
+    const form = document.getElementById("cc-ask-form");
+    if (!form) return;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.getElementById("cc-ask-input");
+      const replyEl = document.getElementById("cc-ask-reply");
+      const msg = (input.value || "").trim();
+      if (!msg) return;
+      const submitBtn = form.querySelector(".cc-ask-submit");
+      if (submitBtn) submitBtn.disabled = true;
+      replyEl.style.display = "block";
+      replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
+      try {
+        const res = await requestJson(`${MCH}/agents/marius/chat`, {
+          method: "POST",
+          body: { message: msg, workspace: null },
+        });
+        if (res && res.ok && res.data) {
+          replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.data.response)}</div>
+            <div class="cc-ask-footer muted">${escapeHtml(res.data.model || "")}</div>`;
+        } else {
+          replyEl.innerHTML = `<p class="cc-ask-error">Marius couldn't answer that: ${escapeHtml((res && res.error) || "unknown error")}</p>`;
+        }
+      } catch (e) {
+        replyEl.innerHTML = `<p class="cc-ask-error">Marius is offline right now. Try again in a moment.</p>`;
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+
   async function init() {
     // Hide any remaining old complex UI elements (from previous full cockpit) - force SIMPLE MODE
     const oldSelectors = [".rail", ".panel", "#sessions-list", "#queue-list", "#artifact-list", "#evidence-list", "#gate-list", "#safety-list", "#log-hint", "section.layout-stack", "main.panel"];
@@ -4181,6 +4406,7 @@
     wireSimpleUI();
     wireMariusEvents(); // Initialize Marius UI bindings
     wireMailTestPanel();
+    wireCommandCenter();
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
@@ -4189,6 +4415,7 @@
     if (window.WardenControlRoom && window.WardenControlRoom.refresh) {
       await window.WardenControlRoom.refresh({ quiet: true });
     }
+    loadCommandCenter().catch((e) => console.error("command center load error", e));
 
     // initial status check for disabled note etc is handled in deploy
     // If user has runner flags in this process (e.g. private), card will reflect Ready
