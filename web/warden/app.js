@@ -1085,7 +1085,8 @@
       return;
     }
     capsEl.style.display = "flex";
-    capsEl.innerHTML = caps.slice(0, 4).map((cap) => `<span class="cap-chip">${escapeHtml(cap)}</span>`).join("");
+    const formatCap = (cap) => String(cap).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    capsEl.innerHTML = caps.slice(0, 4).map((cap) => `<span class="cap-chip">${escapeHtml(formatCap(cap))}</span>`).join("");
   }
 
   function updateRunsEvidenceActions() {
@@ -2076,16 +2077,16 @@
       btn.classList.toggle("active", btn.dataset.section === state.activeSection);
     });
     const inspector = document.getElementById("operator-inspector");
-    const showInspector = (state.activeSection === "mission" || state.activeSection === "agents") && state.activeSection !== "projects";
+    const showInspector = ["mission", "agents", "tasks", "evidence"].includes(state.activeSection);
     if (inspector) inspector.style.display = showInspector ? "" : "none";
     const stage = document.querySelector(".warden-stage");
     if (stage) stage.classList.toggle("inspector-visible", showInspector);
     const titles = {
-      mission: "Control Room",
-      tasks: "Missions",
-      agents: "Agents",
+      mission: "Command Center",
+      tasks: "Tasks",
+      agents: "Agent Library",
       runs: "Runs",
-      evidence: "Evidence",
+      evidence: "Proof",
       memory: "Memory",
       "proof-gates": "Proof Gates",
       "runner-sessions": "Runner Sessions",
