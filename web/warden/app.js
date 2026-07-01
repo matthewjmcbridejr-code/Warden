@@ -2242,19 +2242,94 @@
 
         // Connect action area
         let connectAction = "";
-        if (p.auth_type === "oauth2_authorization_code") {
-          const connectBtnLabel = p.display_name.startsWith("Gmail") ? "Sign in with Google"
-            : p.display_name.includes("Outlook") ? "Sign in with Microsoft"
+        if (p.provider_id === "gmail" && !isConnected) {
+          // Gmail primary path: App Password (IMAP), no OAuth required
+          const guideUrl = "https://console.cloud.google.com/apis/credentials";
+          const redirectUri = `${location.origin}/api/mcharness/warden/connectors/gmail/callback`;
+          connectAction = `
+            <div class="connector-icloud-form" data-provider="gmail">
+              <p class="connector-provider-note">
+                Connect Gmail using a <strong>Google App Password</strong> — no OAuth verification needed.
+                <a href="#" class="connector-icloud-help-toggle" style="font-size:.8rem;">How to create one</a>
+              </p>
+              <div class="connector-icloud-help" style="display:none;">
+                <ol style="margin:.5rem 0 .5rem 1.2rem;padding:0;font-size:.85rem;color:var(--text-secondary);">
+                  <li>Go to <a href="https://myaccount.google.com/security" target="_blank" rel="noopener">Google Account → Security</a></li>
+                  <li>Enable <strong>2-Step Verification</strong> if not already on</li>
+                  <li>Search for <strong>App passwords</strong> at the top of Google Account</li>
+                  <li>Create a new app password — name it "Warden"</li>
+                  <li>Copy the 16-character password (no spaces needed)</li>
+                </ol>
+                <p style="font-size:.8rem;color:var(--text-secondary);">
+                  Note: Some Google Workspace or Advanced Protection accounts may block IMAP or app passwords.
+                  Also confirm IMAP is enabled in Gmail → Settings → Forwarding and POP/IMAP.
+                </p>
+              </div>
+              <div class="connector-form-row">
+                <label class="connector-label">Gmail Address</label>
+                <input type="email" class="connector-input" placeholder="you@gmail.com"
+                  id="gmail-imap-email-input" autocomplete="email" />
+              </div>
+              <div class="connector-form-row">
+                <label class="connector-label">Google App Password</label>
+                <input type="password" class="connector-input" placeholder="16-character app password"
+                  id="gmail-imap-pass-input" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="connector-setup-actions">
+                <button type="button" class="btn primary connector-gmail-imap-submit-btn">
+                  Connect Gmail
+                </button>
+                <span class="connector-setup-note">App password stored locally only. Never sent anywhere.</span>
+              </div>
+              <div class="connector-icloud-status" id="gmail-imap-connect-status"></div>
+            </div>
+            <details class="connector-advanced-details" style="margin-top:.5rem;">
+              <summary style="font-size:.8rem;color:var(--text-secondary);cursor:pointer;">Advanced setup / OAuth</summary>
+              <div class="connector-advanced-body" style="font-size:.82rem;color:var(--text-secondary);padding:.5rem 0;">
+                <p>OAuth is optional and may require Google app verification.<br>App Password is simpler for local/private Warden.</p>
+                ${p.configured ? `
+                  <button type="button" class="btn primary connector-oauth-btn"
+                    data-provider="gmail" style="margin-top:.4rem;">Sign in with Google (OAuth)</button>
+                  <a href="#" class="connector-popup-fallback" style="display:none;" data-provider="gmail">Open sign-in page</a>
+                  <br><button type="button" class="btn connector-clear-config-btn"
+                    data-provider="gmail" style="font-size:.8rem;padding:2px 8px;margin-top:.4rem;">Clear OAuth app config</button>
+                ` : `
+                  <details class="connector-setup-wizard" data-provider="gmail" style="margin-top:.4rem;">
+                    <summary class="connector-setup-summary" style="font-size:.82rem;">Set up OAuth app (advanced)</summary>
+                    <div class="connector-setup-body">
+                      <p>Create at <a href="${escapeHtml(guideUrl)}" target="_blank" rel="noopener">Google Cloud Console</a></p>
+                      <p><strong>Redirect URI:</strong></p>
+                      <div class="connector-redirect-row">
+                        <code class="connector-redirect-uri">${escapeHtml(redirectUri)}</code>
+                        <button type="button" class="btn connector-copy-uri-btn" data-uri="${escapeHtml(redirectUri)}">Copy</button>
+                      </div>
+                      <div class="connector-form-row">
+                        <label class="connector-label">Client ID</label>
+                        <input type="text" class="connector-input connector-client-id-input"
+                          placeholder="Paste Client ID" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="connector-form-row">
+                        <label class="connector-label">Client Secret</label>
+                        <input type="password" class="connector-input connector-client-secret-input"
+                          placeholder="Paste Client Secret" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="connector-setup-actions">
+                        <button type="button" class="btn primary connector-save-config-btn"
+                          data-provider="gmail">Save OAuth config</button>
+                        <span class="connector-setup-note">Saved to local vault only.</span>
+                      </div>
+                      <div class="connector-setup-status" id="setup-status-gmail"></div>
+                    </div>
+                  </details>`}
+              </div>
+            </details>`;
+        } else if (p.auth_type === "oauth2_authorization_code" && p.provider_id !== "gmail") {
+          const connectBtnLabel = p.display_name.includes("Outlook") ? "Sign in with Microsoft"
             : `Connect ${p.display_name}`;
-          const signInNote = p.display_name.startsWith("Gmail")
-            ? "Warden stores read-only access locally. Your email password is never shared."
-            : "Warden stores read-only access locally. Your Microsoft password is never shared.";
+          const signInNote = "Warden stores read-only access locally. Your Microsoft password is never shared.";
 
           if (!p.configured) {
-            // Show admin setup wizard — no CLI instructions
-            const guideUrl = p.provider_id === "gmail"
-              ? "https://console.cloud.google.com/apis/credentials"
-              : "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps";
+            const guideUrl = "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps";
             const redirectUri = `${location.origin}/api/mcharness/warden/connectors/${p.provider_id}/callback`;
             connectAction = `
               <details class="connector-setup-wizard" data-provider="${escapeHtml(p.provider_id)}">
@@ -2263,10 +2338,8 @@
                 </summary>
                 <div class="connector-setup-body">
                   <p class="connector-setup-desc">
-                    Warden needs a free OAuth app to connect to ${escapeHtml(p.display_name)}.
-                    ${p.provider_id === "gmail"
-                      ? "Create one at <a href=\"" + guideUrl + "\" target=\"_blank\" rel=\"noopener\">Google Cloud Console</a> (free)."
-                      : "Register one at <a href=\"" + guideUrl + "\" target=\"_blank\" rel=\"noopener\">Azure App Registrations</a> (free)."}
+                    Warden needs a free OAuth app.
+                    Register one at <a href="${escapeHtml(guideUrl)}" target="_blank" rel="noopener">Azure App Registrations</a> (free).
                   </p>
                   <p class="connector-setup-step"><strong>Redirect URI</strong> to add in the OAuth app:</p>
                   <div class="connector-redirect-row">
@@ -2506,6 +2579,44 @@
               btn.disabled = false;
             }
           } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire Gmail IMAP submit buttons
+      listEl.querySelectorAll(".connector-gmail-imap-submit-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".connector-icloud-form[data-provider='gmail']");
+          const emailInput = form ? form.querySelector("#gmail-imap-email-input") : null;
+          const passInput = form ? form.querySelector("#gmail-imap-pass-input") : null;
+          const statusEl = form ? form.querySelector("#gmail-imap-connect-status") : null;
+
+          const email = (emailInput && emailInput.value.trim()) || "";
+          const appPassword = (passInput && passInput.value.trim()) || "";
+
+          if (!email || !appPassword) {
+            if (statusEl) statusEl.textContent = "Gmail address and app password are required.";
+            return;
+          }
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = "Connecting…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/gmail/connect/app-password`, {
+              method: "POST",
+              body: JSON.stringify({email, app_password: appPassword}),
+            });
+            if (passInput) passInput.value = "";  // clear app password from DOM immediately
+            if (result.ok) {
+              if (statusEl) statusEl.textContent = "";
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || result.note || "Connection failed.";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            if (passInput) passInput.value = "";  // clear even on error
             if (statusEl) statusEl.textContent = `Error: ${e.message}`;
             btn.disabled = false;
           }

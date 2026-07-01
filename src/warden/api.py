@@ -4528,7 +4528,10 @@ def get_warden_connectors_providers():
     providers = list_providers()
     # Override configured flag to reflect vault-stored configs too
     for p in providers:
-        if p.get("auth_type") == "oauth2_authorization_code":
+        if p.get("provider_id") == "gmail":
+            # Gmail primary path is IMAP app-password — no pre-config needed
+            p["configured"] = True
+        elif p.get("auth_type") == "oauth2_authorization_code":
             p["configured"] = is_provider_configured(p["provider_id"])
     return {"ok": True, "providers": providers}
 
@@ -4705,6 +4708,87 @@ def delete_provider_oauth_config(provider: str):
     return {"ok": True, "provider": provider, "configured": False}
 
 
+# ─── Gmail app-password connect (IMAP, primary path) ─────────────────────────
+
+class GmailImapConnectRequest(BaseModel):
+    email: str
+    app_password: str
+
+
+@mcharness_router.post("/warden/connectors/gmail/connect/app-password")
+def post_warden_gmail_imap_connect(body: GmailImapConnectRequest):
+    """Connect Gmail via Google App Password (IMAP). No OAuth required.
+
+    App password stored in local vault only — never returned to caller.
+    Requires IMAP enabled in Gmail settings and 2-Step Verification active.
+    """
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import re as _re
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+    import json as _json
+
+    email = (body.email or "").strip().lower()
+    app_password = (body.app_password or "").strip().replace(" ", "")
+
+    if not email or not _re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="app_password is required")
+    if len(app_password) < 8:
+        raise HTTPException(status_code=400, detail="App password too short (Google App Passwords are 16 characters)")
+
+    # Optional live IMAP connection check
+    connection_status = "connected"
+    connection_note = ""
+    try:
+        from .mail.gmail_imap import GmailImapProvider
+        probe = GmailImapProvider(email_addr=email, app_password=app_password, account_id="probe")
+        if not probe.check_connection():
+            connection_status = "needs_check"
+            connection_note = (
+                "Gmail IMAP login could not be verified. "
+                "Confirm IMAP is enabled (Gmail → Settings → Forwarding and POP/IMAP) "
+                "and that this is a Google App Password, not your normal password."
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        # Network unavailable or timeout — store anyway
+        connection_status = "needs_check"
+        connection_note = "Could not reach Gmail to verify. Credentials stored; test mail search to confirm."
+
+    account_id = f"gmail-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    token_str = _json.dumps({"email": email, "app_password": app_password, "auth_type": "imap_app_password"})
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider="gmail",
+        display_email=email,
+        status=connection_status,
+        scopes=[],
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+    )
+    store = ConnectorStore()
+    store.save_account(account, token=token_str)
+    response = {
+        "ok": True,
+        "account_id": account_id,
+        "provider": "gmail",
+        "auth_type": "imap_app_password",
+        "display_email": email,
+        "status": connection_status,
+    }
+    if connection_note:
+        response["note"] = connection_note
+    return response
+
+
 # ─── iCloud app-password connect ─────────────────────────────────────────────
 
 class ICloudConnectRequest(BaseModel):
@@ -4793,10 +4877,14 @@ def get_warden_mail_search(account_id: str, q: str = "", limit: int = 10):
             if not provider:
                 raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
         elif provider_id == "gmail":
-            from .mail.gmail import build_gmail_provider, TokenExpiredError
-            provider = build_gmail_provider(account_id)
+            # Try IMAP app-password first (primary), fall back to OAuth token
+            from .mail.gmail_imap import build_gmail_imap_provider
+            provider = build_gmail_imap_provider(account_id)
             if not provider:
-                raise HTTPException(status_code=422, detail="Gmail token not found — reconnect account")
+                from .mail.gmail import build_gmail_provider
+                provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail not connected — use Settings to connect with App Password")
         else:
             raise HTTPException(status_code=422, detail=f"Mail search not supported for provider: {provider_id}")
 
@@ -4827,10 +4915,13 @@ def get_warden_mail_message(account_id: str, message_id: str):
             if not provider:
                 raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
         elif provider_id == "gmail":
-            from .mail.gmail import build_gmail_provider
-            provider = build_gmail_provider(account_id)
+            from .mail.gmail_imap import build_gmail_imap_provider
+            provider = build_gmail_imap_provider(account_id)
             if not provider:
-                raise HTTPException(status_code=422, detail="Gmail token not found — reconnect account")
+                from .mail.gmail import build_gmail_provider
+                provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail not connected — use Settings to connect with App Password")
         else:
             raise HTTPException(status_code=422, detail=f"Mail read not supported for: {provider_id}")
 
@@ -4963,6 +5054,76 @@ def post_brain_write_note(body: BrainWriteNoteRequest):
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class BrainIngestRequest(BaseModel):
+    url: str
+    title: str = ""
+    source_type: str = "webpage"  # webpage | selection | youtube | pdf
+    content_text: str = ""
+    selected_text: str = ""
+    channel: str = ""
+    description: str = ""
+    tags: list[str] = []
+    local_only: bool = False
+
+
+@mcharness_router.post("/warden/brain/ingest")
+def post_brain_ingest(body: BrainIngestRequest):
+    """Ingest a webpage, selected text, YouTube video, or PDF URL into the Brain vault."""
+    from .brain import ingest as brain_ingest
+    try:
+        if body.source_type == "selection":
+            if not body.selected_text:
+                raise HTTPException(status_code=400, detail="selected_text required for source_type=selection")
+            result = brain_ingest.ingest_selection(
+                url=body.url,
+                title=body.title or body.url,
+                selected_text=body.selected_text,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        elif body.source_type == "youtube":
+            # Fetch transcript from API if not provided
+            transcript = body.content_text
+            if not transcript:
+                yt = brain_ingest.fetch_youtube_transcript(body.url)
+                transcript = yt.get("transcript", "")
+            result = brain_ingest.ingest_youtube(
+                url=body.url,
+                title=body.title or body.url,
+                channel=body.channel,
+                description=body.description,
+                transcript=transcript,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        elif body.source_type == "pdf":
+            result = brain_ingest.ingest_pdf(
+                url=body.url,
+                title=body.title,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        else:
+            # webpage (default)
+            if not (body.content_text or body.selected_text):
+                raise HTTPException(status_code=400, detail="content_text or selected_text required")
+            result = brain_ingest.ingest_webpage(
+                url=body.url,
+                title=body.title or body.url,
+                content_text=body.content_text,
+                selected_text=body.selected_text,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        if not result.get("ok"):
+            return {"ok": False, "reason": result.get("error", "Ingest failed"), **result}
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @mcharness_router.post("/warden/brain/google/mirror")

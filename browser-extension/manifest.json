@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Warden Memory Collector",
-  "version": "1.0.0",
-  "description": "Captures browsing activity, searches, and AI conversations into Warden memory.",
+  "name": "Warden Watcher",
+  "version": "2.0.0",
+  "description": "Save webpages, selections, YouTube transcripts, and PDFs into Warden Brain.",
   "permissions": [
     "tabs",
     "activeTab",
@@ -28,6 +28,6 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Warden Memory"
+    "default_title": "Warden Watcher"
   }
 }

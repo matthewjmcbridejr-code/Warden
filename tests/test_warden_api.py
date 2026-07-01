@@ -2446,14 +2446,18 @@ def test_connectors_providers_lists_three_providers():
 
 
 def test_connectors_providers_unconfigured_without_env(monkeypatch):
-    """Without OAuth env vars, all providers are configured=False."""
+    """Without OAuth env vars, non-Gmail OAuth providers show configured=False.
+    Gmail is always configured=True since IMAP app-password requires no pre-config."""
     monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("WARDEN_MICROSOFT_OAUTH_CLIENT_ID", raising=False)
     client = TestClient(app)
     resp = client.get("/api/mcharness/warden/connectors/providers")
     assert resp.status_code == 200
     for p in resp.json()["providers"]:
-        assert p["configured"] is False, f"{p['provider_id']} should be unconfigured"
+        if p["provider_id"] == "gmail":
+            assert p["configured"] is True, "Gmail should always be configured (IMAP app-password path)"
+        else:
+            assert p["configured"] is False, f"{p['provider_id']} should be unconfigured without env vars"
 
 
 def test_connectors_accounts_empty_initially():
@@ -2470,6 +2474,9 @@ def test_connectors_connect_start_gmail_unconfigured(monkeypatch):
     """POST .../gmail/connect/start returns configured=False when no OAuth keys set."""
     monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    # Also mock vault-based config to ensure clean state
+    import src.warden.connectors.oauth as oauth_mod
+    monkeypatch.setattr(oauth_mod, "is_provider_configured", lambda p: False)
     client = TestClient(app)
     resp = client.post("/api/mcharness/warden/connectors/gmail/connect/start")
     assert resp.status_code == 200
