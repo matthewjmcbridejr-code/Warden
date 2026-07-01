@@ -5691,3 +5691,12 @@ textarea:focus {
 .inspector-card {
   padding: 20px 22px;
 }
+
+.sidebar-build-info {
+  font-size: 0.66rem;
+  color: var(--muted);
+  opacity: 0.55;
+  padding: 8px 12px 0;
+  font-family: var(--mono);
+  letter-spacing: 0.01em;
+}

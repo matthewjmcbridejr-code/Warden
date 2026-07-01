@@ -1,5 +1,6 @@
 (function () {
   const MCH = "/api/mcharness";
+  const UI_BUILD_VERSION = "cb10231-p1";
   const JULES_VIEW_URL = "https://jules.google.com/session";
   const CAPTAIN_PROFILE_BASE = "/web/warden/agent_profiles";
   const CAPTAIN_PROFILE_STORAGE_KEY = "warden.captain.instructionProfile";
@@ -3285,6 +3286,12 @@
       ]);
       state.lanes = lanesData.lanes || [];
       state.health = health || {};
+      const buildInfoEl = document.getElementById("warden-build-info");
+      if (buildInfoEl) {
+        const shortCommit = state.health.commit ? state.health.commit.slice(0, 7) : "unknown";
+        buildInfoEl.textContent = `ui ${UI_BUILD_VERSION} · api ${shortCommit}`;
+        buildInfoEl.title = `Full commit: ${state.health.commit || "unknown"}`;
+      }
       await loadAgents();
       const codex = (state.agents || []).find((agent) => agent.id === "codex_cli")
         || state.lanes.find((l) => l.lane_id === "codex_cli")
