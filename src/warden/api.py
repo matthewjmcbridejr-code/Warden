@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 import subprocess
 import uuid
 import time
@@ -1710,6 +1711,47 @@ def get_status():
         "checkpoint_db_path": str(CHECKPOINT_DB_PATH.resolve()),
         "checkpoint_exists": checkpoint_file_exists(),
         "mctable_root": str(MCTABLE_ROOT.resolve())
+    }
+
+
+def _git_branch() -> Optional[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    branch = proc.stdout.strip()
+    return branch or None
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+@mcharness_router.get("/warden/build-info")
+def get_warden_build_info():
+    """Proof of what's actually on disk right now — commit, branch, and
+    sha256 of the served UI files. Compare against `sha256sum web/warden/*`
+    to prove the running service matches the working tree."""
+    web_dir = REPO_ROOT / "web" / "warden"
+    return {
+        "ok": True,
+        "commit": _git_commit(),
+        "branch": _git_branch(),
+        "app_html_hash": _file_sha256(web_dir / "app.html"),
+        "app_css_hash": _file_sha256(web_dir / "app.css"),
+        "app_js_hash": _file_sha256(web_dir / "app.js"),
     }
 
 

@@ -5698,12 +5698,17 @@ textarea:focus {
 }
 
 .sidebar-build-info {
-  font-size: 0.66rem;
-  color: var(--muted);
-  opacity: 0.55;
-  padding: 8px 12px 0;
+  display: inline-block;
+  margin: 10px 12px 0;
+  font-size: 0.68rem;
+  color: var(--accent-teal);
   font-family: var(--mono);
   letter-spacing: 0.01em;
+  border: 1px solid rgba(94, 234, 212, 0.25);
+  background: rgba(94, 234, 212, 0.06);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: help;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

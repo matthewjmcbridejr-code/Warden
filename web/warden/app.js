@@ -1,6 +1,25 @@
 (function () {
   const MCH = "/api/mcharness";
-  const UI_BUILD_VERSION = "phase3-routing";
+  const UI_BUILD_VERSION = "phase0-buildproof";
+
+  // Proof-of-freshness: fetch the server's actual on-disk commit + file
+  // hashes and render them in the sidebar. If this doesn't match
+  // `sha256sum web/warden/app.css`, the browser is not talking to the
+  // service you think it is — not a caching mystery, a fact you can check.
+  async function loadBuildInfo() {
+    const el = document.getElementById("warden-build-info");
+    if (!el) return;
+    try {
+      const info = await requestJson(`${MCH}/warden/build-info`);
+      const shortCommit = info.commit ? info.commit.slice(0, 7) : "unknown";
+      const cssHash = info.app_css_hash ? info.app_css_hash.slice(0, 10) : "unknown";
+      const jsHash = info.app_js_hash ? info.app_js_hash.slice(0, 10) : "unknown";
+      el.textContent = `Build: ${shortCommit} (${info.branch || "?"}) · CSS: ${cssHash}`;
+      el.title = `commit ${info.commit || "unknown"}\napp.html ${info.app_html_hash || "unknown"}\napp.css ${info.app_css_hash || "unknown"}\napp.js ${jsHash === "unknown" ? "unknown" : info.app_js_hash}\nui build tag: ${UI_BUILD_VERSION}`;
+    } catch (e) {
+      el.textContent = "Build: unavailable";
+    }
+  }
   const JULES_VIEW_URL = "https://jules.google.com/session";
   const CAPTAIN_PROFILE_BASE = "/web/warden/agent_profiles";
   const CAPTAIN_PROFILE_STORAGE_KEY = "warden.captain.instructionProfile";
@@ -3337,12 +3356,7 @@
       ]);
       state.lanes = lanesData.lanes || [];
       state.health = health || {};
-      const buildInfoEl = document.getElementById("warden-build-info");
-      if (buildInfoEl) {
-        const shortCommit = state.health.commit ? state.health.commit.slice(0, 7) : "unknown";
-        buildInfoEl.textContent = `ui ${UI_BUILD_VERSION} · api ${shortCommit}`;
-        buildInfoEl.title = `Full commit: ${state.health.commit || "unknown"}`;
-      }
+      loadBuildInfo().catch((e) => console.error("build-info load error", e));
       await loadAgents();
       const codex = (state.agents || []).find((agent) => agent.id === "codex_cli")
         || state.lanes.find((l) => l.lane_id === "codex_cli")
