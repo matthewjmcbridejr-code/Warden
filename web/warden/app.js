@@ -1,6 +1,6 @@
 (function () {
   const MCH = "/api/mcharness";
-  const UI_BUILD_VERSION = "cb10231-p1";
+  const UI_BUILD_VERSION = "phase1-visual";
   const JULES_VIEW_URL = "https://jules.google.com/session";
   const CAPTAIN_PROFILE_BASE = "/web/warden/agent_profiles";
   const CAPTAIN_PROFILE_STORAGE_KEY = "warden.captain.instructionProfile";
@@ -2075,7 +2075,8 @@
       section.classList.toggle("active", section.dataset.section === state.activeSection);
     });
     document.querySelectorAll(".nav-item").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.section === state.activeSection);
+      const isResourceShortcut = btn.hasAttribute("data-scroll-target");
+      btn.classList.toggle("active", !isResourceShortcut && btn.dataset.section === state.activeSection);
     });
     const inspector = document.getElementById("operator-inspector");
     const showInspector = ["mission", "agents", "tasks", "evidence"].includes(state.activeSection);

@@ -31,7 +31,12 @@ body {
   min-height: 100vh;
   font-family: var(--sans);
   color: var(--text);
-  background: linear-gradient(180deg, #07101c 0%, #0a1220 100%);
+  background:
+    radial-gradient(1100px 620px at 14% -8%, rgba(125, 176, 255, 0.10), transparent 60%),
+    radial-gradient(900px 700px at 85% 8%, rgba(167, 139, 250, 0.08), transparent 55%),
+    radial-gradient(1200px 900px at 50% 115%, rgba(94, 234, 212, 0.05), transparent 60%),
+    linear-gradient(180deg, #060b16 0%, #080f1d 45%, #0a1220 100%);
+  background-attachment: fixed;
 }
 
 a {
@@ -5699,4 +5704,168 @@ textarea:focus {
   padding: 8px 12px 0;
   font-family: var(--mono);
   letter-spacing: 0.01em;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Phase 1 — depth, glass sidebar, glowing cards, dominant command box
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.warden-sidebar {
+  background:
+    radial-gradient(480px 320px at 0% 0%, rgba(125, 176, 255, 0.07), transparent 65%),
+    linear-gradient(180deg, #0d1a2e 0%, #081020 60%, #060c18 100%);
+  box-shadow: inset -1px 0 0 rgba(125, 176, 255, 0.06), 6px 0 32px rgba(0, 0, 0, 0.28);
+  position: relative;
+}
+
+.warden-sidebar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(125, 176, 255, 0.28), transparent 40%, transparent 60%, rgba(94, 234, 212, 0.12));
+}
+
+.warden-workspace {
+  background:
+    radial-gradient(1000px 560px at 30% -10%, rgba(125, 176, 255, 0.10), transparent 60%),
+    radial-gradient(700px 520px at 96% 0%, rgba(167, 139, 250, 0.07), transparent 55%),
+    linear-gradient(180deg, rgba(7, 12, 22, 0.9) 0%, rgba(9, 16, 28, 0.98) 100%);
+}
+
+/* Cards: real depth via layered shadow + soft border glow, not flat rectangles */
+.cc-card,
+.settings-card,
+.inspector-card,
+.empty-state-card,
+.agent-card {
+  border-color: rgba(125, 176, 255, 0.12);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 14px 30px -18px rgba(0, 0, 0, 0.55);
+  position: relative;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.cc-card::before,
+.settings-card::before,
+.agent-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(125, 176, 255, 0.35), transparent);
+  opacity: 0.7;
+}
+
+.cc-card:hover,
+.settings-card:hover,
+.agent-card:hover {
+  border-color: rgba(125, 176, 255, 0.24);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 44px -20px rgba(56, 100, 220, 0.28);
+}
+
+/* Dominant command box: gradient border via padding wrapper trick */
+.cc-ask-card {
+  position: relative;
+}
+
+.cc-ask-form {
+  background:
+    linear-gradient(180deg, rgba(21, 37, 61, 0.95), rgba(13, 22, 40, 0.95)) padding-box,
+    linear-gradient(120deg, rgba(125, 176, 255, 0.5), rgba(167, 139, 250, 0.35), rgba(94, 234, 212, 0.35)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 20px 50px -18px rgba(30, 60, 140, 0.5), 0 0 0 1px rgba(125, 176, 255, 0.06);
+}
+
+.cc-ask-form:focus-within {
+  box-shadow: 0 0 0 4px rgba(125, 176, 255, 0.14), 0 24px 60px -18px rgba(30, 60, 140, 0.6);
+}
+
+.cc-ask-icon {
+  text-shadow: 0 0 12px rgba(125, 176, 255, 0.6);
+}
+
+.cc-ask-submit {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Suggestion chips — feel intentional, not like leftover buttons */
+.cc-suggestion-chip {
+  background: rgba(125, 176, 255, 0.04);
+  border-color: rgba(125, 176, 255, 0.16);
+}
+
+.cc-suggestion-chip:hover {
+  background: rgba(125, 176, 255, 0.09);
+  box-shadow: 0 4px 14px -6px rgba(56, 100, 220, 0.4);
+}
+
+/* Sidebar nav — refined active state with glow, cleaner rest state */
+.nav-item {
+  border-radius: 10px;
+  font-size: 0.88rem;
+}
+
+.nav-item.active {
+  background: linear-gradient(90deg, rgba(125, 176, 255, 0.16), rgba(125, 176, 255, 0.03));
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 22px -8px rgba(125, 176, 255, 0.35);
+}
+
+.sidebar-primary {
+  box-shadow: 0 10px 28px -10px rgba(56, 120, 220, 0.4);
+}
+
+.sidebar-primary:hover {
+  box-shadow: 0 12px 34px -8px rgba(56, 120, 220, 0.5);
+}
+
+/* Right panel — make Next Best Move feel like the most important card */
+.inspector-card[data-testid="inspector-next-move"] {
+  border-color: rgba(125, 176, 255, 0.22);
+  background:
+    linear-gradient(160deg, rgba(30, 52, 88, 0.55), rgba(15, 26, 45, 0.9));
+  box-shadow: 0 0 0 1px rgba(125, 176, 255, 0.08), 0 18px 40px -20px rgba(56, 100, 220, 0.4);
+}
+
+/* Recent Proof rows read as a timeline, not a plain list */
+[data-testid="cc-card-trace"] .cc-row {
+  position: relative;
+  padding-left: 18px;
+}
+
+[data-testid="cc-card-trace"] .cc-row::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(125, 176, 255, 0.16);
+}
+
+[data-testid="cc-card-trace"] .cc-row .cc-dot {
+  position: absolute;
+  left: 0;
+  top: 14px;
+}
+
+[data-testid="cc-card-trace"] .cc-row-main {
+  padding-left: 10px;
+}
+
+/* Sidebar group headers get more separation from the glass background */
+.sidebar-group-label {
+  color: rgba(143, 163, 190, 0.85);
+}
+
+/* Settings + mail cards: consistent premium surface */
+.mail-test-panel,
+.connectors-provider-list,
+.mail-result-card {
+  border-color: rgba(125, 176, 255, 0.12);
+  background: linear-gradient(165deg, rgba(22, 36, 58, 0.7), rgba(13, 22, 38, 0.85));
 }
