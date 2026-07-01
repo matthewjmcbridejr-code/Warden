@@ -122,9 +122,11 @@ router.include_router(captain_router)
 router.include_router(workbench_router)
 
 from .projects import router as projects_router
+from .webstudio.api import router as webstudio_router
 
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
 mcharness_router.include_router(projects_router)
+mcharness_router.include_router(webstudio_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
 SAFE_REPO_PATHS = [

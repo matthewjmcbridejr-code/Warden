@@ -1,0 +1,48 @@
+# WebStudio site registry — example configuration.
+#
+# Copy this file to configs/webstudio.sites.yaml (gitignored) and fill in
+# real repo paths for your local checkouts. Never commit secrets here —
+# this file only holds non-sensitive operational metadata.
+
+sites:
+  - name: usemarius
+    domain: usemarius.com
+    repo_path: ~/workspaces/marius-core/usemarius-site
+    framework: next
+    package_manager: npm
+    host_provider: vercel
+    dns_provider: namecheap
+    production_branch: main
+    local_preview_command: "npm run dev"
+    build_command: "npm run build"
+    test_command: "npm test"
+    client_name: Marius WebStudio
+    notes: Primary marketing site for Marius WebStudio.
+
+  - name: treeguru-demo
+    domain: treeguru.example.com
+    repo_path: ~/workspaces/clients/treeguru-site
+    framework: astro
+    package_manager: pnpm
+    host_provider: vercel
+    dns_provider: namecheap
+    production_branch: main
+    local_preview_command: "pnpm dev"
+    build_command: "pnpm build"
+    test_command: null
+    client_name: TreeGuru (SMB tree service demo)
+    notes: SMB local-service site; no automated tests configured yet.
+
+  - name: grademy-shelf-demo
+    domain: grademyshelf.example.com
+    repo_path: ~/workspaces/clients/grademy-shelf-site
+    framework: unknown
+    package_manager: npm
+    host_provider: vercel
+    dns_provider: namecheap
+    production_branch: main
+    local_preview_command: "npm run start"
+    build_command: "npm run build"
+    test_command: null
+    client_name: GradeMy/Shelf
+    notes: Generic SMB site template placeholder.
