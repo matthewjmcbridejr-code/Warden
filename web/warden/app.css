@@ -5460,3 +5460,232 @@ textarea:focus-visible {
   padding: 12px 0;
   background: transparent;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Premium pass — typography, buttons, inputs, status, next-move, loading
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+body {
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.thread-hero-title {
+  font-size: 2.15rem;
+  line-height: 1.2;
+}
+
+.thread-hero-sub {
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+.cmd-section {
+  padding: 40px 40px 48px;
+}
+
+/* Buttons — softer radius, subtle motion, clearer primary */
+.btn {
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-weight: 600;
+  font-size: 0.86rem;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, rgba(125, 176, 255, 0.28), rgba(94, 234, 212, 0.14));
+  border-color: rgba(125, 176, 255, 0.55);
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(56, 120, 220, 0.22);
+}
+
+.btn.primary:hover {
+  border-color: var(--accent);
+  box-shadow: 0 8px 26px rgba(56, 120, 220, 0.32);
+}
+
+/* Inputs — clearer focus glow, no default browser look */
+.field input,
+.field select,
+.field textarea,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+select,
+textarea {
+  border-radius: 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 176, 255, 0.14);
+}
+
+.cc-ask-form {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cc-ask-form:focus-within {
+  border-color: rgba(125, 176, 255, 0.5);
+  box-shadow: 0 0 0 4px rgba(125, 176, 255, 0.1), 0 16px 36px rgba(0, 0, 0, 0.3);
+}
+
+/* Cards — stronger gradient + hover lift for interactive rows */
+.cc-card,
+.settings-card,
+.inspector-card {
+  background: linear-gradient(165deg, rgba(22, 36, 58, 0.92), rgba(13, 22, 38, 0.94));
+  border-color: rgba(125, 176, 255, 0.1);
+}
+
+.cc-row {
+  border-radius: 8px;
+  padding: 10px 8px;
+  transition: background 0.15s ease;
+}
+
+.cc-row:hover {
+  background: rgba(125, 176, 255, 0.05);
+}
+
+.cc-card-header h3 {
+  font-size: 1rem;
+}
+
+/* Loading / retry states */
+.cc-checking {
+  padding: 6px 0;
+  position: relative;
+  padding-left: 20px;
+}
+
+.cc-checking::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 2px solid rgba(125, 176, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: cc-spin 0.8s linear infinite;
+}
+
+@keyframes cc-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cc-inline-retry {
+  background: none;
+  border: none;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+}
+
+/* Next Best Move card */
+.cc-next-title {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.cc-next-reason {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.cc-next-cta {
+  width: 100%;
+  padding: 11px 16px;
+}
+
+.cc-next-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.cc-next-chip {
+  font-size: 0.74rem;
+  padding: 5px 10px;
+}
+
+.cc-next-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cc-status-pill-mini {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.cc-pill-good { color: var(--good); border-color: rgba(99, 219, 157, 0.35); }
+.cc-pill-warn { color: var(--warn); border-color: rgba(240, 198, 106, 0.35); }
+.cc-pill-unknown { color: var(--muted); border-color: var(--line); opacity: 0.7; }
+
+/* Ask reply fallback actions */
+.cc-ask-fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Sidebar tag / label overflow fix — no awkward mid-word wraps */
+.nav-item-tag {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92px;
+}
+
+.sidebar-group-label {
+  padding-top: 16px;
+}
+
+.sidebar-group-label:first-of-type {
+  padding-top: 10px;
+}
+
+/* Right panel cards — a touch more breathing room */
+.operator-inspector {
+  gap: 18px;
+}
+
+.inspector-card {
+  padding: 20px 22px;
+}

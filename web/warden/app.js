@@ -4313,91 +4313,92 @@
     document.querySelector(".cc-ask-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  async function loadCommandCenterCaptures() {
-    const el = document.getElementById("cc-captures-list");
-    if (!el) return;
+  async function requestJsonTimeout(url, opts = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const data = await requestJson(`${MCH}/warden/brain/sources?limit=6`);
-      const sources = data.sources || [];
-      if (!sources.length) {
-        el.innerHTML = `<div class="cc-empty">
-          <p>No captures yet.</p>
-          <p class="muted">Install <strong>Warden Watcher</strong> and save a page, selection, or video — it'll show up here.</p>
-        </div>`;
-        return;
-      }
-      el.innerHTML = sources.map((s) => {
-        const type = ccSourceTypeOf(s);
-        const badge = CC_TYPE_BADGE[type] || CC_TYPE_BADGE.webpage;
-        const title = escapeHtml(s.title || s.path || "Untitled");
-        return `<div class="cc-row">
-          <div class="cc-row-main">
-            <span class="cc-type-badge ${badge.cls}">${badge.label}</span>
-            <span class="cc-row-title" title="${title}">${title}</span>
-          </div>
-          <div class="cc-row-meta">
-            <span class="muted">${escapeHtml(timeAgo(s.indexed_at))}</span>
-            <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
-          </div>
-        </div>`;
-      }).join("");
-      el.querySelectorAll("[data-cc-ask]").forEach((btn) => {
-        btn.addEventListener("click", () => ccAskMariusAbout(btn.getAttribute("data-cc-ask")));
-      });
-    } catch (e) {
-      el.innerHTML = `<div class="cc-empty"><p class="muted">Brain vault isn't reachable yet.</p></div>`;
+      return await requestJson(url, { ...opts, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  async function loadCommandCenterConnections() {
-    const el = document.getElementById("cc-connections-list");
-    const strip = document.getElementById("cc-status-strip");
+  function renderCommandCenterCaptures() {
+    const el = document.getElementById("cc-captures-list");
     if (!el) return;
-    try {
-      const [accountsRes, brainRes] = await Promise.all([
-        requestJson(`${MCH}/warden/connectors/accounts`).catch(() => ({ accounts: [] })),
-        requestJson(`${MCH}/warden/brain/health`).catch(() => null),
-      ]);
-      const accounts = accountsRes.accounts || [];
-      const rows = [];
-      const vaultOk = !!(brainRes && brainRes.local && brainRes.local.vault_exists);
-      rows.push({
-        label: "Local Brain vault",
-        ok: !!vaultOk,
-        detail: vaultOk ? "Indexed & ready" : "Not initialized",
-      });
-      if (brainRes && brainRes.hybrid_enabled) {
-        rows.push({ label: "Google Brain mirror", ok: true, detail: "Enabled" });
-      }
-      if (!accounts.length) {
-        rows.push({ label: "Mail accounts", ok: false, detail: "None connected — add in Settings" });
-      } else {
-        accounts.forEach((a) => {
-          rows.push({
-            label: `${a.provider || "account"} · ${a.display_email || a.account_id || ""}`,
-            ok: a.status === "connected" || a.status === "active",
-            detail: a.status || "unknown",
-          });
-        });
-      }
-      el.innerHTML = rows.map((r) => `<div class="cc-row">
-        <div class="cc-row-main">
-          <span class="cc-dot ${r.ok ? "cc-dot-good" : "cc-dot-warn"}"></span>
-          <span class="cc-row-title">${escapeHtml(r.label)}</span>
-        </div>
-        <span class="muted cc-row-meta">${escapeHtml(r.detail)}</span>
-      </div>`).join("");
-
-      if (strip) {
-        const connectedCount = accounts.filter((a) => a.status === "connected" || a.status === "active").length;
-        strip.innerHTML = [
-          `<span class="cc-strip-item ${vaultOk ? "good" : "warn"}">● Brain ${vaultOk ? "ready" : "not set up"}</span>`,
-          `<span class="cc-strip-item ${connectedCount ? "good" : "muted"}">● ${connectedCount} mail account${connectedCount === 1 ? "" : "s"} connected</span>`,
-        ].join("");
-      }
-    } catch (e) {
-      el.innerHTML = `<p class="muted">Could not load connection status.</p>`;
+    const sources = state.cc.sources;
+    if (sources === null) {
+      el.innerHTML = `<div class="cc-empty"><p class="muted">Brain vault didn't respond in time. <button type="button" class="cc-inline-retry" id="cc-captures-retry">Retry</button></p></div>`;
+      document.getElementById("cc-captures-retry")?.addEventListener("click", () => loadCommandCenter());
+      return;
     }
+    if (!sources.length) {
+      el.innerHTML = `<div class="cc-empty">
+        <p>No captures yet.</p>
+        <p class="muted">Install <strong>Warden Watcher</strong> and save a page, selection, or video — it'll show up here.</p>
+      </div>`;
+      return;
+    }
+    el.innerHTML = sources.slice(0, 5).map((s) => {
+      const type = ccSourceTypeOf(s);
+      const badge = CC_TYPE_BADGE[type] || CC_TYPE_BADGE.webpage;
+      const title = escapeHtml(s.title || s.path || "Untitled");
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-type-badge ${badge.cls}">${badge.label}</span>
+          <span class="cc-row-title" title="${title}">${title}</span>
+        </div>
+        <div class="cc-row-meta">
+          <span class="muted">${escapeHtml(timeAgo(s.indexed_at))}</span>
+          <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+        </div>
+      </div>`;
+    }).join("");
+    el.querySelectorAll("[data-cc-ask]").forEach((btn) => {
+      btn.addEventListener("click", () => ccAskMariusAbout(btn.getAttribute("data-cc-ask")));
+    });
+  }
+
+  function renderCommandCenterConnections() {
+    const el = document.getElementById("cc-connections-list");
+    if (!el) return;
+    const brainHealth = state.cc.brainHealth;
+    const accounts = state.cc.accounts;
+    if (brainHealth === null && accounts === null) {
+      el.innerHTML = `<p class="muted">Connections didn't respond in time. <button type="button" class="cc-inline-retry" id="cc-conn-retry">Retry</button></p>`;
+      document.getElementById("cc-conn-retry")?.addEventListener("click", () => loadCommandCenter());
+      return;
+    }
+    const rows = [];
+    const vaultOk = !!(brainHealth && brainHealth.local && brainHealth.local.vault_exists);
+    rows.push({
+      label: "Local Brain vault",
+      ok: brainHealth === null ? null : vaultOk,
+      detail: brainHealth === null ? "Unknown" : (vaultOk ? "Indexed & ready" : "Not initialized"),
+    });
+    if (brainHealth && brainHealth.hybrid_enabled) {
+      rows.push({ label: "Google Brain mirror", ok: true, detail: "Enabled" });
+    }
+    if (accounts === null) {
+      rows.push({ label: "Mail accounts", ok: null, detail: "Unknown — retry" });
+    } else if (!accounts.length) {
+      rows.push({ label: "Mail accounts", ok: false, detail: "None connected — add in Settings" });
+    } else {
+      accounts.forEach((a) => {
+        rows.push({
+          label: `${a.provider || "account"} · ${a.display_email || a.account_id || ""}`,
+          ok: a.status === "connected" || a.status === "active",
+          detail: a.status || "unknown",
+        });
+      });
+    }
+    el.innerHTML = rows.map((r) => `<div class="cc-row">
+      <div class="cc-row-main">
+        <span class="cc-dot ${r.ok === null ? "" : (r.ok ? "cc-dot-good" : "cc-dot-warn")}"></span>
+        <span class="cc-row-title">${escapeHtml(r.label)}</span>
+      </div>
+      <span class="muted cc-row-meta">${escapeHtml(r.detail)}</span>
+    </div>`).join("");
   }
 
   function renderCommandCenterTrace() {
@@ -4405,7 +4406,7 @@
     if (!el) return;
     const items = (state.recentEvidence || []).slice(0, 5);
     if (!items.length) {
-      el.innerHTML = `<div class="cc-empty"><p class="muted">No proof recorded yet. Once an agent runs or a capture is saved, it shows up here.</p></div>`;
+      el.innerHTML = `<div class="cc-empty"><p class="muted">No recent proof yet. Once an agent runs or a capture is saved, it shows up here.</p></div>`;
       return;
     }
     el.innerHTML = items.map((ev) => {
@@ -4421,38 +4422,197 @@
     }).join("");
   }
 
+  // ─── Next Best Move decision engine ──────────────────────────────────────
+  // Reads only data already fetched elsewhere in this session — no guessing,
+  // no fabricated numbers. Unknown inputs (fetch failed/timed out) are treated
+  // as "unknown", never silently coerced into a false-good or false-bad state.
+
+  function computeNextBestMove() {
+    const cc = state.cc || {};
+    const brainHealth = cc.brainHealth;
+    const brainUnknown = brainHealth === null || brainHealth === undefined;
+    const vaultOk = !brainUnknown && !!(brainHealth.local && brainHealth.local.vault_exists);
+    const sourceCount = !brainUnknown && brainHealth.local ? (brainHealth.local.source_count || 0) : (Array.isArray(cc.sources) ? cc.sources.length : null);
+
+    const accounts = cc.accounts;
+    const accountsUnknown = accounts === null || accounts === undefined;
+    const mailConnected = !accountsUnknown && accounts.some((a) => a.status === "connected" || a.status === "active");
+
+    const evidenceCount = (state.recentEvidence || []).length;
+    const steps = (state.activeCaptainPlan && state.activeCaptainPlan.steps) || [];
+    const blockedStep = steps.find((s) => s.status === "blocked");
+
+    const health = state.health || {};
+    const runnerKnown = Object.prototype.hasOwnProperty.call(health, "tmux_runner_enabled");
+    const runnerAvailable = !!(health.tmux_runner_enabled && health.codex_runner_enabled);
+
+    const pills = [
+      { label: "Brain", ok: brainUnknown ? null : vaultOk },
+      { label: "Mail", ok: accountsUnknown ? null : mailConnected },
+      { label: "Watcher", ok: sourceCount === null ? null : sourceCount > 0 },
+      { label: "Proof", ok: evidenceCount > 0 },
+      { label: "Runner", ok: runnerKnown ? (runnerAvailable ? true : null) : null, optional: true },
+    ];
+
+    let move;
+    if (brainUnknown && accountsUnknown) {
+      move = {
+        title: "Checking Warden status…",
+        reason: "Brain and Mail didn't respond yet — this will update automatically.",
+        ctaLabel: "Retry now",
+        ctaAction: "retry",
+      };
+    } else if (!brainUnknown && !vaultOk) {
+      move = {
+        title: "Initialize Warden Brain",
+        reason: "Watcher captures and saved mail need a local vault before they become searchable.",
+        ctaLabel: "Initialize Vault",
+        ctaAction: "init-vault",
+      };
+    } else if (sourceCount === 0) {
+      move = {
+        title: "Save your first source",
+        reason: "Use Warden Watcher to capture a webpage, YouTube video, PDF, or selected text.",
+        ctaLabel: "Go to Brain",
+        ctaAction: "goto-brain",
+      };
+    } else if (!accountsUnknown && !mailConnected) {
+      move = {
+        title: "Connect Gmail or iCloud",
+        reason: "Marius can search your inbox once a read-only mail account is connected.",
+        ctaLabel: "Open Mail Settings",
+        ctaAction: "goto-mail",
+      };
+    } else if (blockedStep) {
+      move = {
+        title: "Review blocked task",
+        reason: `"${blockedStep.title || blockedStep.step_id}" needs a decision before continuing.`,
+        ctaLabel: "Open Proof / Tasks",
+        ctaAction: "goto-tasks",
+      };
+    } else if (sourceCount > 0 && evidenceCount === 0) {
+      move = {
+        title: "Ask Marius what you captured",
+        reason: "You have saved sources. Turn them into a summary, decision, or task.",
+        ctaLabel: "Ask about recent captures",
+        ctaAction: "ask-captures",
+      };
+    } else if (Array.isArray(cc.sources) && cc.sources.length) {
+      const latest = cc.sources[0];
+      move = {
+        title: "Review latest capture",
+        reason: `"${latest.title || latest.path}" is ready in Brain.`,
+        ctaLabel: "Ask Marius about it",
+        ctaAction: "ask-latest",
+      };
+    } else if (runnerKnown && !runnerAvailable) {
+      move = {
+        title: "Agent running is not enabled yet",
+        reason: "You can still use Brain, Mail, Watcher, and Marius. Enable a private runner when you want code/task execution.",
+        ctaLabel: "Open Advanced System Status",
+        ctaAction: "goto-advanced",
+      };
+    } else {
+      move = {
+        title: "Ask Marius what changed today",
+        reason: "Warden has Brain sources, connected mail, and proof history available.",
+        ctaLabel: "Ask Marius",
+        ctaAction: "ask-general",
+      };
+    }
+
+    const secondary = [
+      { label: "Search Brain", action: "goto-brain" },
+      { label: "Open Mail", action: "goto-mail" },
+      { label: "View Proof", action: "goto-tasks" },
+      { label: "Ask Marius", action: "ask-general" },
+    ].filter((s) => s.action !== move.ctaAction).slice(0, 3);
+
+    return { ...move, pills, secondary };
+  }
+
+  function runNextMoveAction(action) {
+    switch (action) {
+      case "retry":
+        loadCommandCenter();
+        break;
+      case "init-vault":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("brain-vault-init-btn")?.click(), 200);
+        break;
+      case "goto-brain":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("brain-vault-card")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        break;
+      case "goto-mail":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("mail-test-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        break;
+      case "goto-tasks":
+        setActiveSection("evidence");
+        break;
+      case "goto-advanced":
+        setActiveSection("settings");
+        setTimeout(() => document.querySelector("[data-testid='settings-advanced-details']")?.setAttribute("open", ""), 100);
+        break;
+      case "ask-captures":
+        ccAskMariusAbout("what I captured recently");
+        break;
+      case "ask-latest": {
+        const latest = state.cc.sources && state.cc.sources[0];
+        ccAskMariusAbout(latest ? (latest.title || latest.path) : "my latest capture");
+        break;
+      }
+      case "ask-general":
+      default:
+        document.getElementById("cc-ask-input")?.focus();
+        document.querySelector(".cc-ask-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        break;
+    }
+  }
+
   function renderCommandCenterNextAction() {
     const el = document.getElementById("cc-next-action");
     if (!el) return;
-    const accounts = (state.cc && state.cc.accounts) || [];
-    let suggestion;
-    if (!accounts.length) {
-      suggestion = { text: "Connect Gmail or iCloud so Marius can search your mail.", cta: "Open Settings", section: "settings" };
-    } else if (!(state.recentEvidence || []).length) {
-      suggestion = { text: "Save your first page with Warden Watcher to build up Brain memory.", cta: "Open Settings", section: "settings" };
-    } else {
-      suggestion = { text: "Ask Marius what changed recently, or open the plan builder for multi-step work.", cta: "Ask Marius", section: null };
-    }
-    el.innerHTML = `<div class="cc-next">
-      <p>${escapeHtml(suggestion.text)}</p>
-      <button type="button" class="btn primary" id="cc-next-cta">${escapeHtml(suggestion.cta)}</button>
-    </div>`;
-    document.getElementById("cc-next-cta")?.addEventListener("click", () => {
-      if (suggestion.section) setActiveSection(suggestion.section);
-      else document.getElementById("cc-ask-input")?.focus();
+    const move = computeNextBestMove();
+    el.innerHTML = `
+      <div class="cc-next">
+        <h4 class="cc-next-title">${escapeHtml(move.title)}</h4>
+        <p class="cc-next-reason">${escapeHtml(move.reason)}</p>
+        <button type="button" class="btn primary cc-next-cta" id="cc-next-cta">${escapeHtml(move.ctaLabel)}</button>
+        ${move.secondary.length ? `<div class="cc-next-secondary">${move.secondary.map((s) => `<button type="button" class="cc-suggestion-chip cc-next-chip" data-cc-next-action="${s.action}">${escapeHtml(s.label)}</button>`).join("")}</div>` : ""}
+      </div>
+      <div class="cc-next-pills">
+        ${move.pills.map((p) => `<span class="cc-status-pill-mini ${p.ok === null ? "cc-pill-unknown" : (p.ok ? "cc-pill-good" : "cc-pill-warn")}">${escapeHtml(p.label)}${p.optional && p.ok === null ? " (optional)" : ""}</span>`).join("")}
+      </div>
+    `;
+    document.getElementById("cc-next-cta")?.addEventListener("click", () => runNextMoveAction(move.ctaAction));
+    el.querySelectorAll("[data-cc-next-action]").forEach((btn) => {
+      btn.addEventListener("click", () => runNextMoveAction(btn.getAttribute("data-cc-next-action")));
     });
   }
 
   async function loadCommandCenter() {
     state.cc = state.cc || {};
-    await Promise.all([loadCommandCenterCaptures(), loadCommandCenterConnections()]);
+    const captuesEl = document.getElementById("cc-captures-list");
+    const connEl = document.getElementById("cc-connections-list");
+    const nextEl = document.getElementById("cc-next-action");
+    if (captuesEl) captuesEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
+    if (connEl) connEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
+    if (nextEl) nextEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
+
+    const [sourcesRes, healthRes, accountsRes] = await Promise.allSettled([
+      requestJsonTimeout(`${MCH}/warden/brain/sources?limit=6`, {}, 8000),
+      requestJsonTimeout(`${MCH}/warden/brain/health`, {}, 8000),
+      requestJsonTimeout(`${MCH}/warden/connectors/accounts`, {}, 8000),
+    ]);
+    state.cc.sources = sourcesRes.status === "fulfilled" ? (sourcesRes.value.sources || []) : null;
+    state.cc.brainHealth = healthRes.status === "fulfilled" ? healthRes.value : null;
+    state.cc.accounts = accountsRes.status === "fulfilled" ? (accountsRes.value.accounts || []) : null;
+
+    renderCommandCenterCaptures();
+    renderCommandCenterConnections();
     renderCommandCenterTrace();
-    try {
-      const accountsRes = await requestJson(`${MCH}/warden/connectors/accounts`);
-      state.cc.accounts = accountsRes.accounts || [];
-    } catch (e) {
-      state.cc.accounts = [];
-    }
     renderCommandCenterNextAction();
   }
 
@@ -4553,6 +4713,47 @@
     }
   }
 
+  const CC_SOURCE_KEYWORDS = ["captur", "saved", "source", "brain", "note", "vault", "page", "video", "pdf"];
+
+  async function tryBrainAskFallback(msg, replyEl) {
+    const looksSourceRelated = CC_SOURCE_KEYWORDS.some((k) => msg.toLowerCase().includes(k));
+    if (!looksSourceRelated) return false;
+    try {
+      const res = await requestJsonTimeout(`${MCH}/warden/brain/ask`, {
+        method: "POST",
+        body: { question: msg },
+      }, 8000);
+      if (res && res.ok && res.answer) {
+        replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.answer)}</div>
+          <div class="cc-ask-footer muted">Answered from Brain search (Marius was unavailable)</div>`;
+        return true;
+      }
+    } catch (e) {
+      // fall through to timeout UI
+    }
+    return false;
+  }
+
+  function renderMariusTimeoutFallback(replyEl, msg) {
+    replyEl.innerHTML = `
+      <p class="cc-ask-error">Marius is taking too long.</p>
+      <div class="cc-ask-fallback-actions">
+        <button type="button" class="btn" id="cc-ask-retry">Try again</button>
+        <button type="button" class="btn" id="cc-ask-fallback-brain">Search Brain</button>
+        <button type="button" class="btn" id="cc-ask-fallback-captures">View Recent Captures</button>
+        <button type="button" class="btn" id="cc-ask-fallback-mail">Open Mail</button>
+      </div>`;
+    document.getElementById("cc-ask-retry")?.addEventListener("click", () => {
+      document.getElementById("cc-ask-input").value = msg;
+      document.getElementById("cc-ask-form")?.requestSubmit();
+    });
+    document.getElementById("cc-ask-fallback-brain")?.addEventListener("click", () => runNextMoveAction("goto-brain"));
+    document.getElementById("cc-ask-fallback-captures")?.addEventListener("click", () => {
+      document.querySelector("[data-testid='cc-card-captures']")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    document.getElementById("cc-ask-fallback-mail")?.addEventListener("click", () => runNextMoveAction("goto-mail"));
+  }
+
   function wireCommandCenter() {
     const form = document.getElementById("cc-ask-form");
     if (!form) return;
@@ -4567,10 +4768,10 @@
       replyEl.style.display = "block";
       replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
       try {
-        const res = await requestJson(`${MCH}/agents/marius/chat`, {
+        const res = await requestJsonTimeout(`${MCH}/agents/marius/chat`, {
           method: "POST",
           body: { message: msg, workspace: null },
-        });
+        }, 10000);
         if (res && res.ok && res.data) {
           replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.data.response)}</div>
             <div class="cc-ask-footer muted">${escapeHtml(res.data.model || "")}</div>`;
@@ -4578,7 +4779,8 @@
           replyEl.innerHTML = `<p class="cc-ask-error">Marius couldn't answer that: ${escapeHtml((res && res.error) || "unknown error")}</p>`;
         }
       } catch (e) {
-        replyEl.innerHTML = `<p class="cc-ask-error">Marius is offline right now. Try again in a moment.</p>`;
+        const usedFallback = await tryBrainAskFallback(msg, replyEl);
+        if (!usedFallback) renderMariusTimeoutFallback(replyEl, msg);
       } finally {
         if (submitBtn) submitBtn.disabled = false;
       }
