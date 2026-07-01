@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Warden — AI Agent Command Center</title>
+  <title>Warden — Local-first AI Command Center</title>
   <meta
     name="description"
-    content="Warden — chat with your agents, recall project memory, and dispatch supervised CLI work."
+    content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets Marius answer or act with source-backed proof."
   />
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./app.css" />
@@ -18,16 +18,41 @@
         <div class="warden-brand">
           <h1 class="warden-title">Warden</h1>
         </div>
-        <p class="sidebar-tagline">AI Agent Command Center</p>
+        <p class="sidebar-tagline">Local-first AI command center</p>
       </div>
 
-      <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">Develop Plan</button>
+      <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">+ New Task</button>
+
+      <form id="sidebar-search-form" class="sidebar-search-form" data-testid="sidebar-search-form">
+        <span class="sidebar-search-icon" aria-hidden="true">⌕</span>
+        <input type="text" id="sidebar-search-input" class="sidebar-search-input" placeholder="Search Brain…" autocomplete="off" data-testid="sidebar-search-input" />
+      </form>
+      <div id="sidebar-search-results" class="sidebar-search-results" style="display:none;" data-testid="sidebar-search-results"></div>
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
-        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command</button>
-        <button type="button" class="nav-item" data-section="agent" data-testid="nav-agent">Marius Agent</button>
-        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory Chat</button>
-        <button type="button" class="nav-item" data-section="gateway" data-testid="nav-gateway">Gateway Status</button>
+        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command Center</button>
+
+        <div class="sidebar-group-label">Agents</div>
+        <button type="button" class="nav-item nav-item-agent" data-section="agent" data-testid="nav-agent">
+          <span class="nav-item-dot nav-item-dot-good"></span>Marius <span class="nav-item-tag">command</span>
+        </button>
+        <button type="button" class="nav-item nav-item-agent" data-section="agents" data-testid="nav-agents">
+          <span class="nav-item-dot" id="nav-dot-agents"></span>Agent Library <span class="nav-item-tag">Codex · Jules</span>
+        </button>
+
+        <div class="sidebar-group-label">Tasks</div>
+        <button type="button" class="nav-item nav-item-agent" data-section="tasks" data-testid="nav-tasks">
+          <span class="nav-item-dot" id="nav-dot-tasks"></span>Tasks <span class="nav-item-tag" id="nav-tasks-count"></span>
+        </button>
+        <button type="button" class="nav-item nav-item-agent" data-section="evidence" data-testid="nav-proof">
+          <span class="nav-item-dot" id="nav-dot-proof"></span>Proof <span class="nav-item-tag" id="nav-proof-count"></span>
+        </button>
+
+        <div class="sidebar-group-label">Resources</div>
+        <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
+        <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-test-panel" data-testid="nav-mail">Mail</button>
+        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
+        <button type="button" class="nav-item nav-item-muted" data-section="gateway" data-testid="nav-gateway">Model Gateway</button>
       </nav>
 
       <footer class="sidebar-footer">
@@ -40,70 +65,51 @@
         <div class="warden-stage-main">
       <section id="warden-section-mission" class="workspace-section active cmd-section" data-section="mission" data-testid="warden-section-mission">
 
-        <!-- Onboarding card — dismissable, shown once per session -->
-        <div id="warden-onboarding-card" class="warden-onboarding-card" data-testid="warden-onboarding-card">
-          <div class="onboarding-card-header">
-            <span class="onboarding-badge">Beta</span>
-            <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
+        <!-- Thread header -->
+        <div class="thread-header" data-testid="thread-header">
+          <div class="thread-header-title">
+            <span class="thread-header-name">Command Center</span>
+            <span id="thread-status-pill" class="thread-status-pill">Local · Private</span>
           </div>
-          <h3 class="onboarding-title">Welcome to Warden</h3>
-          <p class="onboarding-copy">Warden is your local-first AI operating desk — everything you capture, connect, and ask lives here.</p>
-          <div class="onboarding-steps">
-            <div class="onboarding-step"><span class="onboarding-step-num">1</span><span>Ask Marius anything in the box above</span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">2</span><span>Save pages, mail, and notes with Warden Watcher — they land in <strong>Recent Captures</strong></span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">3</span><span>Connect Gmail or iCloud in <strong>Settings</strong> to bring mail into Brain</span></div>
-            <div class="onboarding-step"><span class="onboarding-step-num">4</span><span>Every action leaves proof in <strong>Recent Proof</strong> — nothing happens silently</span></div>
-          </div>
-          <p class="onboarding-note">Advanced: build a multi-step agent plan below when you need supervised, multi-step execution.</p>
+          <button type="button" id="warden-onboarding-toggle" class="thread-header-help" title="What is Warden?">What is this?</button>
         </div>
 
-        <!-- Command Center: Marius quick ask -->
+        <!-- Onboarding — slim, dismissable, shown once per session -->
+        <div id="warden-onboarding-card" class="warden-onboarding-card" data-testid="warden-onboarding-card">
+          <p class="onboarding-copy">Warden is a local-first AI workspace. Marius coordinates agents, captures sources into <strong>Brain</strong>, tracks <strong>Tasks</strong>, and shows <strong>Proof</strong> for everything it does.</p>
+          <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
+        </div>
+
+        <!-- Hero + command thread -->
+        <div class="thread-hero" data-testid="thread-hero">
+          <h2 class="thread-hero-title">What should Warden work on?</h2>
+          <p class="thread-hero-sub">Ask Marius to search your Brain, inspect mail, summarize a capture, or create an agent task.</p>
+        </div>
+
+        <!-- Command Center: Marius quick ask (dominant) -->
         <div class="cc-ask-card" data-testid="cc-ask-card">
           <form id="cc-ask-form" class="cc-ask-form" data-testid="cc-ask-form">
             <span class="cc-ask-icon" aria-hidden="true">◈</span>
-            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Marius anything — what did I capture today? what's in my inbox?" autocomplete="off" data-testid="cc-ask-input" />
+            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Marius, create a task, or search your saved sources…" autocomplete="off" data-testid="cc-ask-input" />
             <button type="submit" class="btn primary cc-ask-submit" data-testid="cc-ask-submit">Ask</button>
           </form>
           <div id="cc-ask-reply" class="cc-ask-reply" style="display:none;" data-testid="cc-ask-reply"></div>
+          <div class="cc-ask-suggestions" data-testid="cc-ask-suggestions">
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="What did I capture today?">What did I capture today?</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Search my inbox for recent client work">Search my inbox for recent client work</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Summarize my latest saved video">Summarize my latest saved video</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Show recent proof">Show recent proof</button>
+          </div>
         </div>
 
-        <!-- Command Center: status strip -->
-        <div id="cc-status-strip" class="cc-status-strip" data-testid="cc-status-strip"></div>
-
-        <!-- Command Center: grid -->
-        <div class="cc-grid" data-testid="cc-grid">
-          <section class="cc-card" data-testid="cc-card-captures">
-            <header class="cc-card-header">
-              <h3>Recent Captures</h3>
-              <span class="cc-card-sub">Brain vault</span>
-            </header>
-            <div id="cc-captures-list" class="cc-card-body"><p class="muted">Loading…</p></div>
-          </section>
-
-          <section class="cc-card" data-testid="cc-card-connections">
-            <header class="cc-card-header">
-              <h3>Connections</h3>
-              <span class="cc-card-sub">Accounts &amp; vault</span>
-            </header>
-            <div id="cc-connections-list" class="cc-card-body"><p class="muted">Loading…</p></div>
-          </section>
-
-          <section class="cc-card" data-testid="cc-card-trace">
-            <header class="cc-card-header">
-              <h3>Recent Proof</h3>
-              <span class="cc-card-sub">What just happened</span>
-            </header>
-            <div id="cc-trace-list" class="cc-card-body"><p class="muted">Loading…</p></div>
-          </section>
-
-          <section class="cc-card cc-card-next" data-testid="cc-card-next">
-            <header class="cc-card-header">
-              <h3>Next Action</h3>
-              <span class="cc-card-sub">Suggested</span>
-            </header>
-            <div id="cc-next-action" class="cc-card-body"><p class="muted">Loading…</p></div>
-          </section>
-        </div>
+        <!-- Recent Captures strip -->
+        <section class="cc-card cc-card-wide" data-testid="cc-card-captures">
+          <header class="cc-card-header">
+            <h3>Recent Captures</h3>
+            <span class="cc-card-sub">Brain vault</span>
+          </header>
+          <div id="cc-captures-list" class="cc-card-body"><p class="muted">Loading…</p></div>
+        </section>
 
         <!-- Plan builder — advanced, collapsed by default -->
         <details class="cc-plan-details" data-testid="cc-plan-details">
@@ -540,7 +546,7 @@
           <p class="settings-section-sub">Where Warden Watcher captures and mail saves end up — a local, Obsidian-compatible Markdown vault.</p>
         </div>
         <div class="settings-grid settings-grid-brain">
-          <div class="settings-card" data-testid="brain-vault-card">
+          <div class="settings-card" id="brain-vault-card" data-testid="brain-vault-card">
             <h3>Local Vault</h3>
             <div id="brain-vault-status" class="settings-value">Loading…</div>
             <div id="brain-vault-meta" class="settings-meta"></div>
@@ -613,36 +619,52 @@
         </div>
 
         <aside id="operator-inspector" class="operator-inspector" data-testid="operator-inspector" style="display:none;" aria-hidden="true">
-          <div class="inspector-card" data-testid="inspector-next-move">
-            <h3 class="inspector-title">Next Move</h3>
-            <p id="inspector-next-move-copy" data-testid="inspector-next-move-copy" class="inspector-copy">Loading operator guidance...</p>
-            <div class="inspector-actions">
+          <div class="inspector-card cc-card" data-testid="inspector-next-move">
+            <h3 class="inspector-title">Next Best Move</h3>
+            <div id="cc-next-action" class="cc-card-body"><p class="muted">Loading…</p></div>
+            <!-- legacy hooks kept for JS compatibility, not shown -->
+            <p id="inspector-next-move-copy" data-testid="inspector-next-move-copy" class="inspector-copy" style="display:none;"></p>
+            <div class="inspector-actions" style="display:none;">
               <button type="button" class="btn primary" id="inspector-develop-plan" data-action="develop-plan" data-testid="inspector-develop-plan">Develop Plan</button>
               <button type="button" class="btn" id="inspector-view-codex" data-testid="inspector-view-codex">View Codex</button>
             </div>
           </div>
-          <div class="inspector-card" data-testid="control-room-status">
-            <h3 class="inspector-title">Control Room Status</h3>
-            <ul class="control-room-list">
-              <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
-              <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
-              <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
-              <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
-            </ul>
+
+          <div class="inspector-card cc-card" data-testid="cc-card-connections">
+            <h3 class="inspector-title">Connected Sources</h3>
+            <div id="cc-connections-list" class="cc-card-body"><p class="muted">Loading…</p></div>
           </div>
-          <div class="inspector-card" data-testid="inspector-connected-agents">
-            <h3 class="inspector-title">Connected Agents</h3>
-            <ul class="control-room-list">
-              <li id="inspector-captain-agent" data-testid="inspector-captain-agent">Captain — Not configured</li>
-              <li id="inspector-codex-agent" data-testid="inspector-codex-agent">Codex CLI — Disabled</li>
-              <li id="inspector-jules-agent" data-testid="inspector-jules-agent">Jules Remote — Planning only</li>
-            </ul>
-            <button type="button" id="inspector-refresh-agents" data-testid="inspector-refresh-agents" class="btn" style="margin-top:8px;">Refresh Status</button>
+
+          <div class="inspector-card cc-card" data-testid="cc-card-trace">
+            <h3 class="inspector-title">Recent Proof</h3>
+            <div id="cc-trace-list" class="cc-card-body"><p class="muted">Loading…</p></div>
           </div>
-          <div class="inspector-card" data-testid="inspector-proof-gates">
-            <h3 class="inspector-title">Proof Gates</h3>
-            <div id="inspector-gates-summary" data-testid="inspector-gates-summary" class="inspector-copy">No proof gates yet.</div>
-          </div>
+
+          <details class="inspector-advanced" data-testid="inspector-advanced-status">
+            <summary class="cc-plan-summary">Advanced: System Status</summary>
+            <div class="inspector-card" data-testid="control-room-status">
+              <h3 class="inspector-title">Control Room Status</h3>
+              <ul class="control-room-list">
+                <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
+                <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
+                <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
+                <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
+              </ul>
+            </div>
+            <div class="inspector-card" data-testid="inspector-connected-agents">
+              <h3 class="inspector-title">Connected Agents (raw)</h3>
+              <ul class="control-room-list">
+                <li id="inspector-captain-agent" data-testid="inspector-captain-agent">Captain — Not configured</li>
+                <li id="inspector-codex-agent" data-testid="inspector-codex-agent">Codex CLI — Disabled</li>
+                <li id="inspector-jules-agent" data-testid="inspector-jules-agent">Jules Remote — Planning only</li>
+              </ul>
+              <button type="button" id="inspector-refresh-agents" data-testid="inspector-refresh-agents" class="btn" style="margin-top:8px;">Refresh Status</button>
+            </div>
+            <div class="inspector-card" data-testid="inspector-proof-gates">
+              <h3 class="inspector-title">Proof Gates</h3>
+              <div id="inspector-gates-summary" data-testid="inspector-gates-summary" class="inspector-copy">No proof gates yet.</div>
+            </div>
+          </details>
         </aside>
       </div>
     </main>

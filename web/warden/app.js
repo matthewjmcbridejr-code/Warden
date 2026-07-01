@@ -4456,6 +4456,103 @@
     renderCommandCenterNextAction();
   }
 
+  function wireSidebarExtras() {
+    // Suggestion chips fill + submit the ask form
+    document.querySelectorAll("[data-cc-suggest]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const input = document.getElementById("cc-ask-input");
+        if (!input) return;
+        input.value = chip.getAttribute("data-cc-suggest") || "";
+        document.getElementById("cc-ask-form")?.requestSubmit();
+      });
+    });
+
+    // Onboarding toggle
+    const toggleBtn = document.getElementById("warden-onboarding-toggle");
+    const onboardingCard = document.getElementById("warden-onboarding-card");
+    if (toggleBtn && onboardingCard) {
+      toggleBtn.addEventListener("click", () => {
+        const hidden = onboardingCard.style.display === "none";
+        onboardingCard.style.display = hidden ? "" : "none";
+        sessionStorage.setItem("warden-onboarding-dismissed", hidden ? "" : "1");
+      });
+    }
+
+    // Resource nav items that scroll to a specific settings card after switching section
+    document.querySelectorAll("[data-scroll-target]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-scroll-target");
+        setTimeout(() => {
+          document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 60);
+      });
+    });
+
+    // Sidebar Brain search
+    const searchForm = document.getElementById("sidebar-search-form");
+    if (searchForm) {
+      searchForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = document.getElementById("sidebar-search-input");
+        const resultsEl = document.getElementById("sidebar-search-results");
+        const q = (input.value || "").trim();
+        if (!q || !resultsEl) return;
+        resultsEl.style.display = "block";
+        resultsEl.innerHTML = `<p class="muted sidebar-search-empty">Searching…</p>`;
+        try {
+          const data = await requestJson(`${MCH}/warden/brain/search?q=${encodeURIComponent(q)}&limit=5`);
+          const results = data.results || [];
+          if (!results.length) {
+            resultsEl.innerHTML = `<p class="muted sidebar-search-empty">No matches in Brain yet.</p>`;
+            return;
+          }
+          resultsEl.innerHTML = results.map((r) => {
+            const title = escapeHtml(r.title || r.path || "Untitled");
+            return `<div class="sidebar-search-result">
+              <span class="sidebar-search-result-title" title="${title}">${title}</span>
+              <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+            </div>`;
+          }).join("");
+          resultsEl.querySelectorAll("[data-cc-ask]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              setActiveSection("mission");
+              ccAskMariusAbout(btn.getAttribute("data-cc-ask"));
+              resultsEl.style.display = "none";
+            });
+          });
+        } catch (e) {
+          resultsEl.innerHTML = `<p class="muted sidebar-search-empty">Brain search unavailable.</p>`;
+        }
+      });
+    }
+  }
+
+  async function loadSidebarAgentsAndTasks() {
+    const tasksDot = document.getElementById("nav-dot-tasks");
+    const tasksCount = document.getElementById("nav-tasks-count");
+    const proofDot = document.getElementById("nav-dot-proof");
+    const proofCount = document.getElementById("nav-proof-count");
+    const agentsDot = document.getElementById("nav-dot-agents");
+
+    const activeSteps = (state.activeCaptainPlan && state.activeCaptainPlan.steps) || [];
+    if (tasksCount) tasksCount.textContent = activeSteps.length ? String(activeSteps.length) : "";
+    if (tasksDot) tasksDot.className = `nav-item-dot ${activeSteps.length ? "nav-item-dot-good" : ""}`;
+
+    const evidenceCount = (state.recentEvidence || []).length;
+    if (proofCount) proofCount.textContent = evidenceCount ? String(evidenceCount) : "";
+    if (proofDot) proofDot.className = `nav-item-dot ${evidenceCount ? "nav-item-dot-good" : ""}`;
+
+    if (agentsDot) {
+      try {
+        const data = await requestJson(`${MCH}/agents`);
+        const runnable = (data.agents || []).some((a) => a.runnable);
+        agentsDot.className = `nav-item-dot ${runnable ? "nav-item-dot-good" : "nav-item-dot-warn"}`;
+      } catch (e) {
+        agentsDot.className = "nav-item-dot nav-item-dot-warn";
+      }
+    }
+  }
+
   function wireCommandCenter() {
     const form = document.getElementById("cc-ask-form");
     if (!form) return;
@@ -4519,6 +4616,7 @@
     wireMailTestPanel();
     wireBrainVaultSettings();
     wireCommandCenter();
+    wireSidebarExtras();
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
@@ -4529,6 +4627,7 @@
     }
     loadCommandCenter().catch((e) => console.error("command center load error", e));
     loadBrainVaultSettings().catch((e) => console.error("brain vault settings load error", e));
+    loadSidebarAgentsAndTasks().catch((e) => console.error("sidebar agents/tasks load error", e));
 
     // initial status check for disabled note etc is handled in deploy
     // If user has runner flags in this process (e.g. private), card will reflect Ready
