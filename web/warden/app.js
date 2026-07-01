@@ -1,6 +1,6 @@
 (function () {
   const MCH = "/api/mcharness";
-  const UI_BUILD_VERSION = "phase1-visual";
+  const UI_BUILD_VERSION = "phase3-routing";
   const JULES_VIEW_URL = "https://jules.google.com/session";
   const CAPTAIN_PROFILE_BASE = "/web/warden/agent_profiles";
   const CAPTAIN_PROFILE_STORAGE_KEY = "warden.captain.instructionProfile";
@@ -1728,6 +1728,55 @@
     return !!(window.WardenControlRoom && window.WardenControlRoom.isDemoMode && window.WardenControlRoom.isDemoMode());
   }
 
+  const TASK_STATUS_LABEL = {
+    queued: "Ready",
+    revised: "Ready",
+    dispatched: "Running",
+    running: "Running",
+    passed: "Done",
+    done: "Done",
+    blocked: "Blocked",
+    needs_review: "Needs Review",
+  };
+
+  function renderTasksBoard() {
+    const empty = document.querySelector("[data-testid='tasks-empty-state']");
+    const board = document.getElementById("tasks-board");
+    const titleEl = document.getElementById("tasks-board-title");
+    const metaEl = document.getElementById("tasks-board-meta");
+    const stepsEl = document.getElementById("tasks-board-steps");
+    if (!empty || !board || !stepsEl) return;
+    const plan = state.activeCaptainPlan;
+    if (!plan || !plan.steps || !plan.steps.length || plan.status === "stopped") {
+      empty.style.display = "";
+      board.style.display = "none";
+      return;
+    }
+    empty.style.display = "none";
+    board.style.display = "";
+    if (titleEl) titleEl.textContent = plan.title || "Active plan";
+    if (metaEl) metaEl.textContent = `${plan.steps.length} step${plan.steps.length === 1 ? "" : "s"} · ${plan.status || "active"}`;
+    stepsEl.innerHTML = plan.steps.map((step) => {
+      const rawStatus = step.status || "queued";
+      const label = TASK_STATUS_LABEL[rawStatus] || rawStatus;
+      const dotClass = rawStatus === "blocked" ? "cc-dot-bad" : (rawStatus === "passed" || rawStatus === "done") ? "cc-dot-good" : (rawStatus === "running" || rawStatus === "dispatched") ? "cc-dot-warn" : "";
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-dot ${dotClass}"></span>
+          <span class="cc-row-title">${escapeHtml(step.title || step.id)}</span>
+        </div>
+        <div class="cc-row-meta">
+          <span class="cc-status-pill-mini ${dotClass === "cc-dot-good" ? "cc-pill-good" : dotClass === "cc-dot-bad" ? "cc-pill-warn" : ""}">${escapeHtml(label)}</span>
+        </div>
+      </div>`;
+    }).join("");
+    stepsEl.insertAdjacentHTML("beforeend", `<button type="button" class="btn primary" id="tasks-board-manage-btn" style="margin-top:12px;">Manage in Command Center</button>`);
+    document.getElementById("tasks-board-manage-btn")?.addEventListener("click", () => {
+      setActiveSection("mission");
+      setTimeout(() => document.getElementById("current-mission-plan")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    });
+  }
+
   function renderMissionPlanPanel() {
     const empty = document.getElementById("current-mission-empty");
     const panel = document.getElementById("current-mission-plan");
@@ -1736,6 +1785,7 @@
     const controls = document.getElementById("captain-plan-controls");
     const plan = state.activeCaptainPlan;
     if (!empty || !panel || !header || !stepsEl || !controls) return;
+    renderTasksBoard();
 
     if (isControlRoomDemoMode()) {
       empty.style.display = "none";
@@ -4763,6 +4813,52 @@
     document.getElementById("cc-ask-fallback-mail")?.addEventListener("click", () => runNextMoveAction("goto-mail"));
   }
 
+  // ─── Command box intent routing ──────────────────────────────────────────
+  // "make a website that says hello world" -> task plan, not a chat answer.
+  // "search my inbox for..." -> Mail. Everything else -> Ask Marius (with the
+  // existing Brain-ask fallback on timeout).
+
+  const CC_TASK_INTENT_RE = /^(make|build|create|write|implement|fix|refactor|set ?up|add|deploy|ship|develop)\b/i;
+  const CC_TASK_KEYWORD_RE = /\b(website|webpage|app|script|feature|bug|endpoint|function|component)\b/i;
+  const CC_MAIL_INTENT_RE = /\b(inbox|email|mail)\b/i;
+
+  function classifyCommandIntent(msg) {
+    if (CC_TASK_INTENT_RE.test(msg) || CC_TASK_KEYWORD_RE.test(msg)) return "task";
+    if (CC_MAIL_INTENT_RE.test(msg)) return "mail";
+    return "ask";
+  }
+
+  async function handleTaskIntent(msg, replyEl) {
+    replyEl.innerHTML = `<p class="muted">Creating a task plan…</p>`;
+    try {
+      await openCaptainDeckModal();
+      const goalEl = document.getElementById("captain-goal");
+      if (goalEl) goalEl.value = msg;
+      await createCaptainPlan();
+      closeCaptainDeckModal();
+      const plan = state.activeCaptainPlan;
+      if (plan && plan.steps && plan.steps.length) {
+        replyEl.innerHTML = `<div class="cc-ask-answer">Created a task plan: <strong>${escapeHtml(plan.title || msg)}</strong> (${plan.steps.length} step${plan.steps.length === 1 ? "" : "s"}). Review it below.</div>
+          <div class="cc-ask-footer muted">${escapeHtml(plan.source === "real_captain" ? "Captain-planned" : "Local deterministic plan (no provider key configured)")}</div>`;
+      } else {
+        replyEl.innerHTML = `<p class="cc-ask-error">Plan came back empty — check Advanced: System Status for Captain configuration.</p>`;
+      }
+      document.getElementById("current-mission-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      replyEl.innerHTML = `<p class="cc-ask-error">Couldn't create a task plan: ${escapeHtml(e.message || String(e))}</p>`;
+    }
+  }
+
+  function handleMailIntent(msg, replyEl) {
+    replyEl.innerHTML = `<p class="muted">Opening Mail search for this…</p>`;
+    setActiveSection("settings");
+    setTimeout(() => {
+      const queryEl = document.getElementById("mail-test-query");
+      if (queryEl) queryEl.value = msg.replace(CC_MAIL_INTENT_RE, "").replace(/\s+/g, " ").trim() || msg;
+      document.getElementById("mail-test-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  }
+
   function wireCommandCenter() {
     const form = document.getElementById("cc-ask-form");
     if (!form) return;
@@ -4775,8 +4871,18 @@
       const submitBtn = form.querySelector(".cc-ask-submit");
       if (submitBtn) submitBtn.disabled = true;
       replyEl.style.display = "block";
-      replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
+
+      const intent = classifyCommandIntent(msg);
       try {
+        if (intent === "task") {
+          await handleTaskIntent(msg, replyEl);
+          return;
+        }
+        if (intent === "mail") {
+          handleMailIntent(msg, replyEl);
+          return;
+        }
+        replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
         const res = await requestJsonTimeout(`${MCH}/agents/marius/chat`, {
           method: "POST",
           body: { message: msg, workspace: null },

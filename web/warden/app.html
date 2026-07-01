@@ -9,7 +9,7 @@
     content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets Marius answer or act with source-backed proof."
   />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./app.css?v=phase1-visual" />
+  <link rel="stylesheet" href="./app.css?v=phase3-routing" />
 </head>
 <body>
   <div class="warden-shell" data-testid="warden-shell">
@@ -224,8 +224,15 @@
         </header>
         <div class="empty-state-card" data-testid="tasks-empty-state">
           <h3>No active task plan yet.</h3>
-          <p>Use Develop Plan to create a supervised plan. Captain steps will appear here.</p>
+          <p>Type a build/fix request in the Command Center box, or use Develop Plan for a supervised multi-step plan.</p>
           <button type="button" class="btn primary" data-action="develop-plan" data-testid="develop-plan-tasks">Develop Plan</button>
+        </div>
+        <div id="tasks-board" class="cc-card cc-card-wide" data-testid="tasks-board" style="display:none;">
+          <header class="cc-card-header">
+            <h3 id="tasks-board-title">Active plan</h3>
+            <span class="cc-card-sub" id="tasks-board-meta"></span>
+          </header>
+          <div id="tasks-board-steps" class="cc-card-body"></div>
         </div>
       </section>
 
@@ -1031,7 +1038,7 @@
     </div>
   </div>
 
-  <script src="./app.js?v=phase1-visual"></script>
+  <script src="./app.js?v=phase3-routing"></script>
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>
