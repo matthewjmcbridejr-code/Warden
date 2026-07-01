@@ -2130,6 +2130,85 @@
     }
   }
 
+  async function loadBrainVaultSettings() {
+    const statusEl = document.getElementById("brain-vault-status");
+    const metaEl = document.getElementById("brain-vault-meta");
+    const mirrorEl = document.getElementById("brain-mirror-status");
+    if (!statusEl) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/brain/health`);
+      const local = data.local || {};
+      if (local.vault_exists) {
+        statusEl.innerHTML = `<span class="cc-dot cc-dot-good" style="display:inline-block;margin-right:6px;"></span>Ready — ${local.source_count || 0} source${local.source_count === 1 ? "" : "s"} indexed`;
+      } else {
+        statusEl.innerHTML = `<span class="cc-dot cc-dot-warn" style="display:inline-block;margin-right:6px;"></span>Not initialized`;
+      }
+      if (metaEl) metaEl.textContent = local.vault_path ? `Vault: ${local.vault_path}` : "";
+      if (mirrorEl) {
+        mirrorEl.innerHTML = data.hybrid_enabled
+          ? `<span class="cc-dot cc-dot-good" style="display:inline-block;margin-right:6px;"></span>Enabled`
+          : `<span class="cc-dot" style="display:inline-block;margin-right:6px;"></span>Not enabled`;
+      }
+    } catch (e) {
+      statusEl.textContent = "Could not reach Brain service.";
+    }
+  }
+
+  function wireBrainVaultSettings() {
+    const initBtn = document.getElementById("brain-vault-init-btn");
+    const reindexBtn = document.getElementById("brain-vault-reindex-btn");
+    const actionStatus = document.getElementById("brain-vault-action-status");
+    if (initBtn) initBtn.addEventListener("click", async () => {
+      initBtn.disabled = true;
+      if (actionStatus) actionStatus.textContent = "Initializing…";
+      try {
+        await requestJson(`${MCH}/warden/brain/init-vault`, { method: "POST" });
+        if (actionStatus) actionStatus.textContent = "Vault initialized.";
+        await loadBrainVaultSettings();
+      } catch (e) {
+        if (actionStatus) actionStatus.textContent = `Error: ${e.message}`;
+      } finally {
+        initBtn.disabled = false;
+      }
+    });
+    if (reindexBtn) reindexBtn.addEventListener("click", async () => {
+      reindexBtn.disabled = true;
+      if (actionStatus) actionStatus.textContent = "Reindexing…";
+      try {
+        const res = await requestJson(`${MCH}/warden/brain/reindex`, { method: "POST" });
+        if (actionStatus) actionStatus.textContent = `Reindexed ${res.indexed || 0} source(s).`;
+        await loadBrainVaultSettings();
+      } catch (e) {
+        if (actionStatus) actionStatus.textContent = `Error: ${e.message}`;
+      } finally {
+        reindexBtn.disabled = false;
+      }
+    });
+  }
+
+  async function saveMailToBrain(btn, { accountId, messageId, subject, fromAddr, bodyText }) {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Saving…";
+    try {
+      await requestJson(`${MCH}/warden/brain/ingest`, {
+        method: "POST",
+        body: {
+          url: `mail://${accountId}/${messageId}`,
+          title: subject || "(no subject)",
+          source_type: "webpage",
+          content_text: bodyText || `From: ${fromAddr || "unknown"}\n\n(subject only — open the message to save its body)`,
+          tags: ["mail"],
+        },
+      });
+      btn.textContent = "Saved to Brain ✓";
+    } catch (e) {
+      btn.textContent = "Save failed";
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+      return;
+    }
+  }
+
   function wireMailTestPanel() {
     const searchBtn = document.getElementById("mail-test-search-btn");
     if (!searchBtn) return;
@@ -2158,8 +2237,15 @@
                 </div>
                 <div class="mail-result-from">From: ${escapeHtml(m.from_addr || "")}</div>
                 <div class="mail-result-snippet">${escapeHtml(m.snippet || "")}</div>
-                <button type="button" class="btn mail-read-btn" style="font-size:0.75rem;margin-top:4px;"
-                  data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}">Read</button>
+                <div class="mail-result-actions" style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+                  <button type="button" class="btn mail-read-btn" style="font-size:0.75rem;"
+                    data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}">Read</button>
+                  <button type="button" class="btn mail-save-brain-btn" style="font-size:0.75rem;"
+                    data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}"
+                    data-subject="${escapeHtml(m.subject || "")}" data-from="${escapeHtml(m.from_addr || "")}">Save to Brain</button>
+                  <button type="button" class="btn mail-ask-marius-btn" style="font-size:0.75rem;"
+                    data-subject="${escapeHtml(m.subject || "")}">Ask Marius</button>
+                </div>
                 <div class="mail-read-body" style="display:none;"></div>
               </div>`).join("");
             // Wire read buttons
@@ -2167,19 +2253,44 @@
               btn.addEventListener("click", async () => {
                 const msgId = btn.getAttribute("data-msg-id");
                 const accId = btn.getAttribute("data-acc-id");
-                const bodyEl = btn.nextElementSibling;
+                const bodyEl = btn.closest(".mail-result-card").querySelector(".mail-read-body");
                 btn.disabled = true;
                 btn.textContent = "Loading…";
                 try {
                   const msgData = await requestJson(`${MCH}/warden/mail/messages/${encodeURIComponent(accId)}/${encodeURIComponent(msgId)}`);
                   const body = (msgData.message && msgData.message.body_text) || "(empty body)";
-                  if (bodyEl) { bodyEl.style.display = ""; bodyEl.textContent = body.slice(0, 2000) + (body.length > 2000 ? "\n…[truncated]" : ""); }
+                  if (bodyEl) {
+                    bodyEl.style.display = "";
+                    bodyEl.textContent = body.slice(0, 2000) + (body.length > 2000 ? "\n…[truncated]" : "");
+                    bodyEl.dataset.fullBody = body;
+                  }
                   btn.style.display = "none";
                 } catch (e) {
                   if (bodyEl) { bodyEl.style.display = ""; bodyEl.textContent = `Error: ${e.message}`; }
                   btn.textContent = "Read";
                   btn.disabled = false;
                 }
+              });
+            });
+            // Wire save-to-brain buttons
+            resultsEl.querySelectorAll(".mail-save-brain-btn").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                const card = btn.closest(".mail-result-card");
+                const bodyEl = card ? card.querySelector(".mail-read-body") : null;
+                saveMailToBrain(btn, {
+                  accountId: btn.getAttribute("data-acc-id"),
+                  messageId: btn.getAttribute("data-msg-id"),
+                  subject: btn.getAttribute("data-subject"),
+                  fromAddr: btn.getAttribute("data-from"),
+                  bodyText: bodyEl ? bodyEl.dataset.fullBody : "",
+                });
+              });
+            });
+            // Wire ask-marius buttons
+            resultsEl.querySelectorAll(".mail-ask-marius-btn").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                setActiveSection("mission");
+                ccAskMariusAbout(btn.getAttribute("data-subject") || "this email");
               });
             });
           }
@@ -4406,6 +4517,7 @@
     wireSimpleUI();
     wireMariusEvents(); // Initialize Marius UI bindings
     wireMailTestPanel();
+    wireBrainVaultSettings();
     wireCommandCenter();
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
@@ -4416,6 +4528,7 @@
       await window.WardenControlRoom.refresh({ quiet: true });
     }
     loadCommandCenter().catch((e) => console.error("command center load error", e));
+    loadBrainVaultSettings().catch((e) => console.error("brain vault settings load error", e));
 
     // initial status check for disabled note etc is handled in deploy
     // If user has runner flags in this process (e.g. private), card will reflect Ready

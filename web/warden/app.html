@@ -522,52 +522,45 @@
       <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
         <header class="workspace-header">
           <h2 class="workspace-title">Settings</h2>
-          <p class="workspace-subhead">Captain planning and service configuration.</p>
+          <p class="workspace-subhead">Connect accounts, manage your Brain vault, and check what's set up.</p>
         </header>
-        <div class="settings-grid">
-          <div class="settings-card">
-            <h3>Captain / OpenRouter</h3>
-            <div id="settings-captain-status" data-testid="settings-captain-status" class="settings-value">Loading Captain status...</div>
-            <div id="settings-captain-model" data-testid="settings-captain-model" class="settings-meta"></div>
-            <div id="settings-captain-key-source" data-testid="settings-captain-key-source" class="settings-meta"></div>
-            <button type="button" id="configure-captain-btn" data-testid="configure-captain" class="btn primary">Configure Captain</button>
-          </div>
-          <div class="settings-card">
-            <h3>Agent Registry</h3>
-            <p id="settings-agent-note" data-testid="settings-agent-note" class="settings-meta">Loading agent setup note...</p>
-          </div>
-          <div class="settings-card" data-testid="settings-safety-card">
-            <h3>Safety</h3>
-            <ul class="settings-safety-list" data-testid="settings-safety-list">
-              <li id="settings-public-runner" data-testid="settings-public-runner">Public runner: Disabled on public service</li>
-              <li id="settings-private-runner" data-testid="settings-private-runner">Private runner: Available only on private service</li>
-              <li id="settings-shell-input" data-testid="settings-shell-input">Arbitrary shell input: Disabled</li>
-              <li id="settings-agent-registration" data-testid="settings-agent-registration">Agent registration: Private only</li>
-            </ul>
-          </div>
-          <div class="settings-card">
-            <h3>Codex CLI</h3>
-            <p id="settings-codex-status" data-testid="settings-codex-status" class="settings-meta">Loading Codex status...</p>
-          </div>
-          <div class="settings-card">
-            <h3>Jules Remote</h3>
-            <p id="settings-jules-status" data-testid="settings-jules-status" class="settings-meta">Loading Jules status...</p>
-          </div>
-        </div>
 
         <!-- Connectors -->
         <div class="settings-section-header">
-          <h3 class="settings-section-title">Account Connectors <span class="settings-beta-tag">Beta</span></h3>
-          <p class="settings-section-sub">Connect mail accounts to let Marius search your inbox. All credentials are stored locally — never sent to agents or included in API responses.</p>
+          <h3 class="settings-section-title">Account Connectors</h3>
+          <p class="settings-section-sub">Connect mail accounts to let Marius search your inbox. Credentials are stored locally — never sent to agents or included in API responses.</p>
         </div>
         <div id="connectors-provider-list" class="connectors-provider-list" data-testid="connectors-provider-list">
           <div class="connectors-loading">Loading providers…</div>
         </div>
 
-        <!-- Mail test panel -->
-        <div class="settings-section-header" style="margin-top:24px;">
-          <h3 class="settings-section-title">Test Mail Search</h3>
-          <p class="settings-section-sub">Search your connected mail accounts. Results show subject, sender, and snippet — no message bodies by default.</p>
+        <!-- Brain / Vault -->
+        <div class="settings-section-header" style="margin-top:28px;">
+          <h3 class="settings-section-title">Brain &amp; Vault</h3>
+          <p class="settings-section-sub">Where Warden Watcher captures and mail saves end up — a local, Obsidian-compatible Markdown vault.</p>
+        </div>
+        <div class="settings-grid settings-grid-brain">
+          <div class="settings-card" data-testid="brain-vault-card">
+            <h3>Local Vault</h3>
+            <div id="brain-vault-status" class="settings-value">Loading…</div>
+            <div id="brain-vault-meta" class="settings-meta"></div>
+            <div class="button-row" style="margin-top:8px;">
+              <button type="button" id="brain-vault-init-btn" class="btn">Initialize Vault</button>
+              <button type="button" id="brain-vault-reindex-btn" class="btn">Reindex</button>
+            </div>
+            <div id="brain-vault-action-status" class="settings-meta"></div>
+          </div>
+          <div class="settings-card" data-testid="brain-mirror-card">
+            <h3>Google Brain Mirror</h3>
+            <div id="brain-mirror-status" class="settings-value">Loading…</div>
+            <p class="settings-meta">Optional. Mirrors your vault into Vertex AI Search for hybrid recall. Off by default — everything works locally without it.</p>
+          </div>
+        </div>
+
+        <!-- Mail -->
+        <div class="settings-section-header" style="margin-top:28px;">
+          <h3 class="settings-section-title">Mail</h3>
+          <p class="settings-section-sub">Search a connected inbox. Read-only — no send, delete, or bulk actions. Save anything useful into Brain.</p>
         </div>
         <div class="mail-test-panel" id="mail-test-panel">
           <div class="mail-test-row">
@@ -580,6 +573,41 @@
           <div id="mail-test-results" class="mail-test-results" style="display:none;"></div>
           <p class="connector-provider-note" style="margin-top:8px;">Agents never receive raw tokens or passwords. Mail send is disabled unless explicitly enabled.</p>
         </div>
+
+        <!-- Advanced: service configuration -->
+        <details class="cc-plan-details" style="margin-top:28px;" data-testid="settings-advanced-details">
+          <summary class="cc-plan-summary">Advanced: service configuration (Captain, agents, safety)</summary>
+          <div class="settings-grid" style="margin-top:12px;">
+            <div class="settings-card">
+              <h3>Captain / OpenRouter</h3>
+              <div id="settings-captain-status" data-testid="settings-captain-status" class="settings-value">Loading Captain status...</div>
+              <div id="settings-captain-model" data-testid="settings-captain-model" class="settings-meta"></div>
+              <div id="settings-captain-key-source" data-testid="settings-captain-key-source" class="settings-meta"></div>
+              <button type="button" id="configure-captain-btn" data-testid="configure-captain" class="btn primary">Configure Captain</button>
+            </div>
+            <div class="settings-card">
+              <h3>Agent Registry</h3>
+              <p id="settings-agent-note" data-testid="settings-agent-note" class="settings-meta">Loading agent setup note...</p>
+            </div>
+            <div class="settings-card" data-testid="settings-safety-card">
+              <h3>Safety</h3>
+              <ul class="settings-safety-list" data-testid="settings-safety-list">
+                <li id="settings-public-runner" data-testid="settings-public-runner">Public runner: Disabled on public service</li>
+                <li id="settings-private-runner" data-testid="settings-private-runner">Private runner: Available only on private service</li>
+                <li id="settings-shell-input" data-testid="settings-shell-input">Arbitrary shell input: Disabled</li>
+                <li id="settings-agent-registration" data-testid="settings-agent-registration">Agent registration: Private only</li>
+              </ul>
+            </div>
+            <div class="settings-card">
+              <h3>Codex CLI</h3>
+              <p id="settings-codex-status" data-testid="settings-codex-status" class="settings-meta">Loading Codex status...</p>
+            </div>
+            <div class="settings-card">
+              <h3>Jules Remote</h3>
+              <p id="settings-jules-status" data-testid="settings-jules-status" class="settings-meta">Loading Jules status...</p>
+            </div>
+          </div>
+        </details>
 
       </section>
         </div>
