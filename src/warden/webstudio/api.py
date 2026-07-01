@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import dns_namecheap, seo, vercel
+from . import dns_migration, dns_namecheap, dns_strategy, seo, vercel
 from .browser import capture_screenshots, playwright_installed
 from .proof import DEFAULT_REPORTS_DIR, ProofPack
 from .registry import DEFAULT_REGISTRY_PATH, RegistryError, get_site, load_registry
@@ -82,7 +82,41 @@ def run_audit(payload: AuditRequest) -> dict[str, Any]:
     result["vercel_installed"] = vercel.vercel_installed()
     result["playwright_installed"] = playwright_installed()
     result["dns_credentials"] = dns_namecheap.env_credentials_status()
+    result["dns_plan"] = dns_strategy.plan_for_site(site)
     return result
+
+
+@router.get("/sites/{site_name}/dns-plan")
+def get_dns_plan(site_name: str) -> dict[str, Any]:
+    site = _load_site(site_name)
+    return {"ok": True, "dns_plan": dns_strategy.plan_for_site(site)}
+
+
+@router.post("/sites/{site_name}/dns-migration-report")
+def generate_dns_migration_report(site_name: str) -> dict[str, Any]:
+    """Read-only DNS inventory + production-safe migration report. Never mutates DNS."""
+    site = _load_site(site_name)
+
+    nameservers = dns_migration.detect_authoritative_nameservers(site.domain)
+    records: list[dns_namecheap.DnsRecord] = []
+    inventory_note = None
+    if dns_namecheap.credentials_available():
+        try:
+            records = dns_namecheap.fetch_current_records(site.domain)
+        except Exception as exc:
+            inventory_note = f"Namecheap record fetch failed: {exc}"
+    else:
+        inventory_note = "Namecheap credentials unavailable; inventory built from nameserver lookup only. " + " ".join(
+            dns_namecheap.setup_instructions()
+        )
+
+    inventory = dns_migration.build_inventory(site.domain, records, nameservers=nameservers)
+    plan = dns_migration.plan_production_migration(site, inventory)
+    if inventory_note:
+        plan["inventory_note"] = inventory_note
+
+    report_path = dns_migration.write_migration_report(plan)
+    return {"ok": True, "report_path": str(report_path), "plan": plan}
 
 
 @router.post("/proof-pack")

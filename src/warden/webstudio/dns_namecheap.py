@@ -1,5 +1,11 @@
 """Namecheap DNS safety layer: read, backup, diff, propose. Writes are approval-gated.
 
+This is the FALLBACK DNS path. For Vercel-hosted WebStudio sites, prefer
+Vercel nameserver delegation (see dns_strategy.py) — Namecheap stays the
+registrar, Vercel answers DNS. Use this module's BasicDNS record editing
+only when a domain needs Namecheap-specific services (email forwarding,
+URL forwarding, Dynamic DNS) or non-Vercel routing.
+
 Namecheap's `namecheap.domains.dns.setHosts` API REPLACES the entire host
 record set in one call — it does not merge. Any write path built on top of
 this module MUST fetch current records first, merge the proposed change into
@@ -58,6 +64,7 @@ class DnsDiffPlan:
     def to_dict(self) -> dict:
         return {
             "domain": self.domain,
+            "strategy": "namecheap_basicdns",
             "existing_count": len(self.existing_records),
             "additions": [r.to_dict() for r in self.additions],
             "modifications": [
@@ -66,6 +73,7 @@ class DnsDiffPlan:
             "unchanged_count": len(self.unchanged),
             "merged_record_count": len(self.merged_records),
             "approved": self.approved,
+            "requires_manual_approval": True,
             "risk_note": (
                 "Namecheap setHosts replaces the full record set. This plan's merged_records "
                 "list is what would be sent — it always includes untouched existing records."

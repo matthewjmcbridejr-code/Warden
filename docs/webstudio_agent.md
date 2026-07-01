@@ -107,7 +107,112 @@ print(vercel.extract_preview_url(result))
 Production deploys are a manual, explicit operator action outside this
 module (`vercel --prod`, run by you in your own terminal).
 
-## Namecheap DNS safety
+## DNS strategy: registrar vs. DNS host
+
+Registrar and DNS host are modeled as **separate** fields on `SiteConfig` —
+never assume "Namecheap" means Namecheap answers DNS queries:
+
+- `registrar_provider` — who the domain is bought through (e.g. `namecheap`)
+- `dns_provider` — who answers DNS queries: `vercel` | `namecheap` | `cloudflare` | `other`
+- `host_provider` — who serves the site (e.g. `vercel`)
+- `dns_strategy` — `vercel_nameservers` | `external_dns_records` | `namecheap_basicdns`
+- `nameserver_target` — set to `vercel` automatically when `dns_strategy` is `vercel_nameservers`
+
+**Policy: for Vercel-hosted sites, prefer Vercel nameserver delegation.**
+Namecheap remains the registrar; Vercel's nameservers (`ns1.vercel-dns.com`,
+`ns2.vercel-dns.com`) answer DNS. Only fall back to `namecheap_basicdns`
+(editing Namecheap host records directly) when the domain needs a
+Namecheap-specific service — email forwarding, URL forwarding, Dynamic DNS —
+or non-Vercel routing.
+
+`warden/webstudio/dns_strategy.py` builds the recommendation and, for the
+`vercel_nameservers` strategy, the concrete delegation plan:
+
+```python
+from warden.webstudio.registry import get_site
+from warden.webstudio import dns_strategy
+
+site = get_site("unlck", "configs/webstudio.sites.yaml")
+plan = dns_strategy.plan_for_site(site)
+print(plan)  # recommended_strategy: "vercel_nameservers", requires_manual_approval: True
+```
+
+### unlck.shop sandbox setup
+
+`unlck.shop` is the first sandbox domain proving this policy end to end:
+
+- `registrar_provider: namecheap`, `dns_provider: vercel`, `host_provider: vercel`
+- `dns_strategy: vercel_nameservers`, `nameserver_target: vercel`
+- `migration_status: sandbox` — the only domain currently cleared for a
+  direct Vercel nameserver cutover
+- Production domain: `unlck.shop`; aliases: `www.unlck.shop`, `test.unlck.shop`, `demo.unlck.shop`
+
+Nameserver delegation is a **registrar-level** change (made at Namecheap) and
+is never applied automatically — `plan_vercel_nameserver_delegation()` only
+describes the target state. Back up current Namecheap DNS records first
+(see below) in case you need to fall back to Namecheap DNS later. Applying
+the delegation is a manual, explicitly approved operator action.
+
+## Production DNS migration policy
+
+Matt already has production sites hosted on Vercel with domains bought at
+Namecheap. Some may use Namecheap BasicDNS today; some may already point at
+Vercel or another DNS host. **Production uptime matters, so migrating a
+domain's DNS is a safety workflow, not a one-step switch.**
+
+Policy:
+
+1. **Existing production domains stay as-is until audited.** Every site
+   defaults to `migration_status: existing`, and
+   `dns_strategy.recommend_migration_action(site)` returns
+   `"no_automatic_migration"` for both `existing` and `planned` status —
+   regardless of what `dns_strategy`/`dns_provider` is configured. Nothing
+   ever auto-recommends a cutover for these domains.
+2. **New/sandbox Vercel-only domains can use Vercel DNS directly.** Only
+   `migration_status: sandbox` domains (currently just `unlck.shop`) get a
+   ready-to-apply `vercel_nameservers` delegation plan from
+   `dns_strategy.plan_for_site()`.
+3. **Production migration requires, in order:** a DNS inventory
+   (`dns_migration.build_inventory`), a Vercel zone parity checklist
+   (`parity_checklist`), missing-record warnings
+   (`missing_record_warnings`), and an explicit approval step before any
+   nameserver or record change (`cutover_checklist`, `rollback_checklist`).
+4. **Email records must be preserved.** Vercel does not provide email
+   hosting — MX and TXT (SPF/DKIM/verification) records are always flagged
+   `present_must_preserve` in the parity checklist and called out in
+   `missing_record_warnings`.
+5. **Namecheap remains the registrar** unless Matt separately decides to
+   transfer registration — DNS delegation to Vercel's nameservers does not
+   change who the domain is registered through.
+
+`migration_status` lifecycle: `existing` → `planned` (inventory + parity
+checklist drafted) → `approved` (Matt has explicitly approved cutover) →
+`migrated` (cutover completed and verified). Only `sandbox` skips straight
+to "safe to migrate directly" since it's disposable/non-critical.
+
+### Running a production DNS migration report
+
+This never changes anything — it only inventories and plans:
+
+```python
+from warden.webstudio.registry import get_site
+from warden.webstudio import dns_migration, dns_namecheap
+
+site = get_site("usemarius", "configs/webstudio.sites.yaml")
+nameservers = dns_migration.detect_authoritative_nameservers(site.domain)
+records = dns_namecheap.fetch_current_records(site.domain) if dns_namecheap.credentials_available() else []
+inventory = dns_migration.build_inventory(site.domain, records, nameservers=nameservers)
+plan = dns_migration.plan_production_migration(site, inventory)
+report_path = dns_migration.write_migration_report(plan)
+print(report_path, plan["recommended_action"])  # "no_automatic_migration" for an existing production domain
+```
+
+Or via the API: `POST /api/mcharness/webstudio/sites/{name}/dns-migration-report`.
+
+## Namecheap DNS safety (fallback path)
+
+Use this path only when a domain needs Namecheap-specific DNS features, or
+hasn't been delegated to Vercel yet.
 
 1. Set env vars (never printed by this module): `NAMECHEAP_API_USER`,
    `NAMECHEAP_API_KEY`, `NAMECHEAP_USERNAME`, `NAMECHEAP_CLIENT_IP`.

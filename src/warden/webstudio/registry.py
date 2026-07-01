@@ -5,10 +5,29 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DEFAULT_REGISTRY_PATH = Path("configs/webstudio.sites.yaml")
 EXAMPLE_REGISTRY_PATH = Path("configs/webstudio.sites.example.yaml")
+
+# Registrar (who the domain is bought through) and DNS host (who answers DNS
+# queries) are separate concerns. A domain can be registered at Namecheap
+# while its nameservers point at Vercel — that's the recommended setup for
+# Vercel-hosted WebStudio sites. Namecheap's own DNS (BasicDNS host records)
+# is a fallback path for domains that need Namecheap-specific services
+# (email forwarding, URL forwarding, Dynamic DNS) or non-Vercel routing.
+DNS_PROVIDERS = {"vercel", "namecheap", "cloudflare", "other"}
+DNS_STRATEGIES = {"vercel_nameservers", "external_dns_records", "namecheap_basicdns"}
+
+# migration_status tracks where a domain is in the DNS migration lifecycle:
+#   existing  — production domain, current DNS setup untouched (default; no
+#               automatic migration is ever recommended for this status)
+#   sandbox   — disposable/non-critical domain safe to migrate directly
+#   planned   — a migration has been scoped (inventory + parity checklist
+#               drafted) but not yet approved
+#   approved  — Matt has explicitly approved the cutover
+#   migrated  — cutover has been completed and verified
+MIGRATION_STATUSES = {"existing", "sandbox", "planned", "approved", "migrated"}
 
 
 class RegistryError(ValueError):
@@ -22,7 +41,13 @@ class SiteConfig(BaseModel):
     framework: str = Field(default="unknown")
     package_manager: str = Field(default="npm")
     host_provider: str = Field(default="vercel")
-    dns_provider: str = Field(default="namecheap")
+    registrar_provider: str = Field(default="namecheap")
+    dns_provider: str = Field(default="vercel")
+    dns_strategy: Optional[str] = Field(default=None)
+    nameserver_target: Optional[str] = Field(default=None)
+    production_domain: Optional[str] = Field(default=None)
+    aliases: list[str] = Field(default_factory=list)
+    migration_status: str = Field(default="existing")
     production_branch: str = Field(default="main")
     local_preview_command: Optional[str] = None
     build_command: Optional[str] = None
@@ -45,6 +70,48 @@ class SiteConfig(BaseModel):
         if value not in allowed:
             raise ValueError(f"package_manager must be one of {sorted(allowed)}")
         return value
+
+    @field_validator("dns_provider")
+    @classmethod
+    def _known_dns_provider(cls, value: str) -> str:
+        if value not in DNS_PROVIDERS:
+            raise ValueError(f"dns_provider must be one of {sorted(DNS_PROVIDERS)}")
+        return value
+
+    @field_validator("dns_strategy")
+    @classmethod
+    def _known_dns_strategy(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in DNS_STRATEGIES:
+            raise ValueError(f"dns_strategy must be one of {sorted(DNS_STRATEGIES)}")
+        return value
+
+    @field_validator("migration_status")
+    @classmethod
+    def _known_migration_status(cls, value: str) -> str:
+        if value not in MIGRATION_STATUSES:
+            raise ValueError(f"migration_status must be one of {sorted(MIGRATION_STATUSES)}")
+        return value
+
+    @model_validator(mode="after")
+    def _fill_dns_strategy_defaults(self) -> "SiteConfig":
+        # Default strategy: Vercel-hosted sites prefer nameserver delegation to
+        # Vercel; anything else falls back to explicit DNS record management
+        # (Namecheap BasicDNS if that's the configured dns_provider). This is
+        # purely descriptive of the *current/target configuration* — whether
+        # that target is actually recommended for migration right now depends
+        # on migration_status (see dns_strategy.recommend_migration_action()).
+        if self.dns_strategy is None:
+            if self.host_provider == "vercel" and self.dns_provider == "vercel":
+                self.dns_strategy = "vercel_nameservers"
+            elif self.dns_provider == "namecheap":
+                self.dns_strategy = "namecheap_basicdns"
+            else:
+                self.dns_strategy = "external_dns_records"
+        if self.dns_strategy == "vercel_nameservers" and not self.nameserver_target:
+            self.nameserver_target = "vercel"
+        if not self.production_domain:
+            self.production_domain = self.domain
+        return self
 
     def resolved_repo_path(self) -> Path:
         return Path(self.repo_path).expanduser()

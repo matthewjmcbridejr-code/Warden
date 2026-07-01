@@ -3,21 +3,76 @@
 # Copy this file to configs/webstudio.sites.yaml (gitignored) and fill in
 # real repo paths for your local checkouts. Never commit secrets here —
 # this file only holds non-sensitive operational metadata.
+#
+# DNS policy: registrar and DNS host are separate concerns.
+#   - registrar_provider: who the domain is bought through (e.g. namecheap)
+#   - dns_provider:       who answers DNS queries (vercel | namecheap | cloudflare | other)
+#   - host_provider:      who serves the site (e.g. vercel)
+#   - dns_strategy:       vercel_nameservers | external_dns_records | namecheap_basicdns
+#   - migration_status:   existing | sandbox | planned | approved | migrated
+#
+# For Vercel-hosted sites, prefer dns_strategy: vercel_nameservers (Namecheap
+# stays the registrar; Vercel's nameservers answer DNS). Only use
+# namecheap_basicdns (editing Namecheap host records directly) when the
+# domain needs a Namecheap-specific service — email forwarding, URL
+# forwarding, Dynamic DNS — or non-Vercel routing.
+#
+# migration_status is the safety gate: "existing" (the default) means this
+# is a production domain whose current DNS setup stays untouched until it
+# has been explicitly audited via dns_migration.plan_production_migration().
+# Only "sandbox" domains (like unlck.shop) are ever recommended for direct
+# Vercel nameserver migration. See docs/webstudio_agent.md for the full policy.
 
 sites:
+  - name: unlck
+    domain: unlck.shop
+    repo_path: ~/workspaces/warden/webstudio-sandboxes/unlck-site
+    framework: next
+    package_manager: npm
+    host_provider: vercel
+    registrar_provider: namecheap
+    dns_provider: vercel
+    dns_strategy: vercel_nameservers
+    nameserver_target: vercel
+    production_domain: unlck.shop
+    aliases:
+      - www.unlck.shop
+      - test.unlck.shop
+      - demo.unlck.shop
+    migration_status: sandbox
+    production_branch: main
+    local_preview_command: "npm run dev"
+    build_command: "npm run build"
+    test_command: null
+    client_name: Marius WebStudio Sandbox
+    notes: >
+      Disposable sandbox domain for testing the WebStudio Agent's Vercel and
+      DNS workflows. The only domain currently cleared (migration_status:
+      sandbox) for a direct Vercel nameserver cutover. Recommended setup:
+      Namecheap stays the registrar; DNS is delegated to Vercel's
+      nameservers (ns1.vercel-dns.com / ns2.vercel-dns.com).
+
   - name: usemarius
     domain: usemarius.com
     repo_path: ~/workspaces/marius-core/usemarius-site
     framework: next
     package_manager: npm
     host_provider: vercel
+    registrar_provider: namecheap
     dns_provider: namecheap
+    dns_strategy: namecheap_basicdns
+    migration_status: existing
     production_branch: main
     local_preview_command: "npm run dev"
     build_command: "npm run build"
     test_command: "npm test"
     client_name: Marius WebStudio
-    notes: Primary marketing site for Marius WebStudio.
+    notes: >
+      Production domain. migration_status: existing — current Namecheap
+      BasicDNS setup stays as-is until explicitly audited with
+      dns_migration.plan_production_migration(). Uses Namecheap BasicDNS
+      today (existing MX/email records depend on it); a Vercel nameserver
+      migration is not recommended automatically for this domain.
 
   - name: treeguru-demo
     domain: treeguru.example.com
@@ -25,13 +80,19 @@ sites:
     framework: astro
     package_manager: pnpm
     host_provider: vercel
-    dns_provider: namecheap
+    registrar_provider: namecheap
+    dns_provider: vercel
+    dns_strategy: vercel_nameservers
+    migration_status: existing
     production_branch: main
     local_preview_command: "pnpm dev"
     build_command: "pnpm build"
     test_command: null
     client_name: TreeGuru (SMB tree service demo)
-    notes: SMB local-service site; no automated tests configured yet.
+    notes: >
+      SMB local-service site placeholder. Treated as a production domain
+      (migration_status: existing) until a real DNS audit is run, even
+      though dns_provider is already configured as vercel.
 
   - name: grademy-shelf-demo
     domain: grademyshelf.example.com
@@ -39,10 +100,13 @@ sites:
     framework: unknown
     package_manager: npm
     host_provider: vercel
-    dns_provider: namecheap
+    registrar_provider: namecheap
+    dns_provider: vercel
+    dns_strategy: vercel_nameservers
+    migration_status: existing
     production_branch: main
     local_preview_command: "npm run start"
     build_command: "npm run build"
     test_command: null
     client_name: GradeMy/Shelf
-    notes: Generic SMB site template placeholder.
+    notes: Generic SMB site template placeholder; audit DNS before any migration.
