@@ -1,6 +1,6 @@
 (function () {
   const MCH = "/api/mcharness";
-  const UI_BUILD_VERSION = "phase0-buildproof";
+  const UI_BUILD_VERSION = "phase2-redesign";
 
   // Proof-of-freshness: fetch the server's actual on-disk commit + file
   // hashes and render them in the sidebar. If this doesn't match
@@ -4665,14 +4665,19 @@
     });
   }
 
+  function ccSkeleton(lines = 3) {
+    const widths = ["w-80", "w-60", "w-40"];
+    return `<div class="wcc-skeleton">${widths.slice(0, lines).map((w) => `<div class="wcc-skeleton-line ${w}"></div>`).join("")}</div>`;
+  }
+
   async function loadCommandCenter() {
     state.cc = state.cc || {};
     const captuesEl = document.getElementById("cc-captures-list");
     const connEl = document.getElementById("cc-connections-list");
     const nextEl = document.getElementById("cc-next-action");
-    if (captuesEl) captuesEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
-    if (connEl) connEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
-    if (nextEl) nextEl.innerHTML = `<p class="muted cc-checking">Checking…</p>`;
+    if (captuesEl) captuesEl.innerHTML = ccSkeleton(3);
+    if (connEl) connEl.innerHTML = ccSkeleton(2);
+    if (nextEl) nextEl.innerHTML = ccSkeleton(3);
 
     const [sourcesRes, healthRes, accountsRes] = await Promise.allSettled([
       requestJsonTimeout(`${MCH}/warden/brain/sources?limit=6`, {}, 8000),

@@ -5874,3 +5874,194 @@ textarea:focus {
   border-color: rgba(125, 176, 255, 0.12);
   background: linear-gradient(165deg, rgba(22, 36, 58, 0.7), rgba(13, 22, 38, 0.85));
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Phase 2 — unmistakable visual redesign (major pass, not a tweak)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.012) 0px, rgba(255, 255, 255, 0.012) 1px, transparent 1px, transparent 3px),
+    radial-gradient(1400px 780px at 10% -12%, rgba(125, 176, 255, 0.16), transparent 55%),
+    radial-gradient(1100px 820px at 92% 4%, rgba(167, 139, 250, 0.13), transparent 55%),
+    radial-gradient(1300px 1000px at 45% 120%, rgba(94, 234, 212, 0.09), transparent 60%),
+    linear-gradient(180deg, #05080f 0%, #070c17 40%, #090f1c 100%);
+  background-attachment: fixed, fixed, fixed, fixed, fixed;
+}
+
+.warden-shell {
+  gap: 0;
+}
+
+.warden-sidebar {
+  width: 288px;
+  padding: 26px 20px 20px;
+  background:
+    radial-gradient(560px 380px at -10% -10%, rgba(125, 176, 255, 0.12), transparent 60%),
+    radial-gradient(420px 320px at 110% 90%, rgba(94, 234, 212, 0.06), transparent 60%),
+    linear-gradient(180deg, #0e1c33 0%, #0a1424 55%, #060b16 100%);
+  box-shadow: inset -1px 0 0 rgba(125, 176, 255, 0.08), 10px 0 46px rgba(0, 0, 0, 0.38);
+  gap: 22px;
+}
+
+.warden-title {
+  font-size: 1.65rem;
+  font-weight: 800;
+  background: linear-gradient(120deg, #ffffff 0%, #cfe2ff 45%, #a7c8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.03em;
+}
+
+.sidebar-tagline {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+/* Command Center hero — much bigger, unmistakably new */
+.thread-hero-title {
+  font-size: 2.6rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  background: linear-gradient(100deg, #ffffff 0%, #d7e6ff 30%, #a7c8ff 55%, #b9a6ff 80%, #7ee8d0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 24px rgba(125, 176, 255, 0.18));
+}
+
+.thread-hero-sub {
+  font-size: 1.08rem;
+  max-width: 62ch;
+}
+
+.thread-status-pill {
+  font-size: 0.76rem;
+  padding: 5px 12px;
+  background: rgba(99, 219, 157, 0.08);
+  box-shadow: 0 0 16px -4px rgba(99, 219, 157, 0.4);
+}
+
+/* Command box — unmistakably dominant */
+.cc-ask-form {
+  padding: 20px 20px 20px 26px;
+  border-radius: 22px;
+  gap: 14px;
+}
+
+.cc-ask-input {
+  font-size: 1.15rem;
+  padding: 12px 0;
+}
+
+.cc-ask-icon {
+  font-size: 1.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(125, 176, 255, 0.22), transparent 70%);
+}
+
+.cc-ask-submit {
+  border-radius: 999px;
+  padding: 13px 26px;
+  font-size: 0.92rem;
+  background: linear-gradient(135deg, #7db0ff 0%, #a78bfa 60%, #5eead4 120%);
+  color: #06101f;
+  font-weight: 800;
+  border: none;
+}
+
+.cc-ask-submit:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 10px 30px -8px rgba(125, 176, 255, 0.5);
+}
+
+/* Cards — glow visible at rest, not only on hover; larger radius */
+.cc-card,
+.settings-card,
+.inspector-card,
+.empty-state-card,
+.agent-card {
+  border-radius: 18px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 22px 48px -26px rgba(20, 40, 90, 0.65);
+}
+
+.cc-card-header h3,
+.inspector-title {
+  letter-spacing: -0.01em;
+}
+
+/* Suggestion chips — pill, tinted, with a leading dot for texture */
+.cc-suggestion-chip {
+  border-radius: 999px;
+  padding: 8px 16px 8px 14px;
+  font-weight: 600;
+}
+
+/* Primary buttons everywhere: pill shape, gradient fill */
+.btn.primary {
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(125, 176, 255, 0.32), rgba(167, 139, 250, 0.22));
+  border-color: rgba(125, 176, 255, 0.6);
+}
+
+/* Sidebar nav groups — accent rail on the left of each group */
+.sidebar-nav {
+  gap: 3px;
+}
+
+.sidebar-group-label {
+  position: relative;
+  padding-left: 14px;
+}
+
+.sidebar-group-label::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: rgba(125, 176, 255, 0.4);
+}
+
+/* Right panel — clear inspector identity with a left accent rail */
+.operator-inspector {
+  border-left: 1px solid rgba(125, 176, 255, 0.08);
+  padding-left: 18px;
+}
+
+/* Skeleton loading state — replaces plain "Loading…" text everywhere it's used */
+.cc-checking {
+  padding-left: 22px;
+}
+
+@keyframes wcc-skeleton-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+}
+
+.wcc-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(125, 176, 255, 0.10), rgba(125, 176, 255, 0.18), rgba(125, 176, 255, 0.10));
+  animation: wcc-skeleton-pulse 1.4s ease-in-out infinite;
+  margin: 6px 0;
+}
+
+.wcc-skeleton-line.w-60 { width: 60%; }
+.wcc-skeleton-line.w-80 { width: 80%; }
+.wcc-skeleton-line.w-40 { width: 40%; }
