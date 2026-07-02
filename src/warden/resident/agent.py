@@ -25,11 +25,14 @@ SynthesisFn = Callable[[str, dict], str]
 
 
 def _default_synthesis(message: str, context: dict) -> str:
-    """Only reached for genuinely ambiguous requests. Kept minimal/local —
-    real deep synthesis would call out to memory_agent.chat/run_agent, but
-    that is gated behind RESIDENT_ENABLE_DEEP_SYNTHESIS."""
+    """Only reached for genuinely ambiguous requests, and only when
+    RESIDENT_ENABLE_DEEP_SYNTHESIS=true. Calls memory_agent.chat(), which
+    gathers Warden Memory (stored memories, git state, board tasks, recent
+    shell/browser activity) into context so general conversation is
+    answered with knowledge of Matt/Warden rather than as a blank chatbot."""
     from ..memory_agent import chat as memory_agent_chat
-    response = memory_agent_chat(message)
+    history = context.get("history") or []
+    response = memory_agent_chat(message, history=history)
     return response.reply
 
 
@@ -65,7 +68,7 @@ class ResidentAgent:
         else:
             intent = router.classify(text)
             if intent.name == "ambiguous":
-                reply = self._handle_ambiguous(text)
+                reply = self._handle_ambiguous(text, chat_id=chat_id)
             else:
                 reply = self._handle_intent(intent)
 
@@ -164,7 +167,7 @@ class ResidentAgent:
         if name == "status":
             return TOOL_REGISTRY["status"](ctx)["short_summary"]
 
-        return self._handle_ambiguous(name)
+        return self._handle_ambiguous(name, chat_id=None)
 
     def _overnight_summary(self) -> str:
         """Tier 2/3 context pack: watcher events + sessions + recent memory +
@@ -172,28 +175,40 @@ class ResidentAgent:
         what did I miss / catch me up" style phrasings."""
         ctx = self.tool_ctx
         watcher_result = TOOL_REGISTRY["watcher_run_due"](ctx)
+        approvals_result = TOOL_REGISTRY["approvals_list"](ctx)
         sessions_result = TOOL_REGISTRY["sessions_list"](ctx)
         memory_result = TOOL_REGISTRY["memory_recent"](ctx, self.cfg.max_context_items)
-        approvals_result = TOOL_REGISTRY["approvals_list"](ctx)
+        # Order matters: actionable items (watchers/approvals/sessions) go
+        # first so they survive truncation; memory recap (least actionable,
+        # can be arbitrarily long from real store growth) goes last.
         parts = [
             f"Watchers: {watcher_result['short_summary']}",
+            f"Approvals: {approvals_result['short_summary']}",
             f"Sessions: {sessions_result['short_summary']}",
             f"Recent memory: {memory_result['short_summary']}",
-            f"Approvals: {approvals_result['short_summary']}",
         ]
         return "\n\n".join(parts)
 
     # -- ambiguous fallback -----------------------------------------------------
 
-    def _handle_ambiguous(self, text: str) -> str:
+    def _handle_ambiguous(self, text: str, chat_id: Any = None) -> str:
         warden_adjacent = router.is_warden_adjacent(text)
 
         # enable_deep_synthesis is the unconditional "think hard" override —
         # if the operator has opted into it, use it for any ambiguous input.
         if self.cfg.enable_deep_synthesis:
             self.synthesis_calls += 1
+            history = []
+            if chat_id is not None:
+                # Prior turns only (exclude the just-logged current message)
+                # so the model sees the conversation as this-message-in-context.
+                history = [
+                    {"role": h["role"], "content": h["content"]}
+                    for h in self.state.recent_conversation(chat_id, limit=self.cfg.max_context_items)
+                    if h["content"] != text or h["role"] != "user"
+                ]
             try:
-                return self.synthesis_fn(text, {})
+                return self.synthesis_fn(text, {"history": history})
             except Exception as exc:
                 return f"Synthesis failed: {exc}"
 
