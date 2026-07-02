@@ -27,6 +27,11 @@ BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT",
 SESSION_ID = str(uuid.uuid4())[:8]
 
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
+
+from .mcp_oauth import OAuthProvider
+
+_OAUTH_ISSUER_URL = os.getenv("MCP_OAUTH_ISSUER_URL", "https://mcp.mctable.online")
 
 mcp = FastMCP(
     "warden-brain",
@@ -41,6 +46,7 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
             "mcp.mctable.team",
+            "mcp.mctable.online",
             "127.0.0.1",
             "127.0.0.1:*",
             "localhost",
@@ -48,9 +54,19 @@ mcp = FastMCP(
         ],
         allowed_origins=[
             "https://mcp.mctable.team",
+            "https://mcp.mctable.online",
             "https://www.notion.so",
             "https://notion.so",
         ],
+    ),
+    auth_server_provider=OAuthProvider(),
+    auth=AuthSettings(
+        issuer_url=_OAUTH_ISSUER_URL,
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True, valid_scopes=["mcp"], default_scopes=["mcp"]
+        ),
+        revocation_options=RevocationOptions(enabled=True),
+        resource_server_url=_OAUTH_ISSUER_URL,
     ),
 )
 
@@ -1528,6 +1544,81 @@ def _make_auth_middleware(token: str):
     return BearerAuthMiddleware
 
 
+def _consent_page_html(request_id: str, pending: dict) -> str:
+    scope_str = " ".join(pending.get("scopes", []))
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Warden — Authorize {pending.get("client_name", "app")}</title>
+<style>body{{font-family:sans-serif;background:#0d1b2e;color:#d4e4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+.card{{background:#14243c;border:1px solid rgba(100,160,255,.25);border-radius:10px;padding:32px 40px;text-align:center;max-width:400px;}}
+h2{{margin:0 0 8px;}}p{{color:#8faabf;margin:0 0 16px;}}
+input{{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid rgba(100,160,255,.35);background:#0d1b2e;color:#d4e4f5;margin-bottom:16px;}}
+.btn{{border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:.9rem;margin:0 6px;}}
+.approve{{background:#2d5f9e;color:#d4e4f5;}}.approve:hover{{background:#3a72b8;}}
+.deny{{background:#3a2020;color:#e6b8b8;}}.deny:hover{{background:#4a2a2a;}}</style>
+</head>
+<body><div class="card">
+<h2>Authorize {pending.get("client_name", "app")}</h2>
+<p>This app is requesting access to your Warden Brain (scope: {scope_str}).</p>
+<form method="post" action="/oauth/consent/submit">
+<input type="hidden" name="request_id" value="{request_id}">
+<input type="password" name="passphrase" placeholder="Owner passphrase" autofocus>
+<div>
+<button class="btn approve" name="decision" value="approve">Approve</button>
+<button class="btn deny" name="decision" value="deny">Deny</button>
+</div>
+</form>
+</div></body></html>"""
+
+
+def _oauth_denied_html(reason: str = "This authorization request is invalid or has expired.") -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Warden — Not authorized</title>
+<style>body{{font-family:sans-serif;background:#0d1b2e;color:#d4e4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+.card{{background:#14243c;border:1px solid rgba(100,160,255,.25);border-radius:10px;padding:32px 40px;text-align:center;max-width:360px;}}</style>
+</head><body><div class="card"><h2>Not authorized</h2><p>{reason}</p></div></body></html>"""
+
+
+async def _handle_oauth_consent_get(scope, receive, send) -> None:
+    from starlette.requests import Request
+    from starlette.responses import HTMLResponse
+
+    from .mcp_oauth import get_pending_authorization
+
+    request = Request(scope, receive)
+    request_id = request.query_params.get("request_id", "")
+    pending = get_pending_authorization(request_id) if request_id else None
+    if pending is None:
+        response = HTMLResponse(_oauth_denied_html(), status_code=400)
+    else:
+        response = HTMLResponse(_consent_page_html(request_id, pending))
+    await response(scope, receive, send)
+
+
+async def _handle_oauth_consent_submit(scope, receive, send) -> None:
+    from starlette.requests import Request
+    from starlette.responses import HTMLResponse, RedirectResponse
+
+    from .mcp_oauth import approve_pending_authorization, deny_pending_authorization
+
+    request = Request(scope, receive)
+    form = await request.form()
+    request_id = form.get("request_id", "")
+    decision = form.get("decision", "")
+    passphrase = form.get("passphrase", "")
+
+    if decision == "approve":
+        redirect_url = approve_pending_authorization(request_id, passphrase)
+    else:
+        redirect_url = deny_pending_authorization(request_id)
+
+    if redirect_url is None:
+        response = HTMLResponse(_oauth_denied_html(), status_code=400)
+    else:
+        response = RedirectResponse(url=redirect_url, status_code=302)
+    await response(scope, receive, send)
+
+
 def main():
     import argparse
     import asyncio
@@ -1543,16 +1634,34 @@ def main():
 
     if args.http:
         token = os.getenv("WARDEN_BRAIN_TOKEN", "")
-        if not token:
-            print("ERROR: WARDEN_BRAIN_TOKEN env var required for HTTP mode", flush=True)
+        from .mcp_tokens import list_clients
+        if not token and not list_clients() and not os.getenv("MCP_OAUTH_OWNER_PASSPHRASE"):
+            print(
+                "ERROR: no auth configured for HTTP mode. Set WARDEN_BRAIN_TOKEN, issue a "
+                "per-client token (python -m warden.mcp_tokens issue --name <client>), or set "
+                "MCP_OAUTH_OWNER_PASSPHRASE to enable the OAuth consent flow.",
+                flush=True,
+            )
             raise SystemExit(1)
 
         import uvicorn
 
-        # FastMCP's own ASGI app — handles all MCP routing internally
+        # FastMCP's own ASGI app — handles all routing internally, including
+        # the OAuth authorize/token/register/revoke/.well-known routes (added
+        # via auth_server_provider=OAuthProvider() above) and the /mcp route's
+        # own auth enforcement (RequireAuthMiddleware, backed by
+        # OAuthProvider.load_access_token — see mcp_oauth.py for what that
+        # accepts: OAuth-issued tokens, Phase 1 per-client tokens, and the
+        # legacy shared WARDEN_BRAIN_TOKEN, all unified in one place).
         mcp_app = mcp.streamable_http_app()
 
-        # Pure ASGI auth wrapper — no Starlette nesting that breaks FastMCP routing
+        # Pure ASGI wrapper — no Starlette nesting that breaks FastMCP routing.
+        # Only special-cases paths FastMCP doesn't serve itself: /health (no
+        # auth) and the two consent-screen routes (gated by
+        # MCP_OAUTH_OWNER_PASSPHRASE, not a bearer token — see mcp_oauth.py).
+        # Everything else — /mcp, /authorize, /token, /register, /revoke,
+        # /.well-known/* — is delegated straight to mcp_app, which enforces
+        # its own auth where the spec requires it.
         async def app(scope, receive, send):
             if scope["type"] == "lifespan":
                 await mcp_app(scope, receive, send)
@@ -1570,18 +1679,16 @@ def main():
                     await send({"type": "http.response.body", "body": body})
                     return
 
-                # All other paths require Bearer token
-                headers = {k.lower(): v for k, v in scope.get("headers", [])}
-                auth = headers.get(b"authorization", b"").decode()
-                if not auth.startswith("Bearer ") or auth[7:] != token:
-                    body = b'{"error":"Unauthorized"}'
-                    await send({"type": "http.response.start", "status": 401,
-                                "headers": [[b"content-type", b"application/json"],
-                                            [b"content-length", str(len(body)).encode()]]})
-                    await send({"type": "http.response.body", "body": body})
+                if path == "/oauth/consent" and scope.get("method") == "GET":
+                    await _handle_oauth_consent_get(scope, receive, send)
                     return
 
-                # Authenticated — pass to FastMCP
+                if path == "/oauth/consent/submit" and scope.get("method") == "POST":
+                    await _handle_oauth_consent_submit(scope, receive, send)
+                    return
+
+                # Everything else (/mcp, /authorize, /token, /register,
+                # /revoke, /.well-known/...) is FastMCP's own routing.
                 await mcp_app(scope, receive, send)
 
         log.warning("Warden Brain MCP HTTP server starting on %s:%s", args.host, args.port)
