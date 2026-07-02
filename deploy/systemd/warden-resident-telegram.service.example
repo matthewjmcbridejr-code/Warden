@@ -1,0 +1,31 @@
+# Example systemd unit for the Warden resident Telegram agent.
+#
+# Copy to /etc/systemd/system/warden-resident-telegram.service, edit paths/user,
+# then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now warden-resident-telegram
+#
+# This service opens NO public port — it only long-polls Telegram's API
+# outbound (getUpdates), so nothing needs to be exposed on the host.
+
+[Unit]
+Description=Warden Resident Telegram Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matt
+WorkingDirectory=/home/matt/workspaces/warden/mcharness-public-export
+EnvironmentFile=/home/matt/workspaces/warden/mcharness-public-export/configs/warden_resident.env
+Environment=PYTHONPATH=/home/matt/workspaces/warden/mcharness-public-export:/home/matt/workspaces/warden/mcharness-public-export/src
+ExecStart=/home/matt/workspaces/warden/mcharness-public-export/.venv/bin/python -m warden.resident.telegram
+Restart=on-failure
+RestartSec=5
+
+# Hardening (adjust if it breaks something you need)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
