@@ -86,3 +86,15 @@ def test_save_backup_writes_json(tmp_path: Path) -> None:
     path = dns.save_backup("usemarius.com", records, backup_dir=tmp_path)
     assert path.exists()
     assert "usemarius.com" in path.read_text(encoding="utf-8")
+
+
+def test_set_custom_nameservers_requires_approval() -> None:
+    with pytest.raises(RuntimeError):
+        dns.set_custom_nameservers("unlck.shop", ["ns1.vercel-dns.com", "ns2.vercel-dns.com"], approved=False)
+
+
+def test_set_custom_nameservers_requires_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in dns.REQUIRED_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError):
+        dns.set_custom_nameservers("unlck.shop", ["ns1.vercel-dns.com", "ns2.vercel-dns.com"], approved=True)

@@ -216,3 +216,41 @@ def build_set_hosts_params(domain: str, plan: DnsDiffPlan) -> dict[str, Any]:
         if record.mx_pref is not None:
             params[f"MXPref{index}"] = str(record.mx_pref)
     return params
+
+
+def set_custom_nameservers(
+    domain: str, nameservers: list[str], *, approved: bool, timeout: float = 20
+) -> dict[str, Any]:
+    """Change a domain's nameservers via namecheap.domains.dns.setCustom.
+
+    This is the one real DNS write in this module (the registrar-level
+    counterpart to `build_set_hosts_params`, which only builds unsent
+    params). It requires explicit `approved=True` from the caller — never
+    called automatically, and never called without a human having reviewed
+    a NameserverDelegationPlan (see dns_strategy.py) first.
+    """
+    if not approved:
+        raise RuntimeError("DNS write blocked: nameserver change was not explicitly approved.")
+    if not credentials_available():
+        raise RuntimeError("Namecheap credentials are not available; see setup_instructions().")
+    sld, _, tld = domain.partition(".")
+    params = {
+        "ApiUser": os.environ["NAMECHEAP_API_USER"],
+        "ApiKey": os.environ["NAMECHEAP_API_KEY"],
+        "UserName": os.environ["NAMECHEAP_USERNAME"],
+        "ClientIp": os.environ["NAMECHEAP_CLIENT_IP"],
+        "Command": "namecheap.domains.dns.setCustom",
+        "SLD": sld,
+        "TLD": tld or "com",
+        "Nameservers": ",".join(nameservers),
+    }
+    url = f"{NAMECHEAP_API_URL}?{urlencode(params)}"
+    with urlopen(url, timeout=timeout) as response:
+        xml_text = response.read().decode("utf-8", errors="replace")
+    root = ElementTree.fromstring(xml_text)
+    ns = {"nc": "http://api.namecheap.com/xml.response"}
+    status = root.get("Status")
+    result_el = root.find(".//nc:DomainDNSSetCustomResult", ns)
+    is_success = bool(result_el is not None and result_el.get("Updated") == "true")
+    errors = [el.text or "" for el in root.findall(".//nc:Errors/nc:Error", ns)]
+    return {"status": status, "success": is_success and status == "OK", "errors": errors}
