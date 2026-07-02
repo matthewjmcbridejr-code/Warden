@@ -13,11 +13,27 @@ from typing import Any, Optional
 
 DEFAULT_SESSION_TAIL_LINES = 40
 DEFAULT_ROOT = Path("~/.local/share/warden/agents").expanduser()
+DEFAULT_PING_TIMEOUT = 1.5
 
 
 class WardenClient:
-    def __init__(self, root: Optional[Path] = None) -> None:
+    def __init__(self, root: Optional[Path] = None, base_url: Optional[str] = None) -> None:
         self.root = root or DEFAULT_ROOT
+        self.base_url = base_url or "http://127.0.0.1:6969"
+
+    # -- reachability ---------------------------------------------------------
+
+    def ping(self) -> bool:
+        """Cheap reachability check against the private Warden API health
+        endpoint. Never raises — returns False on any failure/timeout."""
+        try:
+            import requests
+            resp = requests.get(
+                f"{self.base_url}/api/mcharness/health", timeout=DEFAULT_PING_TIMEOUT
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
 
     # -- agents -------------------------------------------------------------
 

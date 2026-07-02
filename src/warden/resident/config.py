@@ -56,6 +56,7 @@ class ResidentConfig:
     max_context_items: int = 8
     max_response_chars: int = 900
     enable_deep_synthesis: bool = False
+    enable_general_chat: bool = False
 
 
 def load_config() -> ResidentConfig:
@@ -75,6 +76,7 @@ def load_config() -> ResidentConfig:
         max_context_items=_int_env("RESIDENT_MAX_CONTEXT_ITEMS", 8),
         max_response_chars=_int_env("RESIDENT_MAX_RESPONSE_CHARS", 900),
         enable_deep_synthesis=_bool_env("RESIDENT_ENABLE_DEEP_SYNTHESIS", False),
+        enable_general_chat=_bool_env("RESIDENT_ENABLE_GENERAL_CHAT", False),
     )
 
 

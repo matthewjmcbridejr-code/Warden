@@ -73,7 +73,10 @@ variable names it set plus the next commands to run.
 ```
 /start                 — confirm the agent is online
 /help                  — list commands + a few NL examples
-/status                — agents + sessions summary
+/status                — API reachability, agents, sessions, watchers,
+                         pending approvals, email mode, dry-run mode
+/brief                 — recap: watchers + sessions + recent memory +
+                         pending approvals (same as "what happened recently")
 /memory <query>        — search memory (capped to 5 results)
 /watchers              — list configured watchers
 /agents                — list registered agents
@@ -81,6 +84,8 @@ variable names it set plus the next commands to run.
 /approvals             — list pending approvals
 /approve <id>          — approve a pending action
 /deny <id>             — deny a pending action
+/email status          — explain exactly what's configured for the
+                         current EMAIL_MODE
 ```
 
 ## Natural language examples
@@ -92,8 +97,11 @@ These are handled by the deterministic keyword classifier in `router.py` —
 - "draft a reply to Bob" → draft only, never sends
 - "send it" → approval-gated; asks a clarifying question if recipient/body
   aren't already established
-- "what changed overnight" → watcher events + running sessions + recent
-  memory (a tier 2/3 context pack)
+- "what happened recently" / "what changed overnight" / "catch me up" /
+  "what did I miss" / "anything new" / "what's going on" / "recent status" /
+  "daily brief" / "overnight brief" → recap: watcher events + running
+  sessions + recent memory + pending approvals (a tier 2/3 context pack,
+  same as `/brief`)
 - "run webstudio audit on unlck" → WebStudio SEO/file-presence audit
 - "watch dns for example.com" → creates a DNS watcher (approval required for
   non-sandbox domains)
@@ -103,8 +111,19 @@ These are handled by the deterministic keyword classifier in `router.py` —
 - "stop that session" → matches a running session, returns a safe dry-run
   response (no executor exists yet to actually kill a dispatched process)
 
-Anything that doesn't match a slash command or a known pattern is
-**ambiguous** — see the Efficiency section below for what happens next.
+Anything that doesn't match a slash command or a known pattern falls back
+based on `router.is_warden_adjacent()`:
+
+- **Warden-adjacent** (mentions agents, sessions, memory, watchers,
+  WebStudio, DNS, email, approvals, etc.) → a hint suggesting what to check
+  and pointing at `/help`, not a flat "unrecognized" message.
+- **General chat, `RESIDENT_ENABLE_GENERAL_CHAT=false`** (default) → "I'm
+  focused on Warden operations. I can check agents, memory, watchers,
+  WebStudio, DNS, and email."
+- **General chat, `RESIDENT_ENABLE_GENERAL_CHAT=true`** → a brief
+  deterministic note instead of the strict refusal (still no LLM call
+  unless `RESIDENT_ENABLE_DEEP_SYNTHESIS=true`, which is the unconditional
+  "think hard" override for any ambiguous input, warden-adjacent or not).
 
 ## Watchers
 
@@ -135,6 +154,28 @@ Watcher kinds: `dns`, `website`, `email`, `agent`, `reminder`, `generic`.
   implemented" response, even when approved and `EMAIL_DRY_RUN=false`,
   because no live send path exists in the underlying mail providers.
   `draft()` always succeeds locally and never sends.
+
+Use `/email status` (or ask "email status") any time to see exactly what's
+configured — e.g. `EMAIL_MODE=gmail` with no account adapter wired returns:
+
+> Email mode is gmail, but no GMAIL credentials/account adapter is
+> configured yet. I can still draft replies in dry-run, but I cannot read
+> inbox mail until gmail auth is wired.
+
+**Connecting a live Gmail inbox (read-only):**
+
+1. Set up OAuth credentials / a token for `mail/gmail.py`'s
+   `build_gmail_provider()` the same way any other Warden Gmail connector is
+   configured in this repo (see `docs/warden_memory.md` /
+   `docs/handoffs/warden_brain_watcher_gmail_milestone.md` for the existing
+   connector-store pattern) — the resident agent does not add a new auth
+   flow, it just calls `build_gmail_provider(account_id)`.
+2. Set `EMAIL_MODE=gmail` in `configs/warden_resident.env`.
+3. Run `/email status` to confirm `configured: true`.
+4. Reading/summarizing works once configured. Sending stays disabled —
+   there is no live send path in `mail/gmail.py`/`mail/gmail_imap.py`, and
+   `send()` will keep returning "executor not implemented" until one is
+   deliberately added and reviewed.
 
 ## Approval flow
 

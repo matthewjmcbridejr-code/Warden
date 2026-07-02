@@ -78,3 +78,45 @@ def test_classify_ambiguous_fallback():
 def test_classify_empty_string_is_ambiguous():
     intent = router.classify("   ")
     assert intent.name == "ambiguous"
+
+
+def test_parse_slash_command_brief():
+    parsed = router.parse_slash_command("/brief")
+    assert parsed.command == "brief"
+
+
+def test_parse_slash_command_email_status():
+    parsed = router.parse_slash_command("/email status")
+    assert parsed.command == "email"
+    assert parsed.args == "status"
+
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("phrase", [
+    "what happened recently",
+    "what changed recently",
+    "what happened overnight",
+    "what changed overnight",
+    "catch me up",
+    "what did I miss",
+    "anything new",
+    "what's going on",
+    "recent status",
+    "daily brief",
+    "overnight brief",
+])
+def test_classify_recap_variants(phrase):
+    intent = router.classify(phrase)
+    assert intent.name == "overnight_summary"
+
+
+def test_is_warden_adjacent_true_for_warden_keywords():
+    assert router.is_warden_adjacent("something about my watchers is confusing")
+    assert router.is_warden_adjacent("what about that agent session")
+
+
+def test_is_warden_adjacent_false_for_general_chat():
+    assert not router.is_warden_adjacent("why is the sky blue")
+    assert not router.is_warden_adjacent("tell me a joke about quantum physics")

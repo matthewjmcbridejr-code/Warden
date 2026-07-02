@@ -38,7 +38,7 @@ class ToolContext:
         self.memory = MemoryAdapter()
         self.watchers = WatcherService(state)
         self.email = EmailAdapter(self.cfg)
-        self.warden = WardenClient()
+        self.warden = WardenClient(base_url=self.cfg.warden_private_base_url)
         self.approvals = ApprovalQueue(state)
 
 
@@ -170,7 +170,70 @@ def tool_session_stop(ctx: ToolContext, session_match: str) -> dict:
 
 
 def tool_status(ctx: ToolContext) -> dict:
-    return ctx.warden.status()
+    """Compact multi-field status: API reachability, agents, sessions,
+    watchers, pending approvals, email mode, dry-run mode."""
+    agents = ctx.warden.list_agents()
+    sessions = ctx.warden.list_sessions()
+    watchers = ctx.watchers.list()
+    pending_approvals = ctx.approvals.list(status="pending")
+    api_reachable = ctx.warden.ping()
+
+    agents_count = agents.get("key_fields", {}).get("count", 0)
+    sessions_count = sessions.get("key_fields", {}).get("count", 0)
+
+    lines = [
+        f"API: {'reachable' if api_reachable else 'unreachable'}",
+        f"Agents: {agents_count} | Sessions: {sessions_count} | Watchers: {len(watchers)} | "
+        f"Pending approvals: {len(pending_approvals)}",
+        f"Email: mode={ctx.email.mode}",
+        f"Dry-run: {ctx.cfg.dry_run}",
+    ]
+    return {
+        "ok": True,
+        "short_summary": "\n".join(lines),
+        "key_fields": {
+            "api_reachable": api_reachable,
+            "agents": agents_count,
+            "sessions": sessions_count,
+            "watchers": len(watchers),
+            "pending_approvals": len(pending_approvals),
+            "email_mode": ctx.email.mode,
+            "dry_run": ctx.cfg.dry_run,
+        },
+    }
+
+
+def tool_email_status(ctx: ToolContext) -> dict:
+    """Explain exactly what is/isn't configured for the current email mode."""
+    mode = ctx.email.mode
+    if mode == "disabled":
+        return {
+            "ok": True,
+            "short_summary": "Email is disabled (EMAIL_MODE=disabled). Set EMAIL_MODE=mock|gmail|imap to enable.",
+            "key_fields": {"mode": mode},
+        }
+    if mode == "mock":
+        return {
+            "ok": True,
+            "short_summary": "Email mode is mock — using an in-memory sample inbox, no real account connected.",
+            "key_fields": {"mode": mode},
+        }
+    provider = ctx.email._build_provider()
+    if provider is None:
+        return {
+            "ok": False,
+            "short_summary": (
+                f"Email mode is {mode}, but no {mode.upper()} credentials/account adapter is configured yet. "
+                "I can still draft replies in dry-run, but I cannot read inbox mail until "
+                f"{mode} auth is wired."
+            ),
+            "key_fields": {"mode": mode, "configured": False},
+        }
+    return {
+        "ok": True,
+        "short_summary": f"Email mode is {mode} and an account adapter is configured. Sending stays approval-gated.",
+        "key_fields": {"mode": mode, "configured": True},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +354,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "sessions_list": tool_sessions_list,
     "session_stop": tool_session_stop,
     "status": tool_status,
+    "email_status": tool_email_status,
     "approvals_list": tool_approvals_list,
     "approve": tool_approve,
     "deny": tool_deny,

@@ -84,13 +84,19 @@ class ResidentAgent:
             return "Warden resident agent online. Send /help for commands, or just talk to me naturally."
         if cmd == "help":
             return (
-                "Commands: /status /memory <query> /watchers /agents /sessions "
-                "/approvals /approve <id> /deny <id>\n"
-                "Or just ask naturally: \"check my email\", \"what changed overnight\", "
-                "\"watch dns for example.com\", \"what do I know about X\"."
+                "Commands: /status /brief /memory <query> /watchers /agents /sessions "
+                "/approvals /approve <id> /deny <id> /email status\n"
+                "Or just ask naturally: \"check my email\", \"what happened recently\", "
+                "\"catch me up\", \"watch dns for example.com\", \"what do I know about X\"."
             )
         if cmd == "status":
             return TOOL_REGISTRY["status"](ctx)["short_summary"]
+        if cmd == "brief":
+            return self._overnight_summary()
+        if cmd == "email":
+            if args.strip().lower() == "status":
+                return TOOL_REGISTRY["email_status"](ctx)["short_summary"]
+            return "Usage: /email status"
         if cmd == "memory":
             if not args:
                 return "Usage: /memory <query>"
@@ -161,28 +167,49 @@ class ResidentAgent:
         return self._handle_ambiguous(name)
 
     def _overnight_summary(self) -> str:
-        """Tier 2/3 context pack: watcher events + running sessions + recent memory."""
+        """Tier 2/3 context pack: watcher events + sessions + recent memory +
+        pending approvals — the recap used by /brief and all "what happened /
+        what did I miss / catch me up" style phrasings."""
         ctx = self.tool_ctx
         watcher_result = TOOL_REGISTRY["watcher_run_due"](ctx)
         sessions_result = TOOL_REGISTRY["sessions_list"](ctx)
         memory_result = TOOL_REGISTRY["memory_recent"](ctx, self.cfg.max_context_items)
+        approvals_result = TOOL_REGISTRY["approvals_list"](ctx)
         parts = [
             f"Watchers: {watcher_result['short_summary']}",
             f"Sessions: {sessions_result['short_summary']}",
             f"Recent memory: {memory_result['short_summary']}",
+            f"Approvals: {approvals_result['short_summary']}",
         ]
         return "\n\n".join(parts)
 
     # -- ambiguous fallback -----------------------------------------------------
 
     def _handle_ambiguous(self, text: str) -> str:
-        if not self.cfg.enable_deep_synthesis:
+        warden_adjacent = router.is_warden_adjacent(text)
+
+        # enable_deep_synthesis is the unconditional "think hard" override —
+        # if the operator has opted into it, use it for any ambiguous input.
+        if self.cfg.enable_deep_synthesis:
+            self.synthesis_calls += 1
+            try:
+                return self.synthesis_fn(text, {})
+            except Exception as exc:
+                return f"Synthesis failed: {exc}"
+
+        if warden_adjacent:
             return (
-                "I didn't recognize a specific command for that. Try /help, or rephrase — "
-                "e.g. \"check my email\", \"what do I know about X\", \"what changed overnight\"."
+                "I didn't catch a specific command for that, but I can check: "
+                "agents, sessions, memory, watchers, WebStudio, DNS, email, or approvals. "
+                "Try /help, or rephrase — e.g. \"check my email\", \"what do I know about X\", "
+                "\"catch me up\"."
             )
-        self.synthesis_calls += 1
-        try:
-            return self.synthesis_fn(text, {})
-        except Exception as exc:
-            return f"Synthesis failed: {exc}"
+        if self.cfg.enable_general_chat:
+            return (
+                "I don't have a deterministic answer for that one, and deep synthesis is off — "
+                "try /help to see what I can look up for you."
+            )
+        return (
+            "I'm focused on Warden operations. I can check agents, memory, watchers, "
+            "WebStudio, DNS, and email."
+        )

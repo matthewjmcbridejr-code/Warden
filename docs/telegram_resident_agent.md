@@ -117,7 +117,12 @@ only fires when **both** of the following are true:
 
 If `RESIDENT_ENABLE_DEEP_SYNTHESIS` is `false` (the default), ambiguous
 messages get a static, zero-cost nudge back toward `/help` or a rephrase —
-no model call, no cost, ever, for unmatched input.
+no model call, no cost, ever, for unmatched input. Which static nudge
+depends on `router.is_warden_adjacent()` and `RESIDENT_ENABLE_GENERAL_CHAT`
+(default `false`): Warden-adjacent ambiguous messages always get a
+capability hint; purely general chat gets either a flat "I'm focused on
+Warden operations" refusal (general chat disabled) or a brief deterministic
+note (general chat enabled) — still zero model calls either way.
 
 ### 6. Tuning the `RESIDENT_MAX_*` env vars
 

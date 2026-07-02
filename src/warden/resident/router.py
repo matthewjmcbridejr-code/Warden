@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 SLASH_COMMANDS = (
     "start", "help", "status", "memory", "watchers", "agents", "sessions",
-    "approvals", "approve", "deny",
+    "approvals", "approve", "deny", "brief", "email",
 )
 
 
@@ -59,7 +59,17 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ("email_draft", re.compile(r"\bdraft\b.*\b(reply|email|response)\b|\breply to\b", re.I)),
     ("email_urgent", re.compile(r"\burgent (email|mail)|\bany urgent\b", re.I)),
     ("email_check", re.compile(r"\bcheck (my )?(email|mail|inbox)\b|\bnew (email|mail)\b", re.I)),
-    ("overnight_summary", re.compile(r"\bwhat changed overnight\b|\bwhat happened overnight\b|\bovernight (summary|update)\b", re.I)),
+    ("overnight_summary", re.compile(
+        r"\bwhat (changed|happened)\s*(recently|overnight)?\b"
+        r"|\bovernight (summary|update|brief)\b"
+        r"|\bdaily brief\b"
+        r"|\bcatch me up\b"
+        r"|\bwhat did i miss\b"
+        r"|\banything new\b"
+        r"|\bwhat'?s going on\b"
+        r"|\brecent status\b",
+        re.I,
+    )),
     ("webstudio_audit", re.compile(r"\b(run |do )?(a )?webstudio audit\b.*\bon\b|\baudit\b.*\bsite\b", re.I)),
     ("dns_watch", re.compile(r"\bwatch dns\b|\bmonitor dns\b|\bdns watcher\b", re.I)),
     ("memory_search", re.compile(r"\bwhat do (i|you) know about\b|\bdo you remember\b|\brecall\b", re.I)),
@@ -79,6 +89,20 @@ def _extract_domain(text: str) -> Optional[str]:
         if candidate.lower() not in ("e.g.", "i.e."):
             return candidate
     return None
+
+
+_WARDEN_ADJACENT_PATTERN = re.compile(
+    r"\b(agents?|sessions?|memory|watchers?|webstudio|dns|emails?|mail|approvals?|warden|"
+    r"proof packs?|deploy|domains?|sites?)\b",
+    re.I,
+)
+
+
+def is_warden_adjacent(text: str) -> bool:
+    """Heuristic: does this message plausibly relate to a Warden operation
+    even though no specific intent pattern matched? Used to pick a more
+    useful fallback message than a flat 'unrecognized'."""
+    return bool(_WARDEN_ADJACENT_PATTERN.search(text))
 
 
 def classify(text: str) -> Intent:
