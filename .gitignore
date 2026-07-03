@@ -1,4 +1,7 @@
 .venv/
+.env
+.env.*
+!.env.*.example
 __pycache__/
 **/__pycache__/
 .pytest_cache/
@@ -15,8 +18,10 @@ _mctable/workbench/
 _mctable/checkpoints/*.sqlite
 
 docs/archive/legacy/src-tauri/target/
-docs/archive/legacy/src-tauri/gen/mcharness.egg-info/
+docs/archive/legacy/src-tauri/gen/
 *.db
+*.sqlite
+*.sqlite3
 
 configs/webstudio.sites.yaml
 

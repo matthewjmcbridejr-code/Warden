@@ -49,7 +49,7 @@ def create_app() -> FastAPI:
         from src.marius.api import router as marius_router
         from src.marius.bot import start_bot
         app.include_router(marius_router)
-        
+
         @app.on_event("startup")
         def startup_marius():
             start_bot()

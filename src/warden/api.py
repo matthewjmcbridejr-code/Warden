@@ -116,6 +116,12 @@ from .agent_registry import (
     update_registered_agent,
     update_registered_agent_config,
 )
+from .assistant import (
+    AssistantRequest,
+    assistant_health_payload,
+    build_assistant_context,
+    chat_with_assistant,
+)
 
 router = APIRouter(prefix="/api/marius", tags=["marius-desktop"])
 router.include_router(captain_router)
@@ -409,6 +415,10 @@ class WardenMemoryContextPackRequest(BaseModel):
     max_chars: int = Field(default=6000, ge=256, le=20_000)
 
 
+class WardenAssistantRequest(AssistantRequest):
+    pass
+
+
 class McHarnessRunEvidenceCreateRequest(BaseModel):
     type: str = Field(default="transcript", min_length=1)
     title: str = Field(min_length=1)
@@ -545,12 +555,12 @@ def _repo_entries() -> list[dict[str, Any]]:
             "accessible": safe_stat["accessible"],
             "error": safe_stat["error"],
         }
-        
+
         git_dir_exists = False
         if safe_stat["exists"]:
             git_stat = safe_path_exists(path / ".git")
             git_dir_exists = git_stat["exists"]
-            
+
         base["git_dir_present"] = git_dir_exists
 
         if safe_stat["exists"] and git_dir_exists:
@@ -573,7 +583,7 @@ def _repo_entries() -> list[dict[str, Any]]:
                 notes.append("path does not exist")
             elif not git_dir_exists:
                 notes.append("not a git repo")
-                
+
             git_info = {
                 "current_branch": None,
                 "dirty": False,
@@ -2486,7 +2496,7 @@ async def post_marius_agent_memory_remember(request: Request):
         return {"ok": False, "error": str(e)}
 
 
-@mcharness_router.get("/memory/health")
+@mcharness_router.get("/memory/health", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memory_health():
     from src.warden.brain_vector_store import count as vec_count
     vec = 0
@@ -2509,7 +2519,7 @@ def get_warden_memory_health():
     }
 
 
-@mcharness_router.get("/memories")
+@mcharness_router.get("/memories", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Optional[str] = None):
     memories = WORKBENCH_STORE.list_memories()
     active = [m for m in memories if m.status != "forgotten"]
@@ -2526,8 +2536,8 @@ def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Opt
     }
 
 
-@mcharness_router.get("/memories/search")
-@mcharness_router.get("/memories/recall")
+@mcharness_router.get("/memories/search", dependencies=[Depends(_require_private_memory_access)])
+@mcharness_router.get("/memories/recall", dependencies=[Depends(_require_private_memory_access)])
 def recall_warden_memories(q: str = "", scope: Optional[str] = None, kind: Optional[str] = None, limit: int = 20):
     memories = WORKBENCH_STORE.search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
     if kind:
@@ -2541,7 +2551,7 @@ def recall_warden_memories(q: str = "", scope: Optional[str] = None, kind: Optio
     }
 
 
-@mcharness_router.post("/memory/recall")
+@mcharness_router.post("/memory/recall", dependencies=[Depends(_require_private_memory_access)])
 def post_recall_warden_memories(payload: WardenMemoryRecallRequest):
     return recall_warden_memories(payload.query, scope=payload.project_id, limit=payload.limit)
 
@@ -2555,7 +2565,7 @@ class MemoryPatchRequest(BaseModel):
     confidence: Optional[float] = None
 
 
-@mcharness_router.patch("/memories/{memory_id}")
+@mcharness_router.patch("/memories/{memory_id}", dependencies=[Depends(_require_private_memory_access)])
 def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
     path = WORKBENCH_STORE._path("memories", memory_id)
     if not path.exists():
@@ -2579,7 +2589,7 @@ def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
     return {"ok": True, "memory": memory.model_dump(mode="json")}
 
 
-@mcharness_router.post("/memories")
+@mcharness_router.post("/memories", dependencies=[Depends(_require_private_memory_access)])
 def create_warden_memory(payload: WorkbenchMemoryCreateRequest):
     try:
         memory = WORKBENCH_STORE.create_memory(payload)
@@ -2588,8 +2598,8 @@ def create_warden_memory(payload: WorkbenchMemoryCreateRequest):
         return {"ok": False, "error": str(e)}
 
 
-@mcharness_router.post("/memories/remember")
-@mcharness_router.post("/memory/remember")
+@mcharness_router.post("/memories/remember", dependencies=[Depends(_require_private_memory_access)])
+@mcharness_router.post("/memory/remember", dependencies=[Depends(_require_private_memory_access)])
 async def remember_warden_memory(request: Request):
     try:
         payload = await request.json()
@@ -2622,6 +2632,21 @@ def post_warden_memory_context_pack(payload: WardenMemoryContextPackRequest):
         }
     except Exception:
         raise HTTPException(status_code=503, detail="Warden Memory context is unavailable.")
+
+
+@mcharness_router.get("/warden/assistant/health", dependencies=[Depends(_require_private_memory_access)])
+def get_warden_assistant_health():
+    return assistant_health_payload()
+
+
+@mcharness_router.post("/warden/assistant/context", dependencies=[Depends(_require_private_memory_access)])
+def post_warden_assistant_context(payload: WardenAssistantRequest):
+    return build_assistant_context(payload, WORKBENCH_STORE, SAFE_REPO_PATHS)
+
+
+@mcharness_router.post("/warden/assistant/chat", dependencies=[Depends(_require_private_memory_access)])
+def post_warden_assistant_chat(payload: WardenAssistantRequest):
+    return chat_with_assistant(payload, WORKBENCH_STORE, SAFE_REPO_PATHS).model_dump(mode="json")
 
 
 @mcharness_router.post("/agents/marius/handoff/agent-prompt")
