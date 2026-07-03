@@ -2594,3 +2594,83 @@ test("single-section nav: only one workspace section visible at a time", async (
   await expect(page.locator("[data-testid='warden-section-agent']")).toBeHidden();
   await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
 });
+
+test("Assistant panel renders local answers, sources, and Google RAG warning", async ({ page }) => {
+  let assistantBody = null;
+
+  await page.route("**/api/mcharness/**", async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    if (url.pathname.endsWith("/warden/assistant/health")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          private_only: true,
+          provider: "local-deterministic",
+          google_rag: { enabled: false, warning: "Google RAG is disabled by default for this local Warden build." },
+        }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/warden/assistant/chat") && method === "POST") {
+      assistantBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          answer: "Warden Assistant reviewed local, allowlisted context only.\nGoogle RAG is present only as a disabled-by-default adapter slot in this build.",
+          sources: [
+            { kind: "memory", title: "m-proof-1", ref: "memory:m-proof-1" },
+            { kind: "project_doc", title: "warden_memory.md", ref: "doc:docs/warden_memory.md" },
+          ],
+          memory_ids: ["m-proof-1"],
+          context_used: {
+            memory: { included: true, memory_count: 1, truncated: false },
+            project_docs: { included: true, doc_count: 1, paths: ["docs/warden_memory.md"] },
+            google_rag: { requested: true, enabled: false },
+          },
+          provider: "local-deterministic",
+          warnings: ["Google RAG is disabled by default for this local Warden build."],
+        }),
+      });
+      return;
+    }
+    if (await fulfillControlRoomRoutes(route, {
+      snapshot: idleMissionSnapshot({ service_mode: "private" }),
+      runner: { ...idleRunnerSessions(), service_mode: "private" },
+    })) return;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+
+  await page.goto("/web/warden/index.html");
+  await page.locator("[data-testid='nav-assistant']").click();
+  await expect(page.locator("[data-testid='assistant-status-value']")).toContainText("enabled");
+  await page.locator("[data-testid='assistant-message']").fill("How should the local assistant work?");
+  await page.locator("#assistant-include-google-rag").check();
+  await page.locator("[data-testid='assistant-ask']").click();
+  await expect(page.locator("[data-testid='assistant-answer']")).toContainText("allowlisted context only");
+  await expect(page.locator("[data-testid='assistant-sources']")).toContainText("memory:m-proof-1");
+  await expect(page.locator("[data-testid='assistant-warnings']")).toContainText("Google RAG is disabled by default");
+  expect(assistantBody.include_google_rag).toBe(true);
+});
+
+test("Assistant panel disables controls on the public service", async ({ page }) => {
+  await page.route("**/api/mcharness/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes("/warden/assistant/")) {
+      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "Private runner required." }) });
+      return;
+    }
+    if (await fulfillControlRoomRoutes(route)) return;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+
+  await page.goto("/web/warden/index.html");
+  await page.locator("[data-testid='nav-assistant']").click();
+  await expect(page.locator("[data-testid='assistant-private-notice']")).toBeVisible();
+  await expect(page.locator("[data-testid='assistant-ask']")).toBeDisabled();
+  await expect(page.locator("[data-testid='assistant-copy']")).toBeDisabled();
+});

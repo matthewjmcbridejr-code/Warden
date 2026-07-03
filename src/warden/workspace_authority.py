@@ -24,6 +24,12 @@ from typing import Any, Dict, List, Literal, Optional
 _REPO_CONFIG = Path(__file__).resolve().parents[2] / "config" / "warden_projects.json"
 _USER_CONFIG = Path("~/.config/warden/projects.json").expanduser()
 
+# The current checkout, wherever it actually lives on this machine (Matt's
+# box, CI, another dev's clone). Used as the default canonical repo for the
+# "warden" project so the registry doesn't hardcode a path that only exists
+# on one machine. A repo-owned or user config file can still override this.
+_CURRENT_CHECKOUT = str(Path(__file__).resolve().parents[2])
+
 # ---------------------------------------------------------------------------
 # Built-in project registry (no config file needed)
 # ---------------------------------------------------------------------------
@@ -32,10 +38,10 @@ _BUILTIN_REGISTRY: List[Dict[str, Any]] = [
     {
         "project_id": "warden",
         "display_name": "Warden / McTable",
-        "canonical_repo": "/home/matt/workspaces/warden/mcharness-public-export",
+        "canonical_repo": _CURRENT_CHECKOUT,
         "known_worktrees": [
             {
-                "path": "/home/matt/workspaces/warden/mcharness-public-export",
+                "path": _CURRENT_CHECKOUT,
                 "role": "canonical",
                 "safe_to_edit": True,
             },

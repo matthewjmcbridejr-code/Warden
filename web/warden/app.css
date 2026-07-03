@@ -931,6 +931,39 @@ textarea {
   font-size: 0.75rem;
 }
 
+.assistant-panel {
+  overflow: hidden;
+}
+
+.assistant-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.assistant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.assistant-toggle input {
+  margin: 0;
+}
+
+.assistant-question {
+  display: grid;
+  gap: 6px;
+}
+
+.assistant-answer {
+  min-height: 180px;
+}
+
 @media (max-width: 860px) {
   .memory-status-grid,
   .memory-work-grid,

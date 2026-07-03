@@ -38,6 +38,7 @@
         <button type="button" class="nav-item" data-section="runs" data-testid="nav-runs">Runs</button>
         <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memory</button>
+        <button type="button" class="nav-item" data-section="assistant" data-testid="nav-assistant">Assistant</button>
         <button type="button" class="nav-item" data-section="proof-gates" data-testid="nav-proof-gates">Proof Gates</button>
         <button type="button" class="nav-item" data-section="runner-sessions" data-testid="nav-runner-sessions">Runner Sessions</button>
         <button type="button" class="nav-item" data-section="projects" data-testid="nav-projects">Projects</button>
@@ -492,6 +493,65 @@
           </div>
         </div>
 
+      </section>
+
+      <!-- ===== ASSISTANT SECTION ===== -->
+      <section id="warden-section-assistant" class="workspace-section" data-section="assistant" data-testid="warden-section-assistant">
+        <header class="workspace-header memory-header">
+          <div>
+            <h2 class="workspace-title">Warden Assistant</h2>
+            <p class="workspace-subhead">Local, private, and deterministic by default.</p>
+          </div>
+          <button type="button" id="assistant-refresh" class="btn" data-testid="assistant-refresh">Refresh</button>
+        </header>
+
+        <div id="assistant-private-notice" class="memory-private-notice" data-testid="assistant-private-notice" style="display:none;">
+          Private runner required. The assistant is unavailable on the public service.
+        </div>
+
+        <div class="memory-status-grid assistant-status-grid">
+          <article class="memory-stat-card">
+            <span class="memory-stat-label">Status</span>
+            <strong id="assistant-status-value" data-testid="assistant-status-value">Checking…</strong>
+            <span id="assistant-status-detail" class="memory-stat-detail">Private runner required</span>
+          </article>
+          <article class="memory-stat-card">
+            <span class="memory-stat-label">Provider</span>
+            <strong id="assistant-provider-value" data-testid="assistant-provider-value">—</strong>
+            <span class="memory-stat-detail">local answer path</span>
+          </article>
+          <article class="memory-stat-card">
+            <span class="memory-stat-label">Google RAG</span>
+            <strong id="assistant-rag-value" data-testid="assistant-rag-value">disabled</strong>
+            <span class="memory-stat-detail">adapter slot only</span>
+          </article>
+        </div>
+
+        <article class="memory-panel assistant-panel" data-testid="assistant-panel">
+          <div class="memory-panel-heading">
+            <div>
+              <h3>Ask Warden Assistant</h3>
+              <p>Reads memory plus allowlisted docs. No arbitrary filesystem crawl.</p>
+            </div>
+          </div>
+          <div class="assistant-toggle-row">
+            <label class="assistant-toggle"><input type="checkbox" id="assistant-include-memory" checked /> <span>Memory</span></label>
+            <label class="assistant-toggle"><input type="checkbox" id="assistant-include-project-context" checked /> <span>Project docs</span></label>
+            <label class="assistant-toggle"><input type="checkbox" id="assistant-include-google-rag" /> <span>Google RAG</span></label>
+          </div>
+          <label class="assistant-question">
+            <span>Question</span>
+            <textarea id="assistant-message" rows="5" maxlength="5000" placeholder="Ask a local Warden question…" data-testid="assistant-message"></textarea>
+          </label>
+          <div class="memory-form-actions">
+            <button type="button" id="assistant-ask" class="btn primary" data-testid="assistant-ask">Ask</button>
+            <button type="button" id="assistant-copy" class="btn" data-testid="assistant-copy">Copy</button>
+            <span id="assistant-chat-status" class="memory-form-status" data-testid="assistant-chat-status" aria-live="polite"></span>
+          </div>
+          <pre id="assistant-answer" class="memory-context-preview assistant-answer" data-testid="assistant-answer">No answer yet.</pre>
+          <div id="assistant-sources" class="memory-context-sources" data-testid="assistant-sources">No sources yet.</div>
+          <div id="assistant-warnings" class="memory-form-status" data-testid="assistant-warnings"></div>
+        </article>
       </section>
 
       <!-- ===== PROJECTS SECTION ===== -->

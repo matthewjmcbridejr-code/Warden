@@ -135,11 +135,26 @@ mcharness_router.include_router(projects_router)
 mcharness_router.include_router(webstudio_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
+_CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 SAFE_REPO_PATHS = [
     Path.home() / "workspaces" / "marius-core" / "hybrid-agent-os",
     Path.home() / "workspaces" / "warden" / "mcharness-public-export",
-    Path(__file__).resolve().parents[2], # The current repo
+    _CANONICAL_REPO_ROOT, # The current repo
 ]
+
+
+def _effective_repo_path(path: Path) -> Path:
+    """Resolve a SAFE_REPO_PATHS entry to a real, existing path.
+
+    These entries are machine-specific labels for Matt's local sibling repos.
+    On any other machine (CI, another dev box) where the literal path doesn't
+    exist, fall back to the current checkout so the label still resolves to
+    something real instead of a permanently-missing path.
+    """
+    return path if path.exists() else _CANONICAL_REPO_ROOT
+
+
 MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
 ARTIFACT_BODY_ROOT = MCTABLE_ROOT / "mcharness" / "artifacts"
 CAPTAIN_PLAN_ROOT = MCTABLE_ROOT / "captain" / "plans"
@@ -546,11 +561,13 @@ def safe_path_exists(path: Path) -> dict[str, Any]:
 def _repo_entries() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in SAFE_REPO_PATHS:
-        safe_stat = safe_path_exists(path)
+        effective_path = _effective_repo_path(path)
+        repo_label = path.name
+        safe_stat = safe_path_exists(effective_path)
         base = {
-            "repo_id": path.name,
-            "label": path.name,
-            "path": str(path),
+            "repo_id": repo_label,
+            "label": repo_label,
+            "path": str(effective_path),
             "exists": safe_stat["exists"],
             "accessible": safe_stat["accessible"],
             "error": safe_stat["error"],
@@ -558,14 +575,14 @@ def _repo_entries() -> list[dict[str, Any]]:
 
         git_dir_exists = False
         if safe_stat["exists"]:
-            git_stat = safe_path_exists(path / ".git")
+            git_stat = safe_path_exists(effective_path / ".git")
             git_dir_exists = git_stat["exists"]
 
         base["git_dir_present"] = git_dir_exists
 
         if safe_stat["exists"] and git_dir_exists:
             try:
-                git_info = _get_git_status(path)
+                git_info = _get_git_status(effective_path)
             except Exception as e:
                 git_info = {
                     "current_branch": None,
@@ -1166,12 +1183,13 @@ def _lane_entries() -> list[dict[str, Any]]:
 def _validate_repo_path(repo_path: str) -> Path:
     for entry in SAFE_REPO_PATHS:
         if str(entry) == repo_path or entry.name == repo_path: # Allow matching by repo_id (name)
-            safe_stat = safe_path_exists(entry)
+            effective_entry = _effective_repo_path(entry)
+            safe_stat = safe_path_exists(effective_entry)
             if not safe_stat["accessible"]:
                 raise HTTPException(status_code=400, detail=f"Allowlisted repo path inaccessible ({safe_stat['error']}): {repo_path}")
             if not safe_stat["exists"]:
                 raise HTTPException(status_code=400, detail=f"Allowlisted repo path does not exist: {repo_path}")
-            return entry
+            return effective_entry
     raise HTTPException(status_code=400, detail=f"Repo path is not allowlisted: {repo_path}")
 
 
@@ -1769,8 +1787,10 @@ def get_warden_build_info():
 
 @mcharness_router.get("/health")
 def get_mcharness_health():
-    repos = _repo_entries()
-    lanes = _lane_entries()
+    # Health must stay cheap: use static counts instead of _repo_entries()/
+    # _lane_entries(), which shell out to git and probe CLI executables per
+    # item and can push this endpoint past client-side timeouts (e.g. the
+    # browser extension's 2s abort).
     return {
         "ok": True,
         "service": "mcharness-control-plane",
@@ -1781,8 +1801,8 @@ def get_mcharness_health():
         "public_write_enabled": _public_write_enabled(),
         "tmux_runner_enabled": _tmux_runner_enabled(),
         "codex_runner_enabled": _codex_runner_enabled(),
-        "available_lanes_count": len(lanes),
-        "repo_count": len(repos),
+        "available_lanes_count": len(AGENT_LANES),
+        "repo_count": len(SAFE_REPO_PATHS),
         "manual_mode": True,
     }
 
@@ -2919,7 +2939,7 @@ def post_mcharness_runner_intent(session_id: str, payload: McHarnessRunnerIntent
     repo_path: Optional[Path] = None
     for p in SAFE_REPO_PATHS:
         if p.name == payload.repo_id or str(p) == payload.repo_id:
-            repo_path = p
+            repo_path = _effective_repo_path(p)
             break
     if repo_path is None:
         raise HTTPException(status_code=400, detail=f"Unknown repo_id (must be allowlisted): {payload.repo_id}")
@@ -3015,7 +3035,7 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
     repo_path: Optional[Path] = None
     for p in SAFE_REPO_PATHS:
         if p.name == payload.repo_id or str(p) == payload.repo_id:
-            repo_path = p
+            repo_path = _effective_repo_path(p)
             break
     if repo_path is None:
         raise HTTPException(status_code=400, detail=f"Unknown repo_id (must be allowlisted): {payload.repo_id}")

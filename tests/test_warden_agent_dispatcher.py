@@ -183,7 +183,9 @@ def test_command_not_found_returns_failure(tmp_board, monkeypatch):
 # Workspace Authority enforcement tests
 # ---------------------------------------------------------------------------
 
-CANONICAL = "/home/matt/workspaces/warden/mcharness-public-export"
+# Matches the dynamic default in workspace_authority._CURRENT_CHECKOUT —
+# the actual checkout, wherever it lives on this machine.
+CANONICAL = str(Path(__file__).resolve().parents[1])
 SCRATCH = "/home/matt/Documents/Warden"
 
 _WA_CFG = {

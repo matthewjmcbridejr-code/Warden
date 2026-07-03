@@ -1,4 +1,6 @@
 """Tests for Warden Workspace Authority."""
+from pathlib import Path
+
 import pytest
 from src.warden.workspace_authority import (
     resolve_project,
@@ -9,7 +11,9 @@ from src.warden.workspace_authority import (
     build_agent_bootstrap,
 )
 
-CANONICAL = "/home/matt/workspaces/warden/mcharness-public-export"
+# Matches the dynamic default in workspace_authority._CURRENT_CHECKOUT —
+# the actual checkout, wherever it lives on this machine.
+CANONICAL = str(Path(__file__).resolve().parents[1])
 SCRATCH = "/home/matt/Documents/Warden"
 
 
