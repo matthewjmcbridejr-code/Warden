@@ -6,7 +6,7 @@
 
 Local state is clean, tests pass (737/737 non-skipped), and there are no secrets or junk files in the diff. The blocker is real: `feat/marius-resident-core` and `origin/master` have independently rewritten the same core files (`src/warden/api.py`, `src/warden/app.py`, the entire `web/warden/` UI), producing **158 textual conflict hunks across 18 files**. This is a feature-level divergence, not a mechanical one — resolving it means choosing, file by file, between two different implementations of overlapping functionality (this branch's Captain/webstudio/mail/OAuth work vs. master's newly-merged "local assistant / memory cockpit" work from PR #29). That decision requires product judgment I don't have authority to make unilaterally, so I stopped rather than guess.
 
-**Update:** conflicts have since been resolved in a follow-up session — see [§10](#10-conflict-resolution-update) below. PR #30 is now `MERGEABLE` with 743/743 local tests passing. GitHub Actions CI is red for a pre-existing, unrelated reason (see §10).
+**Update (2 follow-up sessions):** conflicts resolved (§10), then the two named merge-readiness blockers fixed (§12). PR #30 is now `MERGEABLE`, 743/743 local tests pass, and CI failures dropped from 33 to 14 — the remaining 14 are a distinct, pre-existing infrastructure gap (no Ollama/codex CLI/`google` package on the CI runner), not a path or code defect. See §12 for the current, final status.
 
 ## 2. Repo State
 
@@ -173,3 +173,47 @@ Pushed `112d344` to `origin/feat/marius-resident-core`. `gh pr view 30` now repo
 7. **PR #30 status after push:** `MERGEABLE` (was `CONFLICTING`). GitHub Actions CI: `FAILURE`, due to a pre-existing hardcoded-path portability gap unrelated to this merge (detailed above).
 8. **Ready to merge:** conflicts are resolved and local tests are fully green, but CI is red and the Assistant frontend panel is incomplete. Recommend Matt review the diff and decide whether to merge despite red CI (given the failure is understood and unrelated) or fix `SAFE_REPO_PATHS` portability first.
 9. **Exact next action for Matt:** review `112d344` on GitHub (`https://github.com/matthewjmcbridejr-code/mcharness/pull/30`), decide on the CI portability fix, and either merge PR #30 as-is or request the `SAFE_REPO_PATHS`/frontend-panel follow-ups first. No `master` push has been made or will be made without explicit instruction.
+
+## 12. Merge-Readiness Blocker Fixes (follow-up session)
+
+Both blockers named in this session's instructions are fixed. Commit `982b3a5`.
+
+### CI Portability for SAFE_REPO_PATHS
+
+Root cause was broader than the literal `SAFE_REPO_PATHS` constant: three separate hardcoded-absolute-path spots contributed to the 33 original CI failures.
+
+1. **`src/warden/api.py` `SAFE_REPO_PATHS`.** Entries for Matt's sibling repos (`hybrid-agent-os`, `mcharness-public-export`) are literal `Path.home()/...` paths that don't exist on any other machine. Added `_effective_repo_path(path)`: returns the literal path if it exists, else falls back to the current checkout (`Path(__file__).resolve().parents[2]`), while `_repo_entries()` keeps the *intended* `repo_id` label (`path.name`) regardless of which physical directory it resolves to. Applied to `_repo_entries()`, `_validate_repo_path()`, and the two runner-intent/runner-start repo-id lookups. On Matt's machine, behavior is byte-for-byte unchanged (literal paths exist there, no fallback triggers).
+2. **`src/warden/workspace_authority.py` `_BUILTIN_REGISTRY`.** The "warden" project's `canonical_repo` and first `known_worktrees` entry were hardcoded to `/home/matt/workspaces/warden/mcharness-public-export`. This is what actually caused most of the 33 failures — `agent_dispatcher.py`'s `_workspace_preflight()` calls `detect_workspace_drift("warden", cwd=os.getcwd())` on every dispatch, and `os.getcwd()` during a CI pytest run is `/home/runner/work/mcharness/mcharness`, which never matched the hardcoded canonical string → every dispatch got blocked with `[WorkspaceAuthority] BLOCKED`. Changed the default to `Path(__file__).resolve().parents[2]` (same dynamic pattern as `api.py`), so it always matches wherever the repo actually lives. A `config/warden_projects.json` (not present, but the loader already supports it) still overrides this for anyone who wants an explicit value.
+3. **`tests/test_warden_workspace_authority.py`, `tests/test_warden_agent_dispatcher.py`.** Both hardcoded a `CANONICAL = "/home/matt/workspaces/warden/mcharness-public-export"` module constant. Changed both to compute the same dynamic path the source now uses, so the tests themselves are portable (not just the code they test).
+
+**Verification:** ran the full suite twice — once normally, once with `HOME=/tmp/fake-ci-home` (directly simulating the CI condition that broke `Path.home()`-based lookups). Both: **743 passed, 1 skipped, 0 failed.**
+
+### Assistant Frontend Panel
+
+Ported the UI slice from master's now-superseded `web/warden/*` (commit `4468018`) to drive the Assistant backend routes that were already wired into `api.py` during merge resolution (§10). Scoped to `index.html` only — confirmed via grep that the browser spec and smoke script exclusively target that page, not the separate `app.html` local-dev shell.
+
+- **`index.html`:** one nav button (`data-testid="nav-assistant"`) placed after Memory, one self-contained `<section id="warden-section-assistant">` (status cards, memory/project-docs/Google-RAG toggles, ask/refresh/copy controls) — 60 lines, no existing markup touched.
+- **`app.css`:** 6 new rules (`.assistant-panel`, `.assistant-toggle-row`, `.assistant-toggle`, `.assistant-toggle input`, `.assistant-question`, `.assistant-answer`) — ~30 lines, no existing rules changed.
+- **`app.js`:** one state slice (`state.assistant`), 6 functions (`assistantPayload`, `setAssistantControlsEnabled`, `renderAssistant`, `loadAssistantHealth`, `askAssistant`, `copyAssistantAnswer`), one entry in the section-title map, one `loadAssistantHealth()` call on section-switch, 3 click listeners — ~170 lines total, inserted at existing, logical seams (next to the equivalent memory-panel code) rather than restructuring anything.
+- **`tests/browser/warden-cockpit.spec.js`:** restored the 2 assistant e2e specs from master verbatim — they assert against the exact `data-testid`/element-id attributes and the exact `/warden/assistant/health`, `/chat` endpoints used in the ported markup/JS, so the mapping is a direct match even though Playwright itself isn't runnable in this environment (not installed; its own config references a stale, unrelated module path) to execute them.
+
+**Verification:** `node --check` on `app.js` and the spec file, `python3` HTML `<section>` tag-balance check, and the full pytest suite (unaffected by frontend changes) — all clean.
+
+### CI Result After Push
+
+Pushed `982b3a5`. `gh pr checks 30` still reports `FAILURE`, but the failure signature changed completely: **33 failures → 14 failures**, and none of the remaining 14 relate to `SAFE_REPO_PATHS`, `workspace_authority`, or any path hardcoding — confirming that blocker is fully resolved.
+
+The remaining 14 are a distinct, pre-existing category — missing external dependencies/services on the GitHub runner that exist on Matt's machine:
+- 7 failures: `ModuleNotFoundError: No module named 'google'` (`tests/test_marius_google_search_provider.py`) — `google` isn't a declared dependency in `pyproject.toml` and isn't importable even in this session's local `.venv`; it must be installed system-wide or in a different environment on Matt's box.
+- 6 failures: `tests/test_marius_chat_brain_context.py`, `test_marius_grounding.py`, `test_marius_provider_gateway.py` — all fail with variants of "ollama unreachable" or unpack errors consistent with no Ollama server responding. Matt's machine runs a live Ollama instance with 12+ pulled models (confirmed via `curl localhost:11434/api/tags` this session); the CI runner has none.
+- 1 failure: `test_agent_refresh_status_private_codex_runnable` — expects the `codex` CLI to report `runnable: True`; the binary isn't installed on the runner.
+
+This is a new, separate blocker class (external tooling/service provisioning for CI, not a code or path defect) that was not named in this session's scope. Flagging it rather than expanding scope to fix it — deciding whether CI should mock/skip these, or provision Ollama/codex/`google` in the workflow, is a product/infra decision for Matt.
+
+### Final Proof (this session)
+
+1. **Commits created:** `982b3a5` — `fix(warden): make CI portable and add Assistant frontend panel`.
+2. **Tests run:** `pytest tests --ignore=tests/e2e --ignore=tests/browser -q` — normal HOME: 743 passed, 1 skipped. `HOME=/tmp/fake-ci-home`: 743 passed, 1 skipped. `py_compile` clean. `node --check` clean on `app.js` and the spec file.
+3. **PR #30 status:** `MERGEABLE`. CI: still `FAILURE`, but failure count dropped 33 → 14, and the 14 remaining are unrelated to both fixed blockers (confirmed by inspecting the CI log directly).
+4. **Ready to merge:** the two named blockers are resolved. CI is not fully green — 14 unrelated pre-existing environment-dependency failures remain, out of this session's scope.
+5. **Exact next action for Matt:** review commit `982b3a5` on [PR #30](https://github.com/matthewjmcbridejr-code/mcharness/pull/30). Decide whether to (a) merge now given CI's remaining failures are understood, documented, and unrelated to the code changes, or (b) request a follow-up to provision Ollama/`codex`/`google` in `ci.yml` (or mark those specific tests as requiring external services) before merging. No push to `master` was made or attempted.
