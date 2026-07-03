@@ -41,6 +41,7 @@
         <button type="button" class="nav-item" data-section="assistant" data-testid="nav-assistant">Assistant</button>
         <button type="button" class="nav-item" data-section="proof-gates" data-testid="nav-proof-gates">Proof Gates</button>
         <button type="button" class="nav-item" data-section="runner-sessions" data-testid="nav-runner-sessions">Runner Sessions</button>
+        <button type="button" class="nav-item" data-section="projects" data-testid="nav-projects">Projects</button>
         <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
       </nav>
 
@@ -62,6 +63,7 @@
         </div>
         <div class="topbar-actions">
           <button type="button" id="topbar-refresh" class="btn" data-testid="topbar-refresh">Refresh</button>
+          <a href="./command-deck.html" class="btn" data-testid="topbar-command-deck">Command Deck</a>
           <button type="button" id="topbar-command" class="btn" data-testid="topbar-command">Command</button>
         </div>
       </header>
@@ -321,136 +323,179 @@
       </section>
 
       <section id="warden-section-memory" class="workspace-section" data-section="memory" data-testid="warden-section-memory">
-        <header class="workspace-header memory-header">
+
+        <!-- Top bar -->
+        <div class="mem-topbar">
           <div>
-            <h2 class="workspace-title">Memory</h2>
-            <p class="workspace-subhead">Private project context for decisions, proof, failures, and handoffs.</p>
+            <h2 class="workspace-title" style="margin:0 0 2px;">Memory</h2>
+            <p class="workspace-subhead" style="margin:0;">Your second brain — decisions, proofs, handoffs, and everything agents should know about you.</p>
           </div>
-          <button type="button" id="memory-refresh" class="btn" data-testid="memory-refresh">Refresh</button>
-        </header>
-
-        <div id="memory-private-notice" class="memory-private-notice" data-testid="memory-private-notice" style="display:none;">
-          Memory is private-runner-only. Use the private cockpit service to search, remember, or preview context packs.
+          <div class="mem-topbar-actions">
+            <button type="button" class="btn primary" id="mem-new-btn" data-testid="mem-new-btn">+ New Memory</button>
+            <button type="button" class="btn" id="mem-refresh-btn" data-testid="mem-refresh-btn">Refresh</button>
+          </div>
         </div>
 
-        <div class="memory-status-grid">
-          <article class="memory-stat-card">
-            <span class="memory-stat-label">Status</span>
-            <strong id="memory-status-value" data-testid="memory-status-value">Checking…</strong>
-            <span id="memory-status-detail" class="memory-stat-detail">Private runner only</span>
-          </article>
-          <article class="memory-stat-card">
-            <span class="memory-stat-label">Memories</span>
-            <strong id="memory-count-value" data-testid="memory-count-value">—</strong>
-            <span class="memory-stat-detail">stored for this service</span>
-          </article>
-          <article class="memory-stat-card">
-            <span class="memory-stat-label">Project</span>
-            <strong id="memory-project-value" data-testid="memory-project-value">Warden</strong>
-            <span id="memory-updated-value" class="memory-stat-detail">No memories yet</span>
-          </article>
+        <!-- Stat strip -->
+        <div class="mem-stat-strip" id="mem-stat-strip">
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Total</span>
+            <strong id="mem-stat-total">—</strong>
+          </div>
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Semantic</span>
+            <strong id="mem-stat-vectors">—</strong>
+            <span class="mem-stat-sub" id="mem-stat-embed-status"></span>
+          </div>
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Decisions</span>
+            <strong id="mem-stat-decisions">—</strong>
+          </div>
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Proofs</span>
+            <strong id="mem-stat-proofs">—</strong>
+          </div>
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Failures</span>
+            <strong id="mem-stat-failures">—</strong>
+          </div>
+          <div class="mem-stat-card">
+            <span class="mem-stat-label">Handoffs</span>
+            <strong id="mem-stat-handoffs">—</strong>
+          </div>
         </div>
 
-        <div class="memory-work-grid">
-          <article class="memory-panel">
-            <div class="memory-panel-heading">
-              <div>
-                <h3>Search Memory</h3>
-                <p>Search the project truth before repeating work.</p>
-              </div>
-            </div>
-            <form id="memory-search-form" class="memory-inline-form" data-testid="memory-search-form">
-              <input id="memory-search-query" maxlength="500" placeholder="Search project memory…" data-testid="memory-search-query" />
-              <button type="submit" class="btn primary" data-testid="memory-search-submit">Search</button>
-            </form>
-            <div id="memory-search-status" class="memory-form-status" aria-live="polite"></div>
-            <div id="memory-search-results" class="memory-list" data-testid="memory-search-results"></div>
-          </article>
+        <!-- Who is Matt strip (PiecesOS personal context) -->
+        <div class="mem-identity-strip" id="mem-identity-strip">
+          <div class="mem-identity-avatar">M</div>
+          <div class="mem-identity-copy">
+            <div class="mem-identity-name" id="mem-identity-name">Loading…</div>
+            <div class="mem-identity-bio" id="mem-identity-bio"></div>
+          </div>
+          <div class="mem-identity-projects" id="mem-identity-projects"></div>
+          <button type="button" class="btn" id="mem-edit-identity-btn" style="margin-left:auto;flex-shrink:0;font-size:0.78rem;padding:5px 10px;">Edit Profile</button>
+        </div>
 
-          <article class="memory-panel">
-            <div class="memory-panel-heading">
-              <div>
-                <h3>Remember Note</h3>
-                <p>Write one compact truth for the next operator or agent.</p>
+        <!-- 3-col layout -->
+        <div class="mem-layout">
+
+          <!-- Left: search + filters -->
+          <aside class="mem-left-rail">
+            <div class="mem-search-box">
+              <input type="text" id="mem-search-input" placeholder="Search memories…" data-testid="mem-search-input" autocomplete="off" />
+              <button type="button" id="mem-search-btn" class="btn" data-testid="mem-search-btn">→</button>
+            </div>
+            <div class="mem-filter-chips" id="mem-filter-chips">
+              <button type="button" class="mem-filter-chip active" data-kind="">All</button>
+              <button type="button" class="mem-filter-chip" data-kind="decision">Decision</button>
+              <button type="button" class="mem-filter-chip" data-kind="proof">Proof</button>
+              <button type="button" class="mem-filter-chip" data-kind="failure">Failure</button>
+              <button type="button" class="mem-filter-chip" data-kind="handoff">Handoff</button>
+              <button type="button" class="mem-filter-chip" data-kind="constraint">Constraint</button>
+              <button type="button" class="mem-filter-chip" data-kind="user_note">Note</button>
+            </div>
+            <div class="mem-project-filter">
+              <label style="font-size:0.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">Project</label>
+              <select id="mem-project-filter" style="width:100%;background:rgba(7,14,25,0.72);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 10px;font:inherit;font-size:0.84rem;">
+                <option value="">All projects</option>
+              </select>
+            </div>
+            <div class="mem-workstream-panel">
+              <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Workstream</div>
+              <div id="mem-workstream-list" class="mem-workstream-list"></div>
+            </div>
+          </aside>
+
+          <!-- Center: memory list -->
+          <main class="mem-center">
+            <div class="mem-list-header">
+              <span class="mem-list-count" id="mem-list-count"></span>
+              <div class="mem-sort-row">
+                <select id="mem-sort-select" style="background:rgba(7,14,25,0.72);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:5px 8px;font:inherit;font-size:0.8rem;">
+                  <option value="recent">Most recent</option>
+                  <option value="kind">Kind</option>
+                  <option value="project">Project</option>
+                </select>
               </div>
             </div>
-            <form id="memory-remember-form" class="memory-form" data-testid="memory-remember-form">
+            <div id="mem-list" class="mem-list" data-testid="mem-list"></div>
+          </main>
+
+          <!-- Right: detail / new form -->
+          <aside class="mem-right-rail">
+            <!-- Detail view -->
+            <div id="mem-detail" class="mem-detail-panel" style="display:none;">
+              <div class="mem-detail-header">
+                <span id="mem-detail-kind-chip" class="memory-chip"></span>
+                <button type="button" id="mem-detail-close" class="btn" style="padding:4px 8px;font-size:0.72rem;">✕ Close</button>
+              </div>
+              <h3 id="mem-detail-title" class="mem-detail-title"></h3>
+              <div class="mem-detail-meta" id="mem-detail-meta"></div>
+              <div id="mem-detail-body" class="mem-detail-body"></div>
+              <div class="mem-detail-tags" id="mem-detail-tags"></div>
+              <div class="mem-detail-actions">
+                <button type="button" class="btn bad" id="mem-forget-btn" style="font-size:0.78rem;">Forget</button>
+              </div>
+            </div>
+
+            <!-- Context pack -->
+            <div id="mem-context-panel" class="mem-context-panel">
+              <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Context Pack</div>
+              <textarea id="mem-context-prompt" rows="3" placeholder="What should the next agent do?" style="width:100%;background:rgba(7,14,25,0.72);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 10px;font:inherit;font-size:0.84rem;resize:vertical;margin-bottom:8px;"></textarea>
+              <select id="mem-context-agent" style="width:100%;background:rgba(7,14,25,0.72);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 10px;font:inherit;font-size:0.84rem;margin-bottom:8px;">
+                <option value="codex_cli">Codex CLI</option>
+                <option value="claude_code">Claude Code</option>
+                <option value="jules_remote">Jules</option>
+                <option value="captain">Captain</option>
+              </select>
+              <button type="button" class="btn primary" id="mem-context-build-btn" style="width:100%;margin-bottom:10px;">Build Context Pack</button>
+              <div id="mem-context-status" class="memory-form-status" aria-live="polite" style="margin-bottom:6px;min-height:16px;font-size:0.8rem;"></div>
+              <pre id="mem-context-preview" style="margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#07101c;color:var(--text);font-family:var(--mono);font-size:0.72rem;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;display:none;"></pre>
+            </div>
+          </aside>
+        </div>
+
+        <!-- New Memory modal -->
+        <div id="mem-new-modal" class="warden-modal" style="display:none;">
+          <div class="warden-modal-content" style="max-width:540px;">
+            <h3 style="margin:0 0 14px;">New Memory</h3>
+            <div class="memory-form">
               <div class="memory-form-row">
-                <label>
-                  <span>Title</span>
-                  <input id="memory-note-title" maxlength="160" placeholder="Short title" data-testid="memory-note-title" />
+                <label class="memory-form"><span>Title</span>
+                  <input id="mem-new-title" maxlength="160" placeholder="Short descriptive title" />
                 </label>
-                <label>
-                  <span>Kind</span>
-                  <select id="memory-note-kind" data-testid="memory-note-kind">
-                    <option value="user_note">note</option>
-                    <option value="decision">decision</option>
-                    <option value="failure">failure</option>
-                    <option value="proof">proof</option>
-                    <option value="constraint">constraint</option>
-                    <option value="handoff">handoff</option>
+                <label class="memory-form"><span>Kind</span>
+                  <select id="mem-new-kind">
+                    <option value="user_note">Note</option>
+                    <option value="decision">Decision</option>
+                    <option value="proof">Proof</option>
+                    <option value="failure">Failure</option>
+                    <option value="constraint">Constraint</option>
+                    <option value="handoff">Handoff</option>
                   </select>
                 </label>
               </div>
-              <label>
-                <span>Tags</span>
-                <input id="memory-note-tags" maxlength="320" placeholder="api, runner, acceptance" data-testid="memory-note-tags" />
+              <label class="memory-form"><span>Project</span>
+                <input id="mem-new-project" placeholder="warden, grademy, marius…" />
               </label>
-              <label>
-                <span>Note</span>
-                <textarea id="memory-note-content" rows="5" maxlength="5000" placeholder="What should the next agent know?" data-testid="memory-note-content"></textarea>
+              <label class="memory-form"><span>Tags (comma-separated)</span>
+                <input id="mem-new-tags" placeholder="api, auth, critical" />
               </label>
-              <div class="memory-form-help">Secrets are redacted on write and render. Keep notes short and operational.</div>
-              <div class="memory-form-actions">
-                <button type="submit" class="btn primary" data-testid="memory-remember-submit">Remember</button>
-                <span id="memory-remember-status" class="memory-form-status" data-testid="memory-remember-status" aria-live="polite"></span>
-              </div>
-            </form>
-          </article>
+              <label class="memory-form"><span>Content</span>
+                <textarea id="mem-new-content" rows="6" maxlength="8000" placeholder="What should any agent know about this?"></textarea>
+              </label>
+              <div id="mem-new-error" style="color:var(--bad);font-size:0.84rem;min-height:18px;"></div>
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn primary" id="mem-new-submit">Save Memory</button>
+              <button type="button" class="btn" id="mem-new-cancel">Cancel</button>
+            </div>
+          </div>
         </div>
 
-        <article class="memory-panel">
-          <div class="memory-panel-heading">
-            <div>
-              <h3>Top of Mind</h3>
-              <p>Recent project memory, newest first. Redaction is shown inline.</p>
-            </div>
-          </div>
-          <div id="memory-recent-list" class="memory-list memory-list-recent" data-testid="memory-recent-list">
-            <div class="memory-empty">Loading memory…</div>
-          </div>
-        </article>
-
-        <article class="memory-panel memory-panel-context">
-          <div class="memory-panel-heading">
-            <div>
-              <h3>Context Pack Preview</h3>
-              <p>Preview the bounded memory block Warden would attach to the next agent task.</p>
-            </div>
-            <span id="memory-context-meta" class="memory-context-meta" data-testid="memory-context-meta">Not built yet</span>
-          </div>
-          <div class="memory-context-controls">
-            <label>
-              <span>Agent</span>
-              <select id="memory-context-agent" data-testid="memory-context-agent">
-                <option value="codex_cli">Codex</option>
-                <option value="jules_remote">Jules</option>
-                <option value="grok">Grok</option>
-                <option value="captain">Captain</option>
-              </select>
-            </label>
-            <label class="memory-context-prompt">
-              <span>Next agent task</span>
-              <textarea id="memory-context-prompt" rows="3" maxlength="5000" placeholder="What is the next agent task?" data-testid="memory-context-prompt"></textarea>
-            </label>
-            <button type="button" id="memory-context-build" class="btn primary" data-testid="memory-context-build">Build Context Pack</button>
-          </div>
-          <div id="memory-context-status" class="memory-form-status" aria-live="polite"></div>
-          <pre id="memory-context-preview" class="memory-context-preview" data-testid="memory-context-preview">No context pack built.</pre>
-          <div id="memory-context-sources" class="memory-context-sources" data-testid="memory-context-sources"></div>
-        </article>
       </section>
 
+      <!-- ===== ASSISTANT SECTION ===== -->
       <section id="warden-section-assistant" class="workspace-section" data-section="assistant" data-testid="warden-section-assistant">
         <header class="workspace-header memory-header">
           <div>
@@ -508,6 +553,114 @@
           <div id="assistant-warnings" class="memory-form-status" data-testid="assistant-warnings"></div>
         </article>
       </section>
+
+      <!-- ===== PROJECTS SECTION ===== -->
+      <section id="warden-section-projects" class="workspace-section" data-section="projects" data-testid="warden-section-projects">
+        <!-- Overview panel (shown when no project selected) -->
+        <div id="projects-overview" class="projects-view">
+          <div class="workspace-header-row">
+            <div class="workspace-header">
+              <h2 class="workspace-title">Projects</h2>
+              <p class="workspace-subhead">Repos, agent worktrees, and execution contexts — all in one place.</p>
+            </div>
+            <button type="button" class="btn primary" id="new-project-btn" data-testid="new-project-btn">+ New Project</button>
+          </div>
+
+          <div id="projects-grid" class="projects-grid" data-testid="projects-grid">
+            <div class="projects-empty" id="projects-empty">
+              <p>No projects yet.</p>
+              <button type="button" class="btn primary" data-action="new-project">Create your first project</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detail panel (shown when project selected) -->
+        <div id="projects-detail" class="projects-view" style="display:none;">
+          <!-- Context strip -->
+          <div class="project-context-strip" id="project-context-strip">
+            <button type="button" class="btn" id="projects-back-btn" data-testid="projects-back-btn">← Projects</button>
+            <div class="project-context-info">
+              <span class="project-context-name" id="project-context-name"></span>
+              <span class="project-context-repo mono" id="project-context-repo"></span>
+            </div>
+            <div class="project-context-chips" id="project-context-chips"></div>
+            <button type="button" class="btn primary" id="launch-agent-btn" data-testid="launch-agent-btn">Launch Agent</button>
+          </div>
+
+          <!-- 3-col grid -->
+          <div class="project-detail-grid">
+            <!-- Left rail -->
+            <div class="project-left-rail">
+              <div class="project-rail-section">
+                <div class="project-rail-heading">Agents</div>
+                <div id="project-agent-cards" class="project-agent-cards"></div>
+              </div>
+              <div class="project-rail-section">
+                <div class="project-rail-heading">Task Templates</div>
+                <div id="project-templates" class="project-templates"></div>
+                <button type="button" class="btn" id="new-template-btn" style="width:100%;margin-top:8px;font-size:0.82rem;">+ New Template</button>
+              </div>
+              <div class="project-rail-section">
+                <div class="project-rail-heading">Brain Search</div>
+                <div class="brain-search-row">
+                  <input type="text" id="brain-search-input" placeholder="Recall from memory…" data-testid="brain-search-input" />
+                  <button type="button" class="btn" id="brain-search-btn">→</button>
+                </div>
+                <div id="brain-search-results" class="brain-search-results"></div>
+              </div>
+            </div>
+
+            <!-- Center -->
+            <div class="project-center">
+              <!-- Workspace status -->
+              <div class="project-panel">
+                <div class="project-panel-header">
+                  <h3 class="project-panel-title">Workspaces</h3>
+                  <span id="worktrees-count" class="project-count-pill"></span>
+                </div>
+                <div id="worktrees-table-wrap" class="worktrees-table-wrap">
+                  <table class="worktrees-table" id="worktrees-table">
+                    <thead>
+                      <tr>
+                        <th>Branch</th>
+                        <th>Agent</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="worktrees-tbody"></tbody>
+                  </table>
+                  <div id="worktrees-empty" class="projects-empty" style="display:none;">No worktrees yet. Launch an agent to create one.</div>
+                </div>
+              </div>
+
+              <!-- Recent Runs -->
+              <div class="project-panel" style="margin-top:14px;">
+                <div class="project-panel-header">
+                  <h3 class="project-panel-title">Recent Runs</h3>
+                </div>
+                <div id="project-runs-list" class="project-runs-list"></div>
+              </div>
+            </div>
+
+            <!-- Right rail -->
+            <div class="project-right-rail">
+              <div class="project-panel">
+                <div class="project-rail-heading" style="margin-bottom:10px;">Recommended Next</div>
+                <div id="project-next-action" class="project-next-action">
+                  <span class="muted" style="font-size:0.84rem;">Run bootstrap to get a recommendation.</span>
+                </div>
+                <button type="button" class="btn" id="bootstrap-btn" style="width:100%;margin-top:10px;font-size:0.82rem;" data-testid="bootstrap-btn">Re-bootstrap</button>
+              </div>
+              <div class="project-panel" style="margin-top:14px;">
+                <div class="project-rail-heading" style="margin-bottom:10px;">Proof Ledger</div>
+                <div id="project-proof-ledger" class="project-proof-ledger"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- ===== /PROJECTS SECTION ===== -->
 
       <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
         <header class="workspace-header">
@@ -590,6 +743,62 @@
         </aside>
       </div>
     </main>
+    </div>
+  </div>
+
+  <!-- New Project Modal -->
+  <div id="new-project-modal" class="warden-modal" style="display:none;">
+    <div class="warden-modal-content" style="max-width:520px;">
+      <h3 style="margin:0 0 14px;">New Project</h3>
+      <div class="memory-form" id="new-project-form">
+        <label class="memory-form"><span>Project Name</span>
+          <input type="text" id="np-name" placeholder="e.g. Warden" />
+        </label>
+        <label class="memory-form"><span>Repo Path (absolute)</span>
+          <input type="text" id="np-repo" placeholder="/home/matt/workspaces/…" />
+        </label>
+        <label class="memory-form"><span>Worktree Root (where branches are created)</span>
+          <input type="text" id="np-worktrees" placeholder="/home/matt/workspaces/worktrees/…" />
+        </label>
+        <label class="memory-form"><span>Agents (comma-separated IDs)</span>
+          <input type="text" id="np-agents" placeholder="claude_code, codex_cli" />
+        </label>
+        <label class="memory-form"><span>Brain Tags (comma-separated)</span>
+          <input type="text" id="np-tags" placeholder="warden, agent-os" />
+        </label>
+        <div id="np-error" style="color:var(--bad);font-size:0.84rem;min-height:18px;"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn primary" id="np-submit-btn">Create Project</button>
+        <button type="button" class="btn" id="np-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Launch Agent Drawer -->
+  <div id="launch-agent-modal" class="warden-modal" style="display:none;">
+    <div class="warden-modal-content" style="max-width:540px;">
+      <h3 style="margin:0 0 14px;">Launch Agent</h3>
+      <div class="memory-form">
+        <label class="memory-form"><span>Agent</span>
+          <select id="la-agent"></select>
+        </label>
+        <label class="memory-form"><span>Branch Name</span>
+          <input type="text" id="la-branch" placeholder="feature-…" />
+        </label>
+        <label class="memory-form"><span>Task Prompt</span>
+          <textarea id="la-prompt" rows="5" placeholder="Describe what the agent should do…"></textarea>
+        </label>
+        <details id="la-bootstrap-preview-details">
+          <summary style="cursor:pointer;color:var(--muted);font-size:0.84rem;margin-bottom:6px;">Preview bootstrap context</summary>
+          <pre id="la-bootstrap-preview" class="history-modal-pre" style="max-height:180px;font-size:0.75rem;"></pre>
+        </details>
+        <div id="la-error" style="color:var(--bad);font-size:0.84rem;min-height:18px;"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn primary" id="la-submit-btn">Launch</button>
+        <button type="button" class="btn" id="la-cancel-btn">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -714,7 +923,7 @@
         <label style="display:block; font-size:0.85em;">Prompt / task description</label>
         <textarea id="modal-prompt" style="width:100%; height:120px; padding:6px;" placeholder="Describe the change or task for Codex..."></textarea>
       </div>
-      <div id="use-agent-memory-note" class="use-agent-memory-note">Memory context will be attached when available.</div>
+      <div class="use-agent-memory-note">Memory context will be attached when available.</div>
       <div id="deploy-disabled-note" style="display:none; color:var(--bad); font-size:0.85em; margin:6px 0;"></div>
       <div style="display:flex; gap:8px; margin-top:12px;">
         <button id="deploy-prompt-btn" class="btn primary" type="button">Deploy Prompt</button>
@@ -893,5 +1102,7 @@
 
   <script src="./control-room.js"></script>
   <script src="./app.js"></script>
+  <script src="./projects.js"></script>
+  <script src="./memory.js"></script>
 </body>
 </html>

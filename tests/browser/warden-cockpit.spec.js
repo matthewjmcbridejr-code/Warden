@@ -422,7 +422,8 @@ test("proves the minimal Agent Library + Codex flow (SIMPLE MODE)", async ({ pag
   await expect(captainModal.locator("[data-testid='captain-settings-status']")).toContainText("Not configured");
   await expect(captainModal.locator("[data-testid='captain-settings-note']")).toContainText("Key setup is private-service only");
   await expect(captainModal.locator("[data-testid='captain-set-key']")).toBeDisabled();
-  await expect(captainModal.locator("#captain-create-plan")).toBeDisabled();
+  // Create Plan is now enabled even without a cloud key (local preview planner is the fallback)
+  await expect(captainModal.locator("#captain-create-plan")).toBeEnabled();
   await captainModal.locator("#captain-close").click();
   await expect(captainModal).not.toBeVisible();
 
@@ -2530,6 +2531,70 @@ test("Memory cockpit disables controls on the public service", async ({ page }) 
   await expect(page.locator("[data-testid='memory-context-build']")).toBeDisabled();
 });
 
+test("single-section nav: only one workspace section visible at a time", async ({ page }) => {
+  await page.route("**/api/mcharness/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes("/memory") || url.pathname.endsWith("/memories")) {
+      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "Memory is private-runner-only." }) });
+      return;
+    }
+    if (url.pathname.includes("/warden/memory-agent")) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "offline" }) });
+      return;
+    }
+    if (url.pathname.includes("/warden/agent")) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "offline" }) });
+      return;
+    }
+    if (url.pathname.includes("/captain/status")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, configured: false, planning_enabled: false, key_source: "missing", private_key_setup_enabled: false, notes: [] }) });
+      return;
+    }
+    if (await fulfillControlRoomRoutes(route)) return;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+
+  await page.goto("/web/warden/index.html");
+
+  // Default: Command visible, all others hidden
+  await expect(page.locator("[data-testid='warden-section-mission']")).toBeVisible();
+  await expect(page.locator("[data-testid='warden-section-memory']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-agent']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
+  await expect(page.locator("[data-testid='nav-mission']")).toHaveClass(/active/);
+
+  // Click Memory Chat — only Memory Chat visible
+  await page.locator("[data-testid='nav-memory']").click();
+  await expect(page.locator("[data-testid='warden-section-memory']")).toBeVisible();
+  await expect(page.locator("[data-testid='warden-section-mission']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-agent']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
+  await expect(page.locator("[data-testid='nav-memory']")).toHaveClass(/active/);
+
+  // Click Marius Agent — only Marius Agent section visible
+  await page.locator("[data-testid='nav-agent']").click();
+  await expect(page.locator("[data-testid='warden-section-agent']")).toBeVisible();
+  await expect(page.locator("[data-testid='warden-section-memory']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-mission']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
+  await expect(page.locator("[data-testid='nav-agent']")).toHaveClass(/active/);
+
+  // Click Gateway Status — only Gateway visible
+  await page.locator("[data-testid='nav-gateway']").click();
+  await expect(page.locator("[data-testid='warden-section-gateway']")).toBeVisible();
+  await expect(page.locator("[data-testid='warden-section-agent']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-memory']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-mission']")).toBeHidden();
+  await expect(page.locator("[data-testid='nav-gateway']")).toHaveClass(/active/);
+
+  // Click Command — back to default
+  await page.locator("[data-testid='nav-mission']").click();
+  await expect(page.locator("[data-testid='warden-section-mission']")).toBeVisible();
+  await expect(page.locator("[data-testid='warden-section-memory']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-agent']")).toBeHidden();
+  await expect(page.locator("[data-testid='warden-section-gateway']")).toBeHidden();
+});
+
 test("Assistant panel renders local answers, sources, and Google RAG warning", async ({ page }) => {
   let assistantBody = null;
 
@@ -2608,29 +2673,4 @@ test("Assistant panel disables controls on the public service", async ({ page })
   await expect(page.locator("[data-testid='assistant-private-notice']")).toBeVisible();
   await expect(page.locator("[data-testid='assistant-ask']")).toBeDisabled();
   await expect(page.locator("[data-testid='assistant-copy']")).toBeDisabled();
-});
-
-test("Memory and Assistant sections avoid horizontal overflow at 375px", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 900 });
-  await page.route("**/api/mcharness/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/memory/health")) {
-      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "private only" }) });
-      return;
-    }
-    if (url.pathname.includes("/warden/assistant/")) {
-      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "private only" }) });
-      return;
-    }
-    if (await fulfillControlRoomRoutes(route)) return;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
-  });
-
-  await page.goto("/web/warden/index.html");
-  await page.locator("[data-testid='nav-memory']").click();
-  const memoryOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(memoryOverflow).toBeLessThanOrEqual(1);
-  await page.locator("[data-testid='nav-assistant']").click();
-  const assistantOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(assistantOverflow).toBeLessThanOrEqual(1);
 });

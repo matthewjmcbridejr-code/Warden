@@ -1193,6 +1193,18 @@ class WorkbenchStore:
         return rows
 
     def _memory_search_text(self, memory: WorkbenchMemory) -> str:
+        # Include flattened metadata so plan_id, goal, source=local_preview etc. are searchable
+        meta_text = ""
+        if memory.metadata and isinstance(memory.metadata, dict):
+            meta_parts = []
+            for v in memory.metadata.values():
+                if isinstance(v, str):
+                    meta_parts.append(v)
+                elif isinstance(v, (int, float)):
+                    meta_parts.append(str(v))
+                elif isinstance(v, list):
+                    meta_parts.extend(str(i) for i in v if isinstance(i, str))
+            meta_text = " ".join(meta_parts)
         return " ".join(
             [
                 memory.memory_id,
@@ -1210,8 +1222,18 @@ class WorkbenchStore:
                 memory.task_id or "",
                 memory.agent_id or "",
                 memory.notes or "",
+                meta_text,
             ]
         ).lower()
+
+    # Keywords that signal the user wants the most recent plan/decision
+    _RECENCY_SIGNALS = frozenset({"just", "latest", "recent", "last", "new", "created", "today"})
+    # Sources that get a relevance boost for plan-related queries
+    _PLAN_SOURCES = frozenset({"captain", "captain_dispatch", "agent_dispatcher"})
+    # Terms that signal interest in agent runs / dispatch actions
+    _RUN_SIGNALS = frozenset({"run", "agent", "dispatch", "dispatched", "blocked", "proof", "executed", "step", "did"})
+    # Memory kinds that represent dispatch/run outcomes
+    _DISPATCH_KINDS = frozenset({"blocked_attempt", "agent_result", "proof", "test_result"})
 
     def search_memories(
         self,
@@ -1226,19 +1248,44 @@ class WorkbenchStore:
         if scope:
             rows = [memory for memory in rows if memory.scope.lower() == scope.strip().lower()]
         rows = [memory for memory in rows if memory.status != "forgotten"]
-        if not query:
+        if not query or query == "*":
             return rows[:limit]
 
+        terms = [term for term in re.split(r"\s+", query) if term and len(term) > 1]
+        wants_recent = bool(self._RECENCY_SIGNALS.intersection(terms))
+        wants_plan = any(t in ("plan", "captain", "plans") for t in terms)
+        wants_run = any(t in self._RUN_SIGNALS for t in terms)
+
         scored: list[tuple[int, float, str, WorkbenchMemory]] = []
-        terms = [term for term in re.split(r"\s+", query) if term]
         for memory in rows:
             haystack = self._memory_search_text(memory)
             if query in haystack:
                 score = 100 + haystack.count(query)
             else:
                 score = sum(10 for term in terms if term in haystack)
-            if score > 0:
-                scored.append((score, memory.updated_at.timestamp(), memory.memory_id, memory))
+            if score == 0:
+                continue
+
+            # Boost: captain/plan source when query is about plans
+            if wants_plan and memory.source in self._PLAN_SOURCES:
+                score += 25
+            # Boost: recency signal words + captain source = surface newest plan first
+            if wants_recent and memory.source in self._PLAN_SOURCES:
+                score += 20
+            # Boost: decision/handoff kind for plan queries
+            if wants_plan and memory.kind in ("decision", "handoff", "agent_result"):
+                score += 15
+            # Boost: dispatch/run kinds for agent-run queries
+            if wants_run and memory.kind in self._DISPATCH_KINDS:
+                score += 30
+            if wants_run and memory.source in self._PLAN_SOURCES:
+                score += 20
+            # Always boost dispatch memories when recency is requested
+            if wants_recent and memory.kind in self._DISPATCH_KINDS:
+                score += 25
+
+            scored.append((score, memory.updated_at.timestamp(), memory.memory_id, memory))
+
         scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
         return [memory for _, _, _, memory in scored[:limit]]
 

@@ -14,14 +14,19 @@ dependencies = [
   "pytest>=8.0",
   "uvicorn>=0.30",
   "langgraph>=1.2",
+  "mcp>=1.0",
+  "httpx>=0.25",
+  "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+semantic = ["sqlite-vec"]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,20 @@
+[Unit]
+Description=Warden Autonomous Memory Collector
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspaces/warden/mcharness-public-export
+Environment=PYTHONPATH=%h/workspaces/warden/mcharness-public-export:%h/workspaces/warden/mcharness-public-export/src
+Environment=WARDEN_CANONICAL_REPO=%h/workspaces/warden/mcharness-public-export
+Environment=WARDEN_WATCHER_INTERVAL=30
+Environment=WARDEN_WATCHER_DEBOUNCE=60
+Environment=WARDEN_WATCHER_RATE_LIMIT=20
+StandardOutput=append:%h/.local/share/warden-brain/memory-watcher.log
+StandardError=append:%h/.local/share/warden-brain/memory-watcher.log
+ExecStart=%h/workspaces/warden/mcharness-public-export/.venv/bin/python -m warden.memory_watcher
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

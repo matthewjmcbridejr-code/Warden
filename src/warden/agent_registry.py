@@ -447,6 +447,42 @@ def list_all_agents(root: Path, *, codex_runner_ready: bool, private_only: bool)
         enrich_agent_profile(item, codex_runner_ready=codex_runner_ready, root=root)
         for item in load_registered_agents(root)
     ]
+    
+    marius_agent = None
+    try:
+        from src.marius.api import gateway, get_ollama_diagnostics
+        diag = get_ollama_diagnostics()
+        online = diag.get("ollama_reachable", False)
+        
+        marius_agent = {
+            "id": "marius",
+            "name": "Marius Local Agent",
+            "kind": "resident_local_agent",
+            "adapter": "resident_local_agent",
+            "status": "ready" if online else "error",
+            "provider": "ollama",
+            "model": gateway.forced_model or "auto",
+            "profile": gateway.current_profile,
+            "description": "Local terminal resident assistant on McServer",
+            "capabilities": [
+                "local_chat",
+                "model_profiles",
+                "ollama_benchmark",
+                "memory_recall",
+                "safe_command_planning",
+                "agent_handoff_prompts"
+            ],
+            "enabled": True,
+            "runnable": False, # Prevent running via generic worker flow
+            "connection_status": "connected" if online else "error",
+            "configured": True,
+            "lane_id": None
+        }
+    except ImportError:
+        pass
+
+    if marius_agent:
+        return [builtin, marius_agent, *registered]
     return [builtin, *registered]
 
 

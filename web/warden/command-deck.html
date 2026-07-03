@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Warden Command Deck</title>
+  <meta name="description" content="Warden Command Deck — local-first AI workforce control plane." />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./command-deck.css" />
+</head>
+<body>
+  <main class="deck-shell">
+    <header class="deck-hero">
+      <div>
+        <p class="eyebrow">Local-first AI workforce control plane</p>
+        <h1>Warden Command Deck</h1>
+        <p class="hero-copy">Local-first AI workforce control plane for shared memory, mission routing, handoffs, proof ledger, and safety gates across Claude, Codex, Gemini, and local agents.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="deck-button" href="./index.html">Control Room</a>
+        <button id="refresh-deck" class="deck-button" type="button">Refresh</button>
+        <button id="seed-demo" class="deck-button primary" type="button">Run Demo Mission</button>
+      </div>
+    </header>
+
+    <section class="status-strip" aria-label="Command Deck status">
+      <div class="stat">
+        <span class="stat-label">Active Missions</span>
+        <strong id="stat-active">0</strong>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Agents Online</span>
+        <strong id="stat-agents">0</strong>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Proofs Recorded</span>
+        <strong id="stat-proofs">0</strong>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Blocked Tasks</span>
+        <strong id="stat-blocked">0</strong>
+      </div>
+    </section>
+
+    <section class="agent-grid" id="agent-grid" aria-label="Agent lanes"></section>
+
+    <section class="deck-grid">
+      <section class="deck-panel mission-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Live Mission Board</p>
+            <h2>Posted → Verified</h2>
+          </div>
+          <span id="deck-mode" class="mode-pill">Live</span>
+        </div>
+        <div id="mission-board" class="mission-board"></div>
+      </section>
+
+      <aside class="deck-panel brain-panel memory-chat-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Memory Agent</p>
+            <h2>Ask Warden</h2>
+          </div>
+          <div class="brain-meta">
+            <span id="brain-model" class="badge badge-info" title="LLM model"></span>
+            <span id="brain-sources" class="badge badge-muted" title="Data sources"></span>
+          </div>
+        </div>
+        <div id="memory-chat-context" class="memory-context-bar"></div>
+        <div id="memory-chat-log" class="memory-chat-log" role="log" aria-live="polite"></div>
+        <form id="memory-chat-form" class="memory-chat-form" autocomplete="off">
+          <input
+            id="brain-query"
+            class="memory-chat-input"
+            placeholder="What was I working on today? What did I commit? What sites did I visit?"
+            autocomplete="off"
+          />
+          <button type="submit" id="brain-send" class="btn-primary">Send</button>
+        </form>
+        <div class="memory-chat-prompts">
+          <button class="prompt-chip" data-q="What was I working on today?">Today's work</button>
+          <button class="prompt-chip" data-q="What have I committed recently?">Recent commits</button>
+          <button class="prompt-chip" data-q="What sites have I been visiting for research?">Browser activity</button>
+          <button class="prompt-chip" data-q="What tasks are active on my board?">Board tasks</button>
+          <button class="prompt-chip" data-q="Summarize everything I know about the current branch.">Branch summary</button>
+        </div>
+      </aside>
+    </section>
+
+    <section class="lower-grid">
+      <section class="deck-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Proof Ledger</p>
+            <h2>Verified Work</h2>
+          </div>
+        </div>
+        <div id="proof-ledger" class="ledger-list"></div>
+      </section>
+
+      <section class="deck-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Relay Timeline</p>
+            <h2>Agent Handoffs</h2>
+          </div>
+        </div>
+        <div id="relay-timeline" class="timeline-list"></div>
+      </section>
+    </section>
+
+    <section class="deck-panel notion-sync-panel" id="notion-sync-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Notion Sync</p>
+          <h2>Dry-run Candidate Preview</h2>
+        </div>
+        <div class="panel-actions">
+          <span id="notion-sync-mode" class="mode-pill">Dry Run</span>
+          <button id="preview-notion-sync" class="deck-button" type="button">Preview Sync</button>
+        </div>
+      </div>
+      <div class="notion-sync-summary" id="notion-sync-summary">
+        <div class="empty-card">No Notion preview loaded yet.</div>
+      </div>
+      <div id="notion-sync-results" class="ledger-list"></div>
+    </section>
+
+    <section class="deck-panel workspace-panel" id="workspace-authority-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Workspace Authority</p>
+          <h2>Agent Source-of-Truth</h2>
+        </div>
+        <span id="workspace-status-pill" class="mode-pill">Loading…</span>
+      </div>
+      <div class="workspace-grid">
+        <div>
+          <span class="ws-label">Canonical Repo</span>
+          <code id="ws-canonical">—</code>
+        </div>
+        <div>
+          <span class="ws-label">Live Service</span>
+          <code id="ws-service">—</code>
+        </div>
+        <div>
+          <span class="ws-label">Safe to Edit</span>
+          <strong id="ws-safe">—</strong>
+        </div>
+        <div>
+          <span class="ws-label">Drift Warning</span>
+          <span id="ws-drift">—</span>
+        </div>
+      </div>
+      <div class="ws-section">
+        <span class="ws-label">Do Not Code Here (scratch repos)</span>
+        <ul id="ws-scratch-list"></ul>
+      </div>
+      <div class="ws-section">
+        <span class="ws-label">Proof Commands</span>
+        <ol id="ws-proof-cmds"></ol>
+      </div>
+      <div class="ws-section ws-agent-rule">
+        <span class="ws-label">Agent Rule</span>
+        <p id="ws-agent-rule">Refuse edits from non-canonical worktrees. Every dispatch is preflight-checked against Workspace Authority before any command launches.</p>
+      </div>
+    </section>
+
+    <footer class="deck-footer">
+      <span id="last-refresh">Connecting…</span>
+      <span>No live systemd units are installed or started from this page.</span>
+    </footer>
+  </main>
+  <script src="./command-deck.js"></script>
+</body>
+</html>

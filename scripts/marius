@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -e
+
+# Robust script directory resolution (handles symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Use the virtual environment python if it exists, otherwise fall back to python3
+PYTHON_EXEC="${ROOT_DIR}/.venv/bin/python3"
+if [ ! -f "${PYTHON_EXEC}" ]; then
+    PYTHON_EXEC="python3"
+fi
+
+# Set PYTHONPATH to include the src directory
+export PYTHONPATH="${ROOT_DIR}:${ROOT_DIR}/src:${PYTHONPATH:-}"
+
+# Execute the marius_chat script with all passed arguments
+exec "${PYTHON_EXEC}" "${SCRIPT_DIR}/marius_chat.py" "$@"

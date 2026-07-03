@@ -1,0 +1,12 @@
+[Unit]
+Description=Warden Brain ingest for Obsidian notes
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/workspaces/warden/mcharness-public-export
+Environment=PYTHONPATH=%h/workspaces/warden/mcharness-public-export:%h/workspaces/warden/mcharness-public-export/src
+Environment=WARDEN_BRAIN_PROJECT=obsidian
+Environment=WARDEN_BRAIN_TAGS=obsidian,notes,systemd
+Environment=WARDEN_BRAIN_INGEST_LOG=%h/.local/share/warden-brain/ingest.log
+Environment=WARDEN_BRAIN_DATA_PATH=%h/.local/share/warden-brain/records.jsonl
+ExecStart=%h/workspaces/warden/mcharness-public-export/.venv/bin/python scripts/brain_ingest_cli.py %h/Obsidian

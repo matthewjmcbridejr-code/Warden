@@ -1,0 +1,12 @@
+[Unit]
+Description=Warden Brain ingest for the Warden repo
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/workspaces/warden/mcharness-public-export
+Environment=PYTHONPATH=%h/workspaces/warden/mcharness-public-export:%h/workspaces/warden/mcharness-public-export/src
+Environment=WARDEN_BRAIN_PROJECT=warden
+Environment=WARDEN_BRAIN_TAGS=warden,repo,docs,systemd
+Environment=WARDEN_BRAIN_INGEST_LOG=%h/.local/share/warden-brain/ingest.log
+Environment=WARDEN_BRAIN_DATA_PATH=%h/.local/share/warden-brain/records.jsonl
+ExecStart=%h/workspaces/warden/mcharness-public-export/.venv/bin/python scripts/brain_ingest_cli.py src/warden docs

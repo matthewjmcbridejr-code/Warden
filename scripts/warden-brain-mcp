@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Entry point for warden-brain MCP server (stdio transport)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+export PYTHONPATH="${ROOT_DIR}:${ROOT_DIR}/src${PYTHONPATH:+:$PYTHONPATH}"
+if [ -x "$VENV_PYTHON" ]; then
+    exec "$VENV_PYTHON" -m warden.brain_mcp_server "$@"
+else
+    exec python -m warden.brain_mcp_server "$@"
+fi

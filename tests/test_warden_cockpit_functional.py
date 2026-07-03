@@ -93,7 +93,7 @@ def test_mcharness_control_plane_loop_persists_after_reload():
         with TestClient(app) as client:
             repos = client.get("/api/mcharness/repos")
             assert repos.status_code == 200
-            assert any(item["path"] == "/root/mcharness-public-export" for item in repos.json()["repos"])
+            assert any(item["path"] == str(Path(__file__).resolve().parents[1]) for item in repos.json()["repos"])
 
             lanes = client.get("/api/mcharness/agent-lanes")
             assert lanes.status_code == 200
@@ -105,7 +105,7 @@ def test_mcharness_control_plane_loop_persists_after_reload():
                     "title": "Functional cockpit session",
                     "objective": "Prove the repo/lane/session/manual-result gate loop through Warden APIs.",
                     "plan_instruction": "Create a bounded queue, collect manual result artifacts, and block continuation until the gate is approved.",
-                    "repo_path": "/root/mcharness-public-export",
+                    "repo_path": str(Path(__file__).resolve().parents[1]),
                     "agent_lane": "manual_paste",
                 },
             )
@@ -113,7 +113,7 @@ def test_mcharness_control_plane_loop_persists_after_reload():
             created_payload = created.json()
             session_id = created_payload["session_id"]
             run_id = created_payload["run"]["run_id"]
-            assert created_payload["thread"]["metadata"]["repo_path"] == "/root/mcharness-public-export"
+            assert created_payload["thread"]["metadata"]["repo_path"] == str(Path(__file__).resolve().parents[1])
             assert created_payload["thread"]["metadata"]["agent_lane"] == "manual_paste"
 
             queued = client.post(
@@ -179,7 +179,7 @@ def test_mcharness_control_plane_loop_persists_after_reload():
             live_git = client.get(f"/api/mcharness/sessions/{session_id}/git-status")
             assert live_git.status_code == 200
             git_payload = live_git.json()
-            assert git_payload["repo_path"] == "/root/mcharness-public-export"
+            assert git_payload["repo_path"] == str(Path(__file__).resolve().parents[1])
             assert "git_status" in git_payload
             assert "git_diff_summary" in git_payload
 

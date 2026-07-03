@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 import subprocess
 import uuid
 import time
@@ -126,14 +127,34 @@ router = APIRouter(prefix="/api/marius", tags=["marius-desktop"])
 router.include_router(captain_router)
 router.include_router(workbench_router)
 
+from .projects import router as projects_router
+from .webstudio.api import router as webstudio_router
+
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
+mcharness_router.include_router(projects_router)
+mcharness_router.include_router(webstudio_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
+
+_CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SAFE_REPO_PATHS = [
     Path.home() / "workspaces" / "marius-core" / "hybrid-agent-os",
     Path.home() / "workspaces" / "warden" / "mcharness-public-export",
-    Path(__file__).resolve().parents[2], # The current repo
+    _CANONICAL_REPO_ROOT, # The current repo
 ]
+
+
+def _effective_repo_path(path: Path) -> Path:
+    """Resolve a SAFE_REPO_PATHS entry to a real, existing path.
+
+    These entries are machine-specific labels for Matt's local sibling repos.
+    On any other machine (CI, another dev box) where the literal path doesn't
+    exist, fall back to the current checkout so the label still resolves to
+    something real instead of a permanently-missing path.
+    """
+    return path if path.exists() else _CANONICAL_REPO_ROOT
+
+
 MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
 ARTIFACT_BODY_ROOT = MCTABLE_ROOT / "mcharness" / "artifacts"
 CAPTAIN_PLAN_ROOT = MCTABLE_ROOT / "captain" / "plans"
@@ -469,6 +490,7 @@ class McHarnessCaptainPlanResponse(BaseModel):
     status: Optional[str] = None
     current_step_id: Optional[str] = None
     decision_log: list[dict[str, Any]] = Field(default_factory=list)
+    source: Optional[str] = None
 
 
 class McHarnessCaptainPlanPersistRequest(BaseModel):
@@ -539,11 +561,13 @@ def safe_path_exists(path: Path) -> dict[str, Any]:
 def _repo_entries() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in SAFE_REPO_PATHS:
-        safe_stat = safe_path_exists(path)
+        effective_path = _effective_repo_path(path)
+        repo_label = path.name
+        safe_stat = safe_path_exists(effective_path)
         base = {
-            "repo_id": path.name,
-            "label": path.name,
-            "path": str(path),
+            "repo_id": repo_label,
+            "label": repo_label,
+            "path": str(effective_path),
             "exists": safe_stat["exists"],
             "accessible": safe_stat["accessible"],
             "error": safe_stat["error"],
@@ -551,14 +575,14 @@ def _repo_entries() -> list[dict[str, Any]]:
 
         git_dir_exists = False
         if safe_stat["exists"]:
-            git_stat = safe_path_exists(path / ".git")
+            git_stat = safe_path_exists(effective_path / ".git")
             git_dir_exists = git_stat["exists"]
 
         base["git_dir_present"] = git_dir_exists
 
         if safe_stat["exists"] and git_dir_exists:
             try:
-                git_info = _get_git_status(path)
+                git_info = _get_git_status(effective_path)
             except Exception as e:
                 git_info = {
                     "current_branch": None,
@@ -1159,12 +1183,13 @@ def _lane_entries() -> list[dict[str, Any]]:
 def _validate_repo_path(repo_path: str) -> Path:
     for entry in SAFE_REPO_PATHS:
         if str(entry) == repo_path or entry.name == repo_path: # Allow matching by repo_id (name)
-            safe_stat = safe_path_exists(entry)
+            effective_entry = _effective_repo_path(entry)
+            safe_stat = safe_path_exists(effective_entry)
             if not safe_stat["accessible"]:
                 raise HTTPException(status_code=400, detail=f"Allowlisted repo path inaccessible ({safe_stat['error']}): {repo_path}")
             if not safe_stat["exists"]:
                 raise HTTPException(status_code=400, detail=f"Allowlisted repo path does not exist: {repo_path}")
-            return entry
+            return effective_entry
     raise HTTPException(status_code=400, detail=f"Repo path is not allowlisted: {repo_path}")
 
 
@@ -1527,6 +1552,7 @@ def _create_warden_run_on_dispatch(
     runner_id: str,
     transcript_path: str,
     status: str = "dispatched",
+    original_prompt: Optional[str] = None,
 ) -> dict[str, Any] | None:
     if payload.lane_id != "codex_cli" or not _run_history_write_enabled():
         return None
@@ -1546,6 +1572,7 @@ def _create_warden_run_on_dispatch(
         transcript_path=transcript_path,
         created_by=payload.created_by or "operator",
         service_mode=_service_mode_label(),
+        original_prompt=original_prompt,
     )
 
 
@@ -1654,7 +1681,7 @@ def _send_prompt_to_codex_runner(session_id: str, prompt_text: str):
     if not name:
         raise HTTPException(status_code=400, detail="No tmux session for runner")
     dispatch_prompt = str(state.get("dispatch_prompt") or "")
-    if dispatch_prompt and not prompt_text.startswith("# Warden Memory Context"):
+    if dispatch_prompt and not prompt_text:
         prompt_text = dispatch_prompt
     # Use -l for literal text (safe, no shell interp of user prompt).
     # Codex CLI queues the message, then Tab + Enter submits it.
@@ -1717,10 +1744,53 @@ def get_status():
     }
 
 
+def _git_branch() -> Optional[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+    branch = proc.stdout.strip()
+    return branch or None
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+@mcharness_router.get("/warden/build-info")
+def get_warden_build_info():
+    """Proof of what's actually on disk right now — commit, branch, and
+    sha256 of the served UI files. Compare against `sha256sum web/warden/*`
+    to prove the running service matches the working tree."""
+    web_dir = REPO_ROOT / "web" / "warden"
+    return {
+        "ok": True,
+        "commit": _git_commit(),
+        "branch": _git_branch(),
+        "app_html_hash": _file_sha256(web_dir / "app.html"),
+        "app_css_hash": _file_sha256(web_dir / "app.css"),
+        "app_js_hash": _file_sha256(web_dir / "app.js"),
+    }
+
+
 @mcharness_router.get("/health")
 def get_mcharness_health():
-    repos = _repo_entries()
-    lanes = _lane_entries()
+    # Health must stay cheap: use static counts instead of _repo_entries()/
+    # _lane_entries(), which shell out to git and probe CLI executables per
+    # item and can push this endpoint past client-side timeouts (e.g. the
+    # browser extension's 2s abort).
     return {
         "ok": True,
         "service": "mcharness-control-plane",
@@ -1731,8 +1801,8 @@ def get_mcharness_health():
         "public_write_enabled": _public_write_enabled(),
         "tmux_runner_enabled": _tmux_runner_enabled(),
         "codex_runner_enabled": _codex_runner_enabled(),
-        "available_lanes_count": len(lanes),
-        "repo_count": len(repos),
+        "available_lanes_count": len(AGENT_LANES),
+        "repo_count": len(SAFE_REPO_PATHS),
         "manual_mode": True,
     }
 
@@ -1783,38 +1853,253 @@ def delete_mcharness_captain_key():
     }
 
 
+def _local_preview_plan(*, goal: str, repo_id: str, lane_id: str) -> dict[str, Any]:
+    """Deterministic local plan generator — no cloud tokens, no API key required.
+
+    Produces 3-5 practical steps by parsing intent keywords from the goal.
+    Marked source=local_preview so UI can display an honest badge.
+    """
+    import hashlib
+
+    goal_lower = goal.lower()
+    plan_id = "plan_" + hashlib.sha1(f"local:{goal}:{repo_id}".encode()).hexdigest()[:8]
+
+    # Classify intent for step template selection
+    is_fix    = any(w in goal_lower for w in ("fix", "bug", "error", "broken", "crash", "fail"))
+    is_add    = any(w in goal_lower for w in ("add", "build", "create", "implement", "new", "feat"))
+    is_refact = any(w in goal_lower for w in ("refactor", "clean", "simplify", "rename", "move", "reorganize"))
+    is_test   = any(w in goal_lower for w in ("test", "spec", "coverage", "pytest", "playwright"))
+    is_docs   = any(w in goal_lower for w in ("doc", "readme", "comment", "explain"))
+    is_ui     = any(w in goal_lower for w in ("ui", "style", "css", "html", "button", "modal", "page"))
+
+    g = goal[:80]
+    r = repo_id
+
+    if is_fix:
+        steps = [
+            {"id": "step_1", "title": "Reproduce the issue", "prompt": f"In {r}: reproduce the bug described in '{g}'. Read the relevant file(s), identify the failing code path, and write down the exact error or wrong behaviour. Do not edit yet."},
+            {"id": "step_2", "title": "Identify root cause", "prompt": f"In {r}: trace the root cause of '{g}'. List the file(s) and line(s) involved. Confirm the fix scope before editing."},
+            {"id": "step_3", "title": "Apply minimal fix", "prompt": f"In {r}: apply the smallest correct fix for '{g}'. Edit only the identified lines. Do not refactor surrounding code."},
+            {"id": "step_4", "title": "Run tests and verify", "prompt": f"In {r}: run the relevant tests for the fix to '{g}'. Confirm passing. If tests fail, diagnose before retrying."},
+        ]
+    elif is_ui:
+        steps = [
+            {"id": "step_1", "title": "Audit current UI", "prompt": f"In {r}: read the relevant HTML/CSS/JS for '{g}'. List what needs to change. Do not edit yet."},
+            {"id": "step_2", "title": "Apply UI changes", "prompt": f"In {r}: implement the UI changes for '{g}'. Edit only the relevant web files. Keep it minimal."},
+            {"id": "step_3", "title": "Verify in browser", "prompt": f"In {r}: verify the UI change for '{g}' loads correctly. Check for console errors. Note any visual issues."},
+        ]
+    elif is_test:
+        steps = [
+            {"id": "step_1", "title": "Identify test gaps", "prompt": f"In {r}: review existing tests related to '{g}'. List what is missing or uncovered."},
+            {"id": "step_2", "title": "Write new tests", "prompt": f"In {r}: write the new tests for '{g}'. Follow the existing test style. Do not modify production code."},
+            {"id": "step_3", "title": "Run and confirm", "prompt": f"In {r}: run the new tests for '{g}'. Confirm all pass. Fix any test setup issues."},
+        ]
+    elif is_docs:
+        steps = [
+            {"id": "step_1", "title": "Read existing docs", "prompt": f"In {r}: read the existing documentation relevant to '{g}'. List what is outdated or missing."},
+            {"id": "step_2", "title": "Write documentation", "prompt": f"In {r}: write or update the documentation for '{g}'. Be concise and accurate. Do not add padding."},
+        ]
+    elif is_refact:
+        steps = [
+            {"id": "step_1", "title": "Audit target code", "prompt": f"In {r}: read the code to be refactored for '{g}'. List what changes are needed. Do not edit yet."},
+            {"id": "step_2", "title": "Refactor", "prompt": f"In {r}: apply the refactor for '{g}'. Preserve all existing behaviour. Run tests after each file changed."},
+            {"id": "step_3", "title": "Verify no regressions", "prompt": f"In {r}: run the full relevant test suite after refactoring '{g}'. Confirm no regressions."},
+        ]
+    else:
+        # Generic add/build/default
+        steps = [
+            {"id": "step_1", "title": "Inspect current state", "prompt": f"In {r}: read the relevant files for '{g}'. Understand the current structure. Do not edit yet."},
+            {"id": "step_2", "title": "Implement", "prompt": f"In {r}: implement '{g}'. Follow existing patterns. Make minimal, focused changes."},
+            {"id": "step_3", "title": "Test and verify", "prompt": f"In {r}: run relevant tests after implementing '{g}'. Confirm expected behaviour. Fix any issues before moving on."},
+            {"id": "step_4", "title": "Review and clean up", "prompt": f"In {r}: review the changes for '{g}'. Remove debug code, fix obvious style issues, ensure nothing is broken."},
+        ]
+
+    for step in steps:
+        step["agent"] = lane_id
+        step["status"] = "queued"
+        step["recommended_agent"] = lane_id
+
+    return {
+        "ok": True,
+        "plan_id": plan_id,
+        "title": f"Plan: {goal[:60]}",
+        "summary": f"Local preview plan for: {goal}",
+        "goal": goal,
+        "repo_id": repo_id,
+        "lane_id": lane_id,
+        "source": "local_preview",
+        "steps": steps,
+        "status": "active",
+        "notes": ["Local preview plan — no cloud tokens used. Set OPENROUTER_API_KEY for AI-generated plans."],
+    }
+
+
+def _write_plan_memory(*, plan: dict[str, Any], goal: str, repo_id: str, lane_id: str) -> Optional[str]:
+    """Write a Warden memory after a plan is created. Returns memory_id or None."""
+    try:
+        from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+        store = WorkbenchStore()
+        steps = plan.get("steps") or []
+        step_lines = "\n".join(
+            f"  {i+1}. {s.get('title','?')} ({s.get('agent','?')})"
+            for i, s in enumerate(steps)
+        )
+        source = plan.get("source", "real_captain")
+        summary = f"Captain created a {'local preview ' if source == 'local_preview' else ''}plan for: {goal[:80]}"
+        content = f"Plan: {plan.get('title','')}\n{plan.get('summary','')}\n\nSteps:\n{step_lines}"
+        plan_id = plan.get("plan_id", "")
+        import hashlib
+        mem_id = "captain-plan-" + hashlib.sha1(plan_id.encode()).hexdigest()[:12]
+        existing = store.search_memories(mem_id, limit=1)
+        if any(m.memory_id == mem_id for m in existing):
+            return mem_id
+        store.create_memory(WorkbenchMemoryCreateRequest(
+            memory_id=mem_id,
+            scope="warden",
+            summary=summary,
+            source="captain",
+            title=summary[:80],
+            kind="decision",
+            tags=["captain", "plan", source, lane_id],
+            metadata={
+                "plan_id": plan_id,
+                "goal": goal,
+                "repo_id": repo_id,
+                "lane_id": lane_id,
+                "step_count": len(steps),
+                "source": source,
+                "content": content,
+            },
+        ))
+        return mem_id
+    except Exception:
+        return None
+
+
+def _write_dispatch_memory(
+    *,
+    kind: str,
+    plan_id: str,
+    step_id: str,
+    step_title: str,
+    run_id: str,
+    repo_id: str,
+    lane_id: str,
+    goal: str,
+    reason: str = "",
+    transcript_excerpt: str = "",
+) -> Optional[str]:
+    """Write a blocked_attempt or agent_result memory after a dispatch attempt. Returns memory_id or None."""
+    try:
+        import hashlib
+        from . import workbench as _wb
+        from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+        store = WorkbenchStore(root=_wb.WORKBENCH_ROOT)
+        mem_id = "dispatch-" + hashlib.sha1(f"{plan_id}:{step_id}:{run_id}".encode()).hexdigest()[:12]
+        if kind == "blocked_attempt":
+            summary = (
+                f"Captain dispatch blocked — runner unavailable. "
+                f"Step: {step_title[:60]} (plan {plan_id[:12]}, step {step_id})"
+            )
+        else:
+            summary = (
+                f"Captain dispatched step: {step_title[:60]} "
+                f"(plan {plan_id[:12]}, step {step_id}, run {run_id[:12]})"
+            )
+        content_lines = [
+            f"kind: {kind}",
+            f"plan_id: {plan_id}",
+            f"step_id: {step_id}",
+            f"step_title: {step_title}",
+            f"run_id: {run_id}",
+            f"repo_id: {repo_id}",
+            f"lane_id: {lane_id}",
+            f"goal: {goal[:120]}",
+        ]
+        if reason:
+            content_lines.append(f"reason: {reason}")
+        if transcript_excerpt:
+            content_lines.append(f"transcript_excerpt: {transcript_excerpt[:400]}")
+        store.create_memory(WorkbenchMemoryCreateRequest(
+            memory_id=mem_id,
+            scope="warden",
+            summary=summary,
+            source="captain_dispatch",
+            title=summary[:80],
+            kind=kind,
+            tags=["captain", "dispatch", kind, lane_id, repo_id],
+            metadata={
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "step_title": step_title,
+                "run_id": run_id,
+                "repo_id": repo_id,
+                "lane_id": lane_id,
+                "goal": goal[:120],
+                "reason": reason,
+                "kind": kind,
+            },
+        ))
+        return mem_id
+    except Exception:
+        return None
+
+
 @mcharness_router.post("/captain/plan", response_model=McHarnessCaptainPlanResponse)
 def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
-    if not _captain_api_key():
-        raise HTTPException(
-            status_code=503,
-            detail="Captain is not configured. Set OPENROUTER_API_KEY on the private service.",
-        )
-    repo_path, repo = _resolve_allowlisted_repo(payload.repo_id)
-    agent = _resolve_captain_plan_agent(payload.lane_id)
+    # Resolve repo — fail hard on unknown repo when cloud key present (real planning needs valid path)
+    # fall back gracefully when local preview only
+    has_cloud_key = bool(_captain_api_key())
+    try:
+        repo_path, repo = _resolve_allowlisted_repo(payload.repo_id)
+    except HTTPException:
+        if has_cloud_key:
+            raise
+        repo = {"repo_id": payload.repo_id or "mcharness-public-export",
+                "path": str(SAFE_REPO_PATHS[1] if len(SAFE_REPO_PATHS) > 1 else SAFE_REPO_PATHS[0])}
 
-    lane_id = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
-    _validate_agent_lane(lane_id)
+    lane_id = payload.lane_id or "codex_cli"
 
-    plan, notes = _build_captain_plan(goal=payload.goal, repo=repo, lane_id=lane_id)
-    artifact_path = _save_captain_plan_artifact(plan, goal=payload.goal, repo=repo, lane_id=lane_id)
-    persisted = persist_plan(MCTABLE_ROOT, goal=payload.goal, repo_id=repo["repo_id"], plan_data=plan)
+    # Try cloud captain first; fall back to local preview
+    if _captain_api_key():
+        try:
+            agent = _resolve_captain_plan_agent(lane_id)
+            resolved_lane = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
+            _validate_agent_lane(resolved_lane)
+            plan, notes = _build_captain_plan(goal=payload.goal, repo=repo, lane_id=resolved_lane)
+            plan["source"] = "real_captain"
+        except HTTPException:
+            raise
+        except Exception as exc:
+            plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
+            notes = plan.get("notes", []) + [f"Cloud planning failed: {exc}"]
+            plan["notes"] = notes
+    else:
+        plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
+        notes = plan.get("notes", [])
+
+    # Persist plan (best-effort — don't fail the response if write fails)
+    persisted = None
+    try:
+        persisted = persist_plan(MCTABLE_ROOT, goal=payload.goal, repo_id=repo["repo_id"], plan_data=plan)
+    except Exception:
+        persisted = plan
+
+    # Write memory (best-effort)
+    _write_plan_memory(goal=payload.goal, plan=plan, repo_id=repo["repo_id"], lane_id=lane_id)
+
     response = _captain_plan_response(persisted, notes=notes)
-    if artifact_path is not None:
-        response["notes"] = list(response.get("notes") or []) + [f"Plan saved to {artifact_path}"]
+    response["source"] = plan.get("source", "local_preview")
     return response
 
 
 @mcharness_router.get("/captain/plans/recent")
 def get_mcharness_captain_plans_recent():
-    if not _run_history_read_enabled():
-        return {
-            "service": "mcharness-control-plane",
-            "service_mode": _service_mode_label(),
-            "plans": [],
-            "notes": ["Captain plans are available on the private runner service."],
-        }
-    plans = list_recent_plans(MCTABLE_ROOT)
+    # Plans are always readable — no runner required
+    try:
+        plans = list_recent_plans(MCTABLE_ROOT)
+    except Exception:
+        plans = []
     return {
         "service": "mcharness-control-plane",
         "service_mode": _service_mode_label(),
@@ -1860,8 +2145,13 @@ def post_mcharness_captain_plan_persist(payload: McHarnessCaptainPlanPersistRequ
     }
 
 
-@mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/dispatch", dependencies=[Depends(_require_run_history_write)])
+@mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/dispatch")
 def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
+    """Dispatch a Captain plan step to the local runner.
+
+    Always succeeds: when the runner is unavailable, saves a blocked_attempt
+    memory and returns blocked=True instead of raising 403.
+    """
     plan = get_plan_record(MCTABLE_ROOT, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
@@ -1870,29 +2160,91 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     step = next((item for item in plan.get("steps") or [] if item.get("step_id") == step_id), None)
     if step is None:
         raise HTTPException(status_code=404, detail=f"Captain plan step not found: {step_id}")
-    repo_id = plan.get("repo_id")
+    repo_id = str(plan.get("repo_id") or "")
     if not repo_id:
         raise HTTPException(status_code=400, detail="Captain plan is missing repo_id.")
+
+    step_title = str(step.get("title") or plan.get("title") or "Captain step")
+    prompt = str(step.get("prompt") or "")
+    goal = str(plan.get("goal") or plan.get("title") or "")
+    lane_id = "codex_cli"
+
+    # Blocked path: runner not available — save honest blocked_attempt memory
+    if not _codex_runner_ready():
+        import uuid
+        run_id = "blocked-" + str(uuid.uuid4())[:8]
+        create_run_record(
+            MCTABLE_ROOT,
+            run_id=run_id,
+            title=f"[blocked] {step_title}",
+            agent_id="codex_cli",
+            agent_adapter="codex_cli",
+            repo_id=repo_id,
+            branch=None,
+            prompt=prompt,
+            status="blocked",
+            plan_id=plan_id,
+            created_by="captain_dispatch",
+            service_mode="public",
+        )
+        mem_id = _write_dispatch_memory(
+            kind="blocked_attempt",
+            plan_id=plan_id,
+            step_id=step_id,
+            step_title=step_title,
+            run_id=run_id,
+            repo_id=repo_id,
+            lane_id=lane_id,
+            goal=goal,
+            reason="runner_unavailable",
+        )
+        return {
+            "ok": True,
+            "blocked": True,
+            "service": "mcharness-control-plane",
+            "run_id": run_id,
+            "memory_id": mem_id,
+            "message": "Runner unavailable — blocked attempt saved to Memory",
+            "plan": _captain_plan_response(plan),
+            "dispatch": {},
+        }
+
+    # Happy path: runner ready — dispatch and write agent_result memory
     dispatch = _execute_codex_dispatch_for_step(
-        title=step.get("title") or plan.get("title") or "Captain step",
-        prompt=str(step.get("prompt") or ""),
-        repo_id=str(repo_id),
+        title=step_title,
+        prompt=prompt,
+        repo_id=repo_id,
         plan_id=plan_id,
         step_id=step_id,
     )
+    runner_id = str(dispatch.get("runner_id") or "")
     updated = mark_step_dispatched(
         MCTABLE_ROOT,
         plan_id,
         step_id,
-        run_id=str(dispatch.get("runner_id") or ""),
+        run_id=runner_id,
         status="dispatched",
     )
-    return {
+    mem_id = _write_dispatch_memory(
+        kind="agent_result",
+        plan_id=plan_id,
+        step_id=step_id,
+        step_title=step_title,
+        run_id=runner_id,
+        repo_id=repo_id,
+        lane_id=lane_id,
+        goal=goal,
+    )
+    resp = {
         "ok": True,
+        "blocked": False,
         "service": "mcharness-control-plane",
+        "run_id": runner_id,
+        "memory_id": mem_id,
         "plan": _captain_plan_response(updated),
         "dispatch": dispatch,
     }
+    return resp
 
 
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/complete", dependencies=[Depends(_require_run_history_write)])
@@ -2166,28 +2518,50 @@ async def post_marius_agent_memory_remember(request: Request):
 
 @mcharness_router.get("/memory/health", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memory_health():
+    from src.warden.brain_vector_store import count as vec_count
+    vec = 0
+    try:
+        vec = vec_count()
+    except Exception:
+        pass
+    memories = WORKBENCH_STORE.list_memories()
+    active = [m for m in memories if m.status != "forgotten"]
+    kinds: dict = {}
+    for m in active:
+        kinds[m.kind] = kinds.get(m.kind, 0) + 1
     return {
         "ok": True,
         "status": "online",
-        "private_only": True,
-        "memory_count": len(WORKBENCH_STORE.list_memories()),
+        "memory_count": len(active),
+        "total_count": len(memories),
+        "vector_count": vec,
+        "kinds": kinds,
     }
 
 
 @mcharness_router.get("/memories", dependencies=[Depends(_require_private_memory_access)])
-def get_warden_memories():
+def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Optional[str] = None):
     memories = WORKBENCH_STORE.list_memories()
+    active = [m for m in memories if m.status != "forgotten"]
+    if kind:
+        active = [m for m in active if m.kind == kind]
+    if scope:
+        active = [m for m in active if (m.project_id or m.scope or "").lower() == scope.lower()]
+    active.sort(key=lambda m: m.updated_at, reverse=True)
+    active = active[:max(1, min(limit, 500))]
     return {
         "ok": True,
-        "count": len(memories),
-        "memories": [memory.model_dump(mode="json") for memory in memories],
+        "count": len(active),
+        "memories": [memory.model_dump(mode="json") for memory in active],
     }
 
 
 @mcharness_router.get("/memories/search", dependencies=[Depends(_require_private_memory_access)])
 @mcharness_router.get("/memories/recall", dependencies=[Depends(_require_private_memory_access)])
-def recall_warden_memories(q: str = "", scope: Optional[str] = None, limit: int = 20):
+def recall_warden_memories(q: str = "", scope: Optional[str] = None, kind: Optional[str] = None, limit: int = 20):
     memories = WORKBENCH_STORE.search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
+    if kind:
+        memories = [m for m in memories if m.kind == kind]
     return {
         "ok": True,
         "query": q,
@@ -2200,6 +2574,39 @@ def recall_warden_memories(q: str = "", scope: Optional[str] = None, limit: int 
 @mcharness_router.post("/memory/recall", dependencies=[Depends(_require_private_memory_access)])
 def post_recall_warden_memories(payload: WardenMemoryRecallRequest):
     return recall_warden_memories(payload.query, scope=payload.project_id, limit=payload.limit)
+
+
+class MemoryPatchRequest(BaseModel):
+    status: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    tags: Optional[List[str]] = None
+    notes: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+@mcharness_router.patch("/memories/{memory_id}", dependencies=[Depends(_require_private_memory_access)])
+def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
+    path = WORKBENCH_STORE._path("memories", memory_id)
+    if not path.exists():
+        raise HTTPException(404, f"Memory not found: {memory_id}")
+    from src.warden.workbench import WorkbenchMemory, _atomic_write_json, _now
+    memory = WorkbenchMemory(**json.loads(path.read_text()))
+    if payload.status is not None:
+        memory.status = payload.status
+    if payload.title is not None:
+        memory.title = payload.title
+    if payload.summary is not None:
+        memory.summary = payload.summary
+    if payload.tags is not None:
+        memory.tags = payload.tags
+    if payload.notes is not None:
+        memory.notes = payload.notes
+    if payload.confidence is not None:
+        memory.confidence = payload.confidence
+    memory.updated_at = _now()
+    _atomic_write_json(path, memory.model_dump(mode="json"))
+    return {"ok": True, "memory": memory.model_dump(mode="json")}
 
 
 @mcharness_router.post("/memories", dependencies=[Depends(_require_private_memory_access)])
@@ -2532,7 +2939,7 @@ def post_mcharness_runner_intent(session_id: str, payload: McHarnessRunnerIntent
     repo_path: Optional[Path] = None
     for p in SAFE_REPO_PATHS:
         if p.name == payload.repo_id or str(p) == payload.repo_id:
-            repo_path = p
+            repo_path = _effective_repo_path(p)
             break
     if repo_path is None:
         raise HTTPException(status_code=400, detail=f"Unknown repo_id (must be allowlisted): {payload.repo_id}")
@@ -2628,7 +3035,7 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
     repo_path: Optional[Path] = None
     for p in SAFE_REPO_PATHS:
         if p.name == payload.repo_id or str(p) == payload.repo_id:
-            repo_path = p
+            repo_path = _effective_repo_path(p)
             break
     if repo_path is None:
         raise HTTPException(status_code=400, detail=f"Unknown repo_id (must be allowlisted): {payload.repo_id}")
@@ -2693,6 +3100,7 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
         runner_id=runner_id,
         transcript_path=trans_path,
         status="dispatched",
+        original_prompt=original_prompt,
     )
     if payload.lane_id == "codex_cli":
         prompt_memory_id = _remember_run_memory(
@@ -3181,6 +3589,42 @@ def post_mcharness_run_gate(run_id: str, payload: McHarnessProofGateCreateReques
     }
 
 
+@mcharness_router.post("/runs/{run_id}/save-proof-memory")
+def post_mcharness_run_save_proof_memory(run_id: str):
+    """Write a proof or blocked_attempt memory for an existing run record.
+
+    Useful when the run was created by a runner and the caller wants to
+    ensure a Warden Memory entry exists for later recall.
+    """
+    run = get_run_record(MCTABLE_ROOT, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    plan_id = str(run.get("plan_id") or "")
+    repo_id = str(run.get("repo_id") or "")
+    status = str(run.get("status") or "")
+    title = str(run.get("title") or run_id)
+    kind = "blocked_attempt" if status == "blocked" else "proof"
+    mem_id = _write_dispatch_memory(
+        kind=kind,
+        plan_id=plan_id,
+        step_id="",
+        step_title=title,
+        run_id=run_id,
+        repo_id=repo_id,
+        lane_id=str(run.get("agent_id") or "codex_cli"),
+        goal=title,
+        reason=status,
+        transcript_excerpt=str(run.get("transcript_excerpt") or ""),
+    )
+    return {
+        "ok": True,
+        "service": "mcharness-control-plane",
+        "run_id": run_id,
+        "memory_id": mem_id,
+        "kind": kind,
+    }
+
+
 @mcharness_router.post("/gates/{gate_id}/decision", dependencies=[Depends(_require_run_history_write)])
 def post_mcharness_gate_decision(gate_id: str, payload: McHarnessProofGateDecisionRequest):
     gate = get_proof_gate(MCTABLE_ROOT, gate_id)
@@ -3377,3 +3821,1437 @@ def get_mcharness_evidence_detail(evidence_id: str):
 @legacy_router.post("/api/mctable/local/dispatch-launch")
 def disabled_legacy_launch_route():
     raise HTTPException(status_code=400, detail="deprecated/disabled legacy launch route")
+
+
+# ---------------------------------------------------------------------------
+# Command Deck endpoints
+# ---------------------------------------------------------------------------
+
+import os as _os
+
+_BOARD_ROOT = Path(_os.getenv("WARDEN_BOARD_ROOT", _os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
+_BOARD_TASK_STATUSES = ["queued", "claimed", "running", "needs_review", "failed", "completed", "done"]
+
+
+def _cd_load_tasks(status: str, limit: int = 20):
+    d = _BOARD_ROOT / "tasks" / status
+    if not d.exists():
+        return []
+    tasks = []
+    for f in sorted(d.glob("*.json"), reverse=True)[:limit]:
+        try:
+            tasks.append(json.loads(f.read_text()))
+        except Exception:
+            pass
+    return tasks
+
+
+def _cd_load_proofs(limit: int = 20):
+    """Load recent proof/failure/handoff memories."""
+    try:
+        from .workbench import WorkbenchStore
+        store = WorkbenchStore()
+        mems = store.search_memories("", limit=limit)
+        return [
+            m.model_dump(mode="json")
+            for m in mems
+            if m.kind in ("proof", "failure", "handoff", "decision")
+        ]
+    except Exception:
+        return []
+
+
+def _cd_load_relay(limit: int = 30):
+    """Load recent dispatch/activity events."""
+    events = []
+    act_root = _BOARD_ROOT / "activity"
+    if not act_root.exists():
+        return []
+    for day_dir in sorted(act_root.iterdir(), reverse=True)[:3]:
+        for f in sorted(day_dir.glob("*.jsonl"), reverse=True):
+            try:
+                for line in f.read_text().splitlines():
+                    if line.strip():
+                        events.append(json.loads(line))
+                        if len(events) >= limit:
+                            return events
+            except Exception:
+                pass
+    return events
+
+
+@mcharness_router.get("/warden/command-deck/state")
+def get_command_deck_state():
+    all_tasks = []
+    for status in _BOARD_TASK_STATUSES:
+        for t in _cd_load_tasks(status):
+            t.setdefault("status", status)
+            all_tasks.append(t)
+
+    # Proof gate: flag verified tasks without closeout
+    for t in all_tasks:
+        if t.get("status") in ("completed", "done"):
+            if not t.get("proof_id") and not t.get("proof") and not t.get("failure"):
+                t["proof_gate"] = "proof_needed"
+            else:
+                t["proof_gate"] = "verified"
+        else:
+            t["proof_gate"] = "not_required"
+
+    return {
+        "ok": True,
+        "tasks": all_tasks,
+        "summary": {
+            "queued": sum(1 for t in all_tasks if t.get("status") == "queued"),
+            "running": sum(1 for t in all_tasks if t.get("status") in ("running", "claimed")),
+            "needs_review": sum(1 for t in all_tasks if t.get("status") == "needs_review"),
+            "proof_needed": sum(1 for t in all_tasks if t.get("proof_gate") == "proof_needed"),
+            "failed": sum(1 for t in all_tasks if t.get("status") == "failed"),
+        },
+    }
+
+
+@mcharness_router.get("/warden/command-deck/proofs")
+def get_command_deck_proofs():
+    return {"ok": True, "proofs": _cd_load_proofs(limit=30)}
+
+
+@mcharness_router.get("/warden/command-deck/relay")
+def get_command_deck_relay():
+    return {"ok": True, "events": _cd_load_relay(limit=50)}
+
+
+@mcharness_router.get("/warden/command-deck/events")
+def get_command_deck_events():
+    """SSE-compatible endpoint — returns latest events as JSON for polling."""
+    return {
+        "ok": True,
+        "events": _cd_load_relay(limit=20),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+class _DemoSeedRequest(BaseModel):
+    title: str = "Demo Mission"
+    description: str = "Demonstrate Warden Command Deck dispatch loop."
+    agent: str = "cl"
+    priority: str = "medium"
+
+
+@mcharness_router.post("/warden/command-deck/demo-seed", status_code=201)
+def post_command_deck_demo_seed(req: Optional[_DemoSeedRequest] = None):
+    if req is None:
+        req = _DemoSeedRequest()
+    import uuid as _uuid
+    from .workspace_authority import get_canonical_repo
+    task_id = f"demo-{_uuid.uuid4().hex[:8]}"
+    task = {
+        "task_id": task_id,
+        "title": req.title,
+        "description": req.description,
+        "agent": req.agent,
+        "priority": req.priority,
+        "project_id": "warden",
+        "repo_path": get_canonical_repo("warden") or "",
+        "workspace_checked": False,
+        "status": "queued",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "tags": ["demo"],
+    }
+    dest = _BOARD_ROOT / "tasks" / "queued"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / f"{task_id}.json").write_text(json.dumps(task, indent=2))
+    return {"ok": True, "task": task}
+
+
+# -- Dispatch controls --
+
+class _TaskCreateRequest(BaseModel):
+    title: str
+    description: str = ""
+    agent: str = "any"
+    priority: str = "medium"
+    project: str = ""
+    project_id: str = "warden"
+    branch: str = ""
+    repo_path: str = ""  # defaults to canonical Warden repo if empty
+    workspace_checked: bool = False
+
+
+@mcharness_router.post("/warden/command-deck/tasks", status_code=201)
+def post_command_deck_task(req: _TaskCreateRequest):
+    import uuid as _uuid
+    from .workspace_authority import get_canonical_repo
+    task_id = f"wt-{_uuid.uuid4().hex[:8]}"
+    # Default repo_path to canonical for the project
+    repo_path = req.repo_path or get_canonical_repo(req.project_id) or ""
+    task = {
+        "task_id": task_id,
+        "title": req.title,
+        "description": req.description,
+        "agent": req.agent,
+        "priority": req.priority,
+        "project": req.project or req.project_id,
+        "project_id": req.project_id,
+        "branch": req.branch,
+        "repo_path": repo_path,
+        "workspace_checked": req.workspace_checked,
+        "status": "queued",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    dest = _BOARD_ROOT / "tasks" / "queued"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / f"{task_id}.json").write_text(json.dumps(task, indent=2))
+    return {"ok": True, "task": task}
+
+
+def _cd_find_task(task_id: str):
+    for status in _BOARD_TASK_STATUSES:
+        f = _BOARD_ROOT / "tasks" / status / f"{task_id}.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text()), f
+            except Exception:
+                pass
+    return None, None
+
+
+def _cd_move_task(task_id: str, dest_status: str) -> dict:
+    task, src = _cd_find_task(task_id)
+    if not task or not src:
+        raise HTTPException(404, f"Task not found: {task_id}")
+    dest_dir = _BOARD_ROOT / "tasks" / dest_status
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    task["status"] = dest_status
+    task["updated_at"] = datetime.now(timezone.utc).isoformat()
+    (dest_dir / src.name).write_text(json.dumps(task, indent=2))
+    src.unlink(missing_ok=True)
+    return task
+
+
+@mcharness_router.post("/warden/command-deck/tasks/{task_id}/claim")
+def post_cd_task_claim(task_id: str):
+    task = _cd_move_task(task_id, "claimed")
+    return {"ok": True, "task": task}
+
+
+class _ProofBody(BaseModel):
+    summary: str = ""
+    files_changed: list = []
+    commands_run: list = []
+
+
+@mcharness_router.post("/warden/command-deck/tasks/{task_id}/proof")
+def post_cd_task_proof(task_id: str, body: _ProofBody):
+    task, src = _cd_find_task(task_id)
+    if not task or not src:
+        raise HTTPException(404, f"Task not found: {task_id}")
+    task["proof"] = {
+        "summary": body.summary,
+        "files_changed": body.files_changed,
+        "commands_run": body.commands_run,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    task["proof_gate"] = "verified"
+    task["status"] = "completed"
+    task["updated_at"] = datetime.now(timezone.utc).isoformat()
+    dest = _BOARD_ROOT / "tasks" / "completed"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / src.name).write_text(json.dumps(task, indent=2))
+    src.unlink(missing_ok=True)
+    return {"ok": True, "task": task}
+
+
+class _FailureBody(BaseModel):
+    reason: str = ""
+    blocker: str = ""
+
+
+@mcharness_router.post("/warden/command-deck/tasks/{task_id}/failure")
+def post_cd_task_failure(task_id: str, body: _FailureBody):
+    task, src = _cd_find_task(task_id)
+    if not task or not src:
+        raise HTTPException(404, f"Task not found: {task_id}")
+    task["failure"] = {
+        "reason": body.reason,
+        "blocker": body.blocker,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    task["proof_gate"] = "failed"
+    task["status"] = "failed"
+    task["updated_at"] = datetime.now(timezone.utc).isoformat()
+    dest = _BOARD_ROOT / "tasks" / "failed"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / src.name).write_text(json.dumps(task, indent=2))
+    src.unlink(missing_ok=True)
+    return {"ok": True, "task": task}
+
+
+class _HandoffBody(BaseModel):
+    to_agent: str
+    note: str = ""
+    next_action: str = ""
+
+
+@mcharness_router.post("/warden/command-deck/tasks/{task_id}/handoff")
+def post_cd_task_handoff(task_id: str, body: _HandoffBody):
+    task, src = _cd_find_task(task_id)
+    if not task or not src:
+        raise HTTPException(404, f"Task not found: {task_id}")
+    task["handoff"] = {
+        "to_agent": body.to_agent,
+        "note": body.note,
+        "next_action": body.next_action,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    task["agent"] = body.to_agent
+    task["status"] = "queued"
+    task["updated_at"] = datetime.now(timezone.utc).isoformat()
+    dest = _BOARD_ROOT / "tasks" / "queued"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / src.name).write_text(json.dumps(task, indent=2))
+    src.unlink(missing_ok=True)
+    return {"ok": True, "task": task}
+
+
+@mcharness_router.post("/warden/command-deck/tasks/{task_id}/dispatch")
+def post_cd_task_dispatch(task_id: str):
+    from .agent_dispatcher import AgentDispatcher
+    task, src = _cd_find_task(task_id)
+    if not task or not src:
+        raise HTTPException(404, f"Task not found: {task_id}")
+    dispatcher = AgentDispatcher(dry_run=True)
+    result = dispatcher.dispatch_task(task, src)
+    return {
+        "ok": result.success,
+        "task_id": result.task_id,
+        "run_id": result.run_id,
+        "summary": result.summary,
+        "log": str(result.log_path) if result.log_path else None,
+        "dry_run": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Daily Brief endpoint
+# ---------------------------------------------------------------------------
+
+@mcharness_router.post("/warden/notion/daily-brief")
+def post_warden_daily_brief():
+    """Generate today's Warden daily brief and save locally."""
+    from .daily_brief import generate_and_save
+    result = generate_and_save()
+    return result
+
+
+@mcharness_router.get("/warden/notion/daily-brief")
+def get_warden_daily_brief():
+    """Return today's brief markdown (generate if not yet created)."""
+    from .daily_brief import generate_and_save
+    result = generate_and_save()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Notion sync dry-run endpoints
+# ---------------------------------------------------------------------------
+
+class _NotionSyncRequest(BaseModel):
+    existing_candidates: list = []
+
+
+@mcharness_router.get("/warden/notion/sync/status")
+def get_warden_notion_sync_status():
+    """Return redacted Notion sync readiness; never exposes secret values."""
+    from .notion_sync import notion_sync_status
+    return notion_sync_status()
+
+
+@mcharness_router.post("/warden/notion/sync/dry-run")
+def post_warden_notion_sync_dry_run(req: Optional[_NotionSyncRequest] = None):
+    """Preview Warden board tasks that would become Notion inbox candidates."""
+    from .notion_sync import sync_candidates_dry_run
+    existing = req.existing_candidates if req else []
+    return sync_candidates_dry_run(_BOARD_ROOT, existing_candidates=existing)
+
+
+@mcharness_router.post("/warden/notion/sync/write")
+def post_warden_notion_sync_write(req: Optional[_NotionSyncRequest] = None):
+    """Blocked v0 write path; real Notion writes are intentionally disabled."""
+    from .notion_sync import sync_candidates_write
+    existing = req.existing_candidates if req else []
+    return sync_candidates_write(_BOARD_ROOT, existing_candidates=existing)
+
+
+# ---------------------------------------------------------------------------
+# Workspace Authority endpoints
+# ---------------------------------------------------------------------------
+
+@mcharness_router.get("/warden/workspaces")
+def get_workspaces():
+    from .workspace_authority import list_projects
+    return {"ok": True, "projects": list_projects()}
+
+
+@mcharness_router.get("/warden/workspaces/{project_id}")
+def get_workspace(project_id: str):
+    from .workspace_authority import resolve_project
+    p = resolve_project(project_id)
+    if not p:
+        raise HTTPException(404, f"Unknown project: {project_id!r}")
+    return {"ok": True, "project": p}
+
+
+class _ResolveRequest(BaseModel):
+    project_id: str
+    cwd: Optional[str] = None
+
+
+@mcharness_router.post("/warden/workspaces/resolve")
+def post_workspace_resolve(req: _ResolveRequest):
+    from .workspace_authority import detect_workspace_drift
+    import os as _os2
+    result = detect_workspace_drift(req.project_id, req.cwd or _os2.getcwd())
+    return {"ok": result.get("safe_to_edit", False), **result}
+
+
+class _BootstrapRequest(BaseModel):
+    project_id: str
+    task: str = ""
+    cwd: Optional[str] = None
+
+
+@mcharness_router.post("/warden/workspaces/bootstrap")
+def post_workspace_bootstrap(req: _BootstrapRequest):
+    from .workspace_authority import build_agent_bootstrap
+    return build_agent_bootstrap(req.project_id, task=req.task, cwd=req.cwd)
+
+
+# ---------------------------------------------------------------------------
+# Memory Watcher endpoints
+# ---------------------------------------------------------------------------
+
+@mcharness_router.get("/warden/memory-watcher/status")
+def get_memory_watcher_status():
+    from .memory_watcher import get_watcher_status
+    return {"ok": True, **get_watcher_status()}
+
+
+@mcharness_router.post("/warden/memory-watcher/start")
+def post_memory_watcher_start():
+    from .memory_watcher import start_background_watcher
+    result = start_background_watcher(dry_run=False)
+    return {"ok": True, "result": result}
+
+
+@mcharness_router.post("/warden/memory-watcher/stop")
+def post_memory_watcher_stop():
+    from .memory_watcher import stop_background_watcher
+    result = stop_background_watcher()
+    return {"ok": True, "result": result}
+
+
+@mcharness_router.post("/warden/memory-watcher/collect")
+def post_memory_watcher_collect():
+    """Trigger one immediate collection pass (for testing / manual trigger)."""
+    from .memory_watcher import MemoryWatcher
+    w = MemoryWatcher(dry_run=False)
+    n = w.poll_once()
+    return {"ok": True, "memories_written": n}
+
+
+@mcharness_router.post("/warden/memory-watcher/install-hooks")
+def post_memory_watcher_install_hooks():
+    from .memory_watcher import install_git_hooks, CANONICAL_REPO
+    installed = install_git_hooks(CANONICAL_REPO)
+    return {"ok": True, "installed": installed}
+
+
+@mcharness_router.post("/warden/memory-watcher/uninstall-hooks")
+def post_memory_watcher_uninstall_hooks():
+    from .memory_watcher import uninstall_git_hooks, CANONICAL_REPO
+    removed = uninstall_git_hooks(CANONICAL_REPO)
+    return {"ok": True, "removed": removed}
+
+
+# ---------------------------------------------------------------------------
+# Memory Chat Agent
+# ---------------------------------------------------------------------------
+
+class _MemoryChatMessage(BaseModel):
+    role: str = "user"
+    content: str
+
+
+class _MemoryChatRequest(BaseModel):
+    message: str
+    history: list[_MemoryChatMessage] = []
+    model: Optional[str] = None
+
+
+class _AgentChatRequest(BaseModel):
+    message: str
+    history: list[_MemoryChatMessage] = []
+
+
+@mcharness_router.post("/warden/agent/chat")
+async def post_warden_agent_chat(req: _AgentChatRequest):
+    """WardenAgent — tool-calling agent for 'where we at?' queries.
+
+    Pulls from memory, git, GitHub PRs/issues, and web search.
+    Uses cloud LLM (Groq/Cerebras/OpenRouter) with Ollama fallback.
+    """
+    from .agent import run_agent
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+    result = await run_agent(message=req.message, history=history)
+    return {
+        "ok": True,
+        "reply": result.reply,
+        "tools_used": result.tools_used,
+        "sources": result.sources,
+        "model": result.model,
+        "provider": result.provider,
+        "fallback": result.fallback,
+        "trace": result.trace,
+    }
+
+
+@mcharness_router.post("/warden/memory-agent/chat")
+async def post_memory_agent_chat(req: _MemoryChatRequest):
+    """Chat with the Warden Memory Agent — synthesizes git, shell, browser, tasks, and stored memories."""
+    from .memory_agent import chat as agent_chat
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+    result = agent_chat(message=req.message, history=history, model=req.model)
+    return {
+        "ok": True,
+        "reply": result.reply,
+        "sources": result.sources,
+        "model_used": result.model_used,
+        "context_snapshot": result.context_snapshot,
+        "fallback": result.fallback,
+        "trace": result.trace,
+    }
+
+
+@mcharness_router.get("/warden/memory-agent/context")
+def get_memory_agent_context():
+    """Return a snapshot of current context without LLM — for UI pre-loading."""
+    from .memory_agent import gather_context
+    ctx = gather_context()
+    return {
+        "ok": True,
+        "branch": ctx.current_branch,
+        "recent_commits": ctx.git_log[:8],
+        "shell_commands": ctx.shell_commands[-10:],
+        "browser_visits": ctx.browser_visits[-8:],
+        "board_tasks": [
+            {"status": t.get("status"), "title": t.get("title"), "agent": t.get("agent")}
+            for t in ctx.board_tasks[:6]
+        ],
+        "memory_count": len(ctx.recent_memories),
+        "gathered_at": ctx.gathered_at,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Model Gateway Control Room endpoints
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _RoutePreviewRequest(BaseModel):
+    task: str
+    force_alias: Optional[str] = None
+
+class _ContextPreviewRequest(BaseModel):
+    query: str
+    alias: Optional[str] = None
+    memories: list[dict] = []
+    git_context: Optional[str] = None
+    tool_outputs: list[dict] = []
+    system_prompt: Optional[str] = None
+
+
+@mcharness_router.get("/warden/model-gateway/status")
+def get_gateway_status():
+    """Provider reachability and key status. Never exposes raw key values."""
+    from .gateway.providers import check_all
+    return {"ok": True, "providers": check_all()}
+
+
+@mcharness_router.get("/warden/model-gateway/aliases")
+def get_gateway_aliases():
+    """All 6 model aliases with metadata."""
+    from .gateway.aliases import ALIAS_DEFS
+    return {"ok": True, "aliases": ALIAS_DEFS}
+
+
+@mcharness_router.post("/warden/model-gateway/route-preview")
+def post_route_preview(req: _RoutePreviewRequest):
+    """Preview how a task would be routed — no cloud token spend."""
+    from .gateway.policy import route
+    from .gateway.context_budget import _count_tokens, _ALIAS_BUDGETS
+    d = route(req.task, force_alias=req.force_alias)
+    input_tokens = d.estimated_input_tokens
+    budget = _ALIAS_BUDGETS.get(d.alias, 4096)
+    tokens_after = min(input_tokens, budget)
+    pct_saved = round((input_tokens - tokens_after) / max(1, input_tokens) * 100, 1) if input_tokens > budget else 0.0
+    from .gateway.aliases import ALIAS_DEFS
+    alias_def = ALIAS_DEFS.get(d.alias, {})
+    return {
+        "ok": True,
+        "alias": d.alias,
+        "reason": d.reason,
+        "confidence": round(d.confidence, 2),
+        "classifier_used": d.classifier_used,
+        "privacy": d.privacy,
+        "openrouter_free_blocked": d.openrouter_free_blocked,
+        "estimated_input_tokens": input_tokens,
+        "token_budget": budget,
+        "estimated_tokens_after_budget": tokens_after,
+        "pct_saved": pct_saved,
+        "likely_tools": d.likely_tools,
+        "primary_provider": alias_def.get("primary_provider"),
+        "fallback_provider": alias_def.get("fallback_provider"),
+        "warnings": d.warnings,
+    }
+
+
+@mcharness_router.post("/warden/model-gateway/context-preview")
+def post_context_preview(req: _ContextPreviewRequest):
+    """Show exactly what context would be kept/dropped/compressed for a given alias."""
+    from .gateway.policy import route
+    from .gateway.context_budget import build_budget, inspect
+    alias = req.alias or route(req.query).alias
+    result = build_budget(
+        alias=alias,
+        query=req.query,
+        memories=req.memories or [],
+        git_context=req.git_context,
+        tool_outputs=req.tool_outputs or [],
+        system_prompt=req.system_prompt,
+    )
+    return {
+        "ok": True,
+        "alias": alias,
+        "token_budget": result.token_budget,
+        "tokens_before": result.total_before,
+        "tokens_after": result.total_after,
+        "tokens_saved": result.tokens_saved,
+        "pct_saved": result.pct_saved,
+        "items": inspect(result),
+    }
+
+
+@mcharness_router.get("/warden/model-gateway/traces")
+def get_gateway_traces(limit: int = 50):
+    """Recent gateway request traces — task, alias, provider, token savings."""
+    from .gateway.traces import recent
+    return {"ok": True, "traces": recent(limit=min(limit, 200))}
+
+
+# ── Browser extension ingest ──────────────────────────────────────────────────
+
+class BrowserIngestRequest(BaseModel):
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@mcharness_router.post("/warden/browser/ingest", status_code=201)
+def browser_ingest(req: BrowserIngestRequest):
+    """Receive batched browser events from the Warden Chrome extension.
+
+    Each event has: source, kind, url, title, ts — plus kind-specific fields
+    (query, text, messages, fields, etc.). Stored as WorkbenchMemory entries
+    grouped by kind so they're searchable via Memory Agent.
+    """
+    from .workbench import WorkbenchStore, WorkbenchMemoryCreateRequest
+    import hashlib
+
+    if not req.events:
+        return {"ok": True, "stored": 0}
+
+    store = WorkbenchStore()
+    stored = 0
+    skipped = 0
+
+    # Group events by kind for richer memory summaries
+    kind_groups: dict[str, list[dict]] = {}
+    for ev in req.events[:500]:  # cap per batch
+        k = ev.get("kind", "browse")
+        kind_groups.setdefault(k, []).append(ev)
+
+    for kind, events in kind_groups.items():
+        for ev in events:
+            url = (ev.get("url") or "")[:300]
+            title = (ev.get("title") or "")[:200]
+            ts = ev.get("ts") or ""
+            source = ev.get("source") or "browser"
+
+            # Build a summary line per event kind
+            if kind == "search":
+                query = (ev.get("query") or "").strip()
+                if not query:
+                    skipped += 1
+                    continue
+                engine = ev.get("engine", "google")
+                summary = f"[{engine} search] {query}"
+                content = f"Searched {engine}: {query}\nURL: {url}"
+
+            elif kind == "ai_conversation":
+                messages = ev.get("messages") or []
+                if not messages:
+                    skipped += 1
+                    continue
+                service = ev.get("source", "ai").replace("_turn", "")
+                turns = "\n".join(
+                    f"{m.get('role','?').upper()}: {m.get('text','')[:400]}"
+                    for m in messages[:6]
+                )
+                summary = f"[{service}] conversation — {len(messages)} turn(s)"
+                content = f"Service: {service}\nURL: {url}\n\n{turns}"
+
+            elif kind == "selection":
+                text = (ev.get("selected_text") or "").strip()
+                if not text:
+                    skipped += 1
+                    continue
+                summary = f"[selected] {text[:120]}"
+                content = f"Selected on {title or url}:\n{text}\nURL: {url}"
+
+            elif kind == "input":
+                text = (ev.get("text") or "").strip()
+                fields = ev.get("fields") or {}
+                body = text or "; ".join(f"{k}={v}" for k, v in fields.items())
+                if not body:
+                    skipped += 1
+                    continue
+                summary = f"[typed] {body[:120]}"
+                content = f"Typed on {title or url}:\n{body}\nURL: {url}"
+
+            elif kind == "copy":
+                text = (ev.get("text") or "").strip()
+                if not text:
+                    skipped += 1
+                    continue
+                summary = f"[copied] {text[:120]}"
+                content = f"Copied from {title or url}:\n{text}\nURL: {url}"
+
+            elif kind == "github":
+                pr = ev.get("pr")
+                issue = ev.get("issue")
+                repo = f"{ev.get('owner','')}/{ev.get('repo','')}"
+                detail = f"PR #{pr}" if pr else (f"issue #{issue}" if issue else ev.get("path", ""))
+                summary = f"[github] {repo} {detail}".strip()
+                content = f"GitHub: {repo} {detail}\nURL: {url}"
+
+            elif kind == "media":
+                yt_title = ev.get("title") or title
+                channel = ev.get("channel") or ""
+                summary = f"[youtube] {yt_title}" + (f" — {channel}" if channel else "")
+                content = f"Watched: {yt_title}\nChannel: {channel}\nURL: {url}"
+
+            elif kind == "reference":
+                h1 = ev.get("title") or title
+                snippet = (ev.get("snippet") or "").strip()
+                summary = f"[docs] {h1[:120]}"
+                content = f"Docs: {h1}\nURL: {url}" + (f"\n\n{snippet}" if snippet else "")
+
+            elif kind == "browse":
+                if not title and not url:
+                    skipped += 1
+                    continue
+                dwell = ev.get("dwell_sec", 0)
+                if dwell < 5 and source != "navigation":
+                    skipped += 1
+                    continue
+                scroll = ev.get("scroll_pct", 0)
+                summary = f"[browsed] {title or url[:80]}"
+                content = f"Visited: {title or url}\nURL: {url}\nDwell: {dwell}s, scroll: {scroll}%"
+
+            else:
+                summary = f"[{kind}] {title or url[:80]}"
+                content = f"Kind: {kind}\nURL: {url}\nTitle: {title}"
+
+            # Dedup by content hash
+            dedup = hashlib.sha1(f"{summary}|{url}".encode()).hexdigest()[:12]
+            memory_id = f"browser-{dedup}"
+
+            try:
+                existing = store.search_memories(memory_id, limit=1)
+                if any(m.memory_id == memory_id for m in existing):
+                    skipped += 1
+                    continue
+                store.create_memory(WorkbenchMemoryCreateRequest(
+                    memory_id=memory_id,
+                    scope="warden",
+                    summary=summary,
+                    source="browser_extension",
+                    title=summary[:80],
+                    kind="user_note",
+                    tags=["auto", "browser", kind],
+                    metadata={
+                        "url": url,
+                        "title": title,
+                        "ts": ts,
+                        "source": source,
+                        "raw": {k: v for k, v in ev.items() if k not in ("url", "title", "ts", "source")
+                                and not isinstance(v, (dict, list))},
+                    },
+                ))
+                stored += 1
+            except Exception:
+                skipped += 1
+
+    return {"ok": True, "stored": stored, "skipped": skipped, "received": len(req.events)}
+
+
+# ---------------------------------------------------------------------------
+# Warden Connectors — account connection platform
+# ---------------------------------------------------------------------------
+
+@mcharness_router.get("/warden/connectors/providers")
+def get_warden_connectors_providers():
+    """List available connector providers with configuration status."""
+    from .connectors.registry import list_providers
+    from .connectors.oauth import is_provider_configured
+    providers = list_providers()
+    # Override configured flag to reflect vault-stored configs too
+    for p in providers:
+        if p.get("provider_id") == "gmail":
+            # Gmail primary path is IMAP app-password — no pre-config needed
+            p["configured"] = True
+        elif p.get("auth_type") == "oauth2_authorization_code":
+            p["configured"] = is_provider_configured(p["provider_id"])
+    return {"ok": True, "providers": providers}
+
+
+@mcharness_router.get("/warden/connectors/accounts")
+def get_warden_connectors_accounts():
+    """List connected user accounts. Tokens are never returned."""
+    from .connectors.store import list_accounts
+    return {"ok": True, "accounts": list_accounts(redact=True)}
+
+
+@mcharness_router.post("/warden/connectors/{provider}/connect/start")
+def post_warden_connectors_connect_start(provider: str, request: Request):
+    """Begin an OAuth2 connection flow for the given provider."""
+    from .connectors.oauth import start_oauth_flow
+    base_url = str(request.base_url).rstrip("/")
+    result = start_oauth_flow(provider, base_url)
+    if result.get("configured") is False:
+        return {"ok": False, "configured": False, "provider": provider,
+                "error": result.get("error", "Provider not configured")}
+    return {"ok": True, "provider": provider, "auth_url": result.get("auth_url"),
+            "state": result.get("state")}
+
+
+@mcharness_router.get("/warden/connectors/{provider}/callback")
+def get_warden_connectors_callback(provider: str, code: str = "", state: str = "", error: str = ""):
+    """OAuth2 callback — validates state, exchanges code for token, stores account."""
+    from .connectors.oauth import validate_callback_state, exchange_code_for_token, _extract_email_from_token
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+
+    if error:
+        return {"ok": False, "error": error, "provider": provider,
+                "message": f"OAuth denied: {error}"}
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
+    state_data = validate_callback_state(state)
+    if state_data is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    redirect_uri = state_data.get("redirect_uri", "")
+    token_response = exchange_code_for_token(provider, code, redirect_uri)
+
+    if "error" in token_response:
+        return {"ok": False, "provider": provider, "status": "token_exchange_failed",
+                "error": token_response.get("error"),
+                "message": token_response.get("error_description", "Token exchange failed")}
+
+    # Store token securely, record account
+    email = _extract_email_from_token(token_response, provider)
+    account_id = f"{provider}-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    scopes = state_data.get("scopes", [])
+
+    # Serialize token as JSON string for vault storage
+    import json as _json
+    token_str = _json.dumps({
+        "access_token": token_response.get("access_token", ""),
+        "refresh_token": token_response.get("refresh_token", ""),
+        "expires_in": token_response.get("expires_in"),
+        "token_type": token_response.get("token_type", "Bearer"),
+    })
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider=provider,
+        display_email=email or f"{provider}_user",
+        status="connected",
+        scopes=scopes,
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+        token_ref="",
+    )
+    store = ConnectorStore()
+    stored = store.save_account(account, token=token_str)
+
+    # Return success page (user may be in a popup window)
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Warden — Connected</title>
+<style>body{{font-family:sans-serif;background:#0d1b2e;color:#d4e4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+.card{{background:#14243c;border:1px solid rgba(100,160,255,.25);border-radius:10px;padding:32px 40px;text-align:center;max-width:360px;}}
+h2{{margin:0 0 8px;}}p{{color:#8faabf;margin:0 0 16px;}}
+.btn{{background:#2d5f9e;color:#d4e4f5;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:.9rem;}}
+.btn:hover{{background:#3a72b8;}}</style>
+</head>
+<body><div class="card">
+<h2>&#10003; {provider.title()} Connected</h2>
+<p>{email or "Account connected successfully."}</p>
+<button class="btn" id="doneBtn">Done</button>
+</div>
+<script>
+(function(){{
+  var origin = location.origin;
+  if(window.opener){{
+    try{{window.opener.postMessage({{type:"warden_connector_connected",provider:{json.dumps(provider)}}},origin);}}catch(e){{}}
+  }}
+  document.getElementById("doneBtn").onclick = function(){{ window.close(); }};
+}})();
+</script>
+</body></html>"""
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_body)
+
+
+@mcharness_router.post("/warden/connectors/accounts/{account_id}/disconnect")
+def post_warden_connectors_disconnect(account_id: str):
+    """Disconnect a connected account and remove its stored token."""
+    from .connectors.store import ConnectorStore
+    store = ConnectorStore()
+    removed = store.disconnect_account(account_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+    return {"ok": True, "account_id": account_id, "status": "disconnected"}
+
+
+# ─── Provider OAuth config (stored in vault, not env vars) ───────────────────
+
+class ProviderConfigRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@mcharness_router.get("/warden/connectors/{provider}/config")
+def get_provider_oauth_config(provider: str):
+    """Return masked provider OAuth config. Never returns the raw client_secret."""
+    from .connectors.oauth import load_provider_config, is_provider_configured, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    cfg = load_provider_config(provider)
+    client_id = cfg.get("client_id", "")
+    has_secret = bool(cfg.get("client_secret", ""))
+    return {
+        "ok": True,
+        "provider": provider,
+        "configured": bool(client_id),
+        "client_id": client_id,
+        "has_secret": has_secret,
+        "source": "vault" if client_id else "none",
+    }
+
+
+@mcharness_router.post("/warden/connectors/{provider}/config")
+def post_provider_oauth_config(provider: str, body: ProviderConfigRequest):
+    """Save provider OAuth client credentials to the local vault."""
+    from .connectors.oauth import save_provider_config, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    client_id = (body.client_id or "").strip()
+    client_secret = (body.client_secret or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id is required")
+    if not client_secret:
+        raise HTTPException(status_code=400, detail="client_secret is required")
+    save_provider_config(provider, client_id, client_secret)
+    masked = client_id[:6] + "..." if len(client_id) > 6 else client_id
+    return {"ok": True, "provider": provider, "configured": True,
+            "client_id_preview": masked, "has_secret": True}
+
+
+@mcharness_router.delete("/warden/connectors/{provider}/config")
+def delete_provider_oauth_config(provider: str):
+    """Remove stored provider OAuth config from vault."""
+    from .connectors.oauth import clear_provider_config, _PROVIDER_CONFIG_SUPPORTED
+    if provider not in _PROVIDER_CONFIG_SUPPORTED:
+        raise HTTPException(status_code=404, detail=f"Provider {provider} does not support OAuth config")
+    clear_provider_config(provider)
+    return {"ok": True, "provider": provider, "configured": False}
+
+
+# ─── Gmail app-password connect (IMAP, primary path) ─────────────────────────
+
+class GmailImapConnectRequest(BaseModel):
+    email: str
+    app_password: str
+
+
+@mcharness_router.post("/warden/connectors/gmail/connect/app-password")
+def post_warden_gmail_imap_connect(body: GmailImapConnectRequest):
+    """Connect Gmail via Google App Password (IMAP). No OAuth required.
+
+    App password stored in local vault only — never returned to caller.
+    Requires IMAP enabled in Gmail settings and 2-Step Verification active.
+    """
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import re as _re
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+    import json as _json
+
+    email = (body.email or "").strip().lower()
+    app_password = (body.app_password or "").strip().replace(" ", "")
+
+    if not email or not _re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="app_password is required")
+    if len(app_password) < 8:
+        raise HTTPException(status_code=400, detail="App password too short (Google App Passwords are 16 characters)")
+
+    # Optional live IMAP connection check
+    connection_status = "connected"
+    connection_note = ""
+    try:
+        from .mail.gmail_imap import GmailImapProvider
+        probe = GmailImapProvider(email_addr=email, app_password=app_password, account_id="probe")
+        if not probe.check_connection():
+            connection_status = "needs_check"
+            connection_note = (
+                "Gmail IMAP login could not be verified. "
+                "Confirm IMAP is enabled (Gmail → Settings → Forwarding and POP/IMAP) "
+                "and that this is a Google App Password, not your normal password."
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        # Network unavailable or timeout — store anyway
+        connection_status = "needs_check"
+        connection_note = "Could not reach Gmail to verify. Credentials stored; test mail search to confirm."
+
+    account_id = f"gmail-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    token_str = _json.dumps({"email": email, "app_password": app_password, "auth_type": "imap_app_password"})
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider="gmail",
+        display_email=email,
+        status=connection_status,
+        scopes=[],
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+    )
+    store = ConnectorStore()
+    store.save_account(account, token=token_str)
+    response = {
+        "ok": True,
+        "account_id": account_id,
+        "provider": "gmail",
+        "auth_type": "imap_app_password",
+        "display_email": email,
+        "status": connection_status,
+    }
+    if connection_note:
+        response["note"] = connection_note
+    return response
+
+
+# ─── iCloud app-password connect ─────────────────────────────────────────────
+
+class ICloudConnectRequest(BaseModel):
+    email: str
+    app_password: str
+
+
+@mcharness_router.post("/warden/connectors/icloud/connect/app-password")
+def post_warden_icloud_connect(body: ICloudConnectRequest):
+    """Connect iCloud Mail via app-specific password. Password stored in vault only."""
+    from .connectors.store import ConnectorStore
+    from .connectors.models import ConnectedAccount
+    import re as _re
+    import uuid as _uuid
+    from datetime import datetime, timezone as _tz
+    import json as _json
+
+    email = (body.email or "").strip()
+    app_password = (body.app_password or "").strip()
+
+    if not email or not _re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    if not app_password:
+        raise HTTPException(status_code=400, detail="app_password is required")
+    # Basic app-specific password format: xxxx-xxxx-xxxx-xxxx
+    if len(app_password) < 8:
+        raise HTTPException(status_code=400, detail="app_password too short")
+
+    account_id = f"icloud-{_uuid.uuid4().hex[:12]}"
+    now = datetime.now(_tz.utc).isoformat()
+    token_str = _json.dumps({"email": email, "app_password": app_password})
+
+    account = ConnectedAccount(
+        account_id=account_id,
+        user_id="local",
+        provider="icloud",
+        display_email=email,
+        status="connected",
+        scopes=[],
+        capabilities=["mail.read", "mail.search"],
+        created_at=now,
+        updated_at=now,
+    )
+    store = ConnectorStore()
+    store.save_account(account, token=token_str)
+    return {"ok": True, "account_id": account_id, "provider": "icloud",
+            "display_email": email, "status": "connected",
+            "note": "App password stored in local vault only. Use /warden/mail/search to test."}
+
+
+# ─── Mail endpoints ───────────────────────────────────────────────────────────
+
+@mcharness_router.get("/warden/mail/accounts")
+def get_warden_mail_accounts():
+    """List connected mail accounts (no tokens returned)."""
+    from .connectors.store import ConnectorStore
+    from .connectors.registry import PROVIDERS
+    all_accounts = ConnectorStore().list_accounts(redact=True)
+    mail_providers = {"gmail", "outlook", "icloud"}
+    mail_accounts = [a for a in all_accounts
+                     if a.get("provider") in mail_providers]
+    return {"ok": True, "accounts": mail_accounts, "count": len(mail_accounts)}
+
+
+@mcharness_router.get("/warden/mail/search")
+def get_warden_mail_search(account_id: str, q: str = "", limit: int = 10):
+    """Search mail in a connected account. Returns summaries only."""
+    from .connectors.store import ConnectorStore
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id required")
+    if limit < 1 or limit > 50:
+        limit = 10
+
+    store = ConnectorStore()
+    acc = store.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+
+    provider_id = acc.get("provider", "")
+    query = (q or "").strip() or "ALL"
+
+    try:
+        if provider_id == "icloud":
+            from .mail.icloud import build_icloud_provider
+            provider = build_icloud_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
+        elif provider_id == "gmail":
+            # Try IMAP app-password first (primary), fall back to OAuth token
+            from .mail.gmail_imap import build_gmail_imap_provider
+            provider = build_gmail_imap_provider(account_id)
+            if not provider:
+                from .mail.gmail import build_gmail_provider
+                provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail not connected — use Settings to connect with App Password")
+        else:
+            raise HTTPException(status_code=422, detail=f"Mail search not supported for provider: {provider_id}")
+
+        summaries = provider.search(query, limit=limit)
+        return {"ok": True, "account_id": account_id, "provider": provider_id,
+                "query": query, "count": len(summaries),
+                "messages": [s.to_dict() for s in summaries]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail search error: {type(e).__name__}: {e}")
+
+
+@mcharness_router.get("/warden/mail/messages/{account_id}/{message_id:path}")
+def get_warden_mail_message(account_id: str, message_id: str):
+    """Read a mail message by ID. Returns normalized body_text (no HTML, no raw tokens)."""
+    from .connectors.store import ConnectorStore
+    store = ConnectorStore()
+    acc = store.get_account(account_id)
+    if not acc:
+        raise HTTPException(status_code=404, detail=f"Account not found: {account_id}")
+
+    provider_id = acc.get("provider", "")
+    try:
+        if provider_id == "icloud":
+            from .mail.icloud import build_icloud_provider
+            provider = build_icloud_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="iCloud credentials not found in vault")
+        elif provider_id == "gmail":
+            from .mail.gmail_imap import build_gmail_imap_provider
+            provider = build_gmail_imap_provider(account_id)
+            if not provider:
+                from .mail.gmail import build_gmail_provider
+                provider = build_gmail_provider(account_id)
+            if not provider:
+                raise HTTPException(status_code=422, detail="Gmail not connected — use Settings to connect with App Password")
+        else:
+            raise HTTPException(status_code=422, detail=f"Mail read not supported for: {provider_id}")
+
+        msg = provider.read_message(message_id)
+        return {"ok": True, "message": msg.to_dict(include_html=False)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mail read error: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Warden Brain — local vault + Google hybrid
+# ---------------------------------------------------------------------------
+
+class BrainWriteNoteRequest(BaseModel):
+    title: str
+    body: str
+    tags: list[str] = []
+    filename: Optional[str] = None
+
+
+class BrainAskRequest(BaseModel):
+    question: str
+    limit: int = 6
+
+
+class BrainMirrorRequest(BaseModel):
+    dry_run: bool = True
+    source_ids: list[str] = []
+    limit: int = 50
+
+
+class BrainProviderConfigSaveRequest(BaseModel):
+    pass  # config is via env only; this endpoint just reads status
+
+
+@mcharness_router.get("/warden/brain/health")
+def get_brain_health():
+    """Brain health: local vault + Google provider status."""
+    from .brain import local_provider, google_provider
+    local_st = local_provider.status()
+    google_st = google_provider.status()
+    return {
+        "ok": True,
+        "local": local_st,
+        "google": google_st,
+        "hybrid_enabled": google_provider.is_enabled() and google_provider.is_configured(),
+    }
+
+
+@mcharness_router.get("/warden/brain/providers")
+def get_brain_providers():
+    """List brain providers and their configuration status."""
+    from .brain import local_provider, google_provider
+    return {
+        "ok": True,
+        "providers": [
+            {
+                "provider_id": "local",
+                "display_name": "Local Brain (Obsidian-compatible vault)",
+                "free": True,
+                "status": local_provider.status(),
+            },
+            {
+                "provider_id": "google_discovery_engine",
+                "display_name": "Google Brain (Vertex AI Search)",
+                "free": False,
+                "status": google_provider.status(),
+            },
+        ],
+    }
+
+
+@mcharness_router.post("/warden/brain/init-vault")
+def post_brain_init_vault():
+    """Initialize the local Markdown vault directory structure."""
+    from .brain.vault import init_vault
+    result = init_vault()
+    return {"ok": True, **result}
+
+
+@mcharness_router.post("/warden/brain/reindex")
+def post_brain_reindex():
+    """Scan vault and reindex all Markdown sources into SQLite FTS."""
+    from .brain import local_provider
+    result = local_provider.reindex()
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/sources")
+def get_brain_sources(limit: int = 50):
+    """List indexed brain sources."""
+    from .brain.index import list_sources
+    sources = list_sources(limit=limit)
+    return {"ok": True, "sources": sources, "count": len(sources)}
+
+
+@mcharness_router.get("/warden/brain/search")
+def get_brain_search(q: str = "", limit: int = 10):
+    """Hybrid search: local FTS + Google (if enabled)."""
+    if not q:
+        raise HTTPException(status_code=400, detail="q is required")
+    from .brain import hybrid
+    results = hybrid.search(q, limit=limit)
+    return {"ok": True, "query": q, "results": results, "count": len(results)}
+
+
+@mcharness_router.post("/warden/brain/ask")
+def post_brain_ask(body: BrainAskRequest):
+    """Hybrid ask: extractive answer with citations from local + Google."""
+    from .brain import hybrid
+    answer = hybrid.answer(body.question, limit=body.limit)
+    return {"ok": True, **answer.to_dict()}
+
+
+@mcharness_router.post("/warden/brain/write-note")
+def post_brain_write_note(body: BrainWriteNoteRequest):
+    """Write a new Markdown note to the vault inbox."""
+    from .brain.vault import write_note
+    try:
+        result = write_note(
+            title=body.title,
+            body=body.body,
+            tags=body.tags or [],
+            filename=body.filename,
+        )
+        return {"ok": True, **result}
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class BrainIngestRequest(BaseModel):
+    url: str
+    title: str = ""
+    source_type: str = "webpage"  # webpage | selection | youtube | pdf
+    content_text: str = ""
+    selected_text: str = ""
+    channel: str = ""
+    description: str = ""
+    tags: list[str] = []
+    local_only: bool = False
+
+
+@mcharness_router.post("/warden/brain/ingest")
+def post_brain_ingest(body: BrainIngestRequest):
+    """Ingest a webpage, selected text, YouTube video, or PDF URL into the Brain vault."""
+    from .brain import ingest as brain_ingest
+    try:
+        if body.source_type == "selection":
+            if not body.selected_text:
+                raise HTTPException(status_code=400, detail="selected_text required for source_type=selection")
+            result = brain_ingest.ingest_selection(
+                url=body.url,
+                title=body.title or body.url,
+                selected_text=body.selected_text,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        elif body.source_type == "youtube":
+            # Fetch transcript from API if not provided
+            transcript = body.content_text
+            if not transcript:
+                yt = brain_ingest.fetch_youtube_transcript(body.url)
+                transcript = yt.get("transcript", "")
+            result = brain_ingest.ingest_youtube(
+                url=body.url,
+                title=body.title or body.url,
+                channel=body.channel,
+                description=body.description,
+                transcript=transcript,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        elif body.source_type == "pdf":
+            result = brain_ingest.ingest_pdf(
+                url=body.url,
+                title=body.title,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        else:
+            # webpage (default)
+            if not (body.content_text or body.selected_text):
+                raise HTTPException(status_code=400, detail="content_text or selected_text required")
+            result = brain_ingest.ingest_webpage(
+                url=body.url,
+                title=body.title or body.url,
+                content_text=body.content_text,
+                selected_text=body.selected_text,
+                tags=body.tags or [],
+                local_only=body.local_only,
+            )
+        if not result.get("ok"):
+            return {"ok": False, "reason": result.get("error", "Ingest failed"), **result}
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@mcharness_router.post("/warden/brain/google/mirror")
+def post_brain_google_mirror(body: BrainMirrorRequest):
+    """Mirror local vault sources to Google Discovery Engine."""
+    from .brain import google_provider
+    from .brain.mirror import mirror_sources
+    if not google_provider.is_enabled():
+        return {
+            "ok": False,
+            "reason": "Google Brain not enabled. Set WARDEN_GOOGLE_BRAIN_ENABLED=1.",
+            "dry_run": body.dry_run,
+        }
+    result = mirror_sources(
+        source_ids=body.source_ids or None,
+        limit=body.limit,
+        dry_run=body.dry_run,
+    )
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/google/mirror-status")
+def get_brain_mirror_status():
+    """Return mirror sync status for all sources."""
+    from .brain.mirror import mirror_status
+    result = mirror_status()
+    return {"ok": True, **result}
+
+
+@mcharness_router.get("/warden/brain/google/status")
+def get_brain_google_status():
+    """Google Brain provider status and configuration."""
+    from .brain import google_provider
+    return {"ok": True, **google_provider.status()}
+
+
+@mcharness_router.post("/warden/brain/google/verify")
+def post_brain_google_verify():
+    """Verify Google Brain credentials with a lightweight search."""
+    from .brain import google_provider
+    result = google_provider.verify_config()
+    return {"ok": result["ok"], **result}

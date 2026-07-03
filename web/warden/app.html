@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Warden | Supervised AI Coding Agents</title>
+  <title>Warden — Local-first AI Command Center</title>
   <meta
     name="description"
-    content="Warden by Marius Systems — supervised control room for AI coding agents. Powered by McHarness."
+    content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets Marius answer or act with source-backed proof."
   />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./app.css" />
+  <link rel="stylesheet" href="./app.css?v=phase2-redesign" />
 </head>
 <body>
   <div class="warden-shell" data-testid="warden-shell">
@@ -17,82 +17,144 @@
       <div class="sidebar-brand">
         <div class="warden-brand">
           <h1 class="warden-title">Warden</h1>
-          <span class="warden-byline" data-testid="warden-byline">by Marius Systems</span>
         </div>
-        <p class="sidebar-tagline">Supervised agent ops</p>
+        <p class="sidebar-tagline">Local-first AI command center</p>
       </div>
 
-      <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">Develop Plan</button>
+      <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">+ New Task</button>
+
+      <form id="sidebar-search-form" class="sidebar-search-form" data-testid="sidebar-search-form">
+        <span class="sidebar-search-icon" aria-hidden="true">⌕</span>
+        <input type="text" id="sidebar-search-input" class="sidebar-search-input" placeholder="Search Brain…" autocomplete="off" data-testid="sidebar-search-input" />
+      </form>
+      <div id="sidebar-search-results" class="sidebar-search-results" style="display:none;" data-testid="sidebar-search-results"></div>
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
-        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Mission</button>
-        <button type="button" class="nav-item" data-section="agents" data-testid="nav-agents">Agents</button>
-        <button type="button" class="nav-item" data-section="tasks" data-testid="nav-tasks">Tasks</button>
-        <button type="button" class="nav-item" data-section="runs" data-testid="nav-runs">Runs</button>
-        <button type="button" class="nav-item" data-section="evidence" data-testid="nav-evidence">Evidence</button>
-        <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
+        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command Center</button>
+
+        <div class="sidebar-group-label">Agents</div>
+        <button type="button" class="nav-item nav-item-agent" data-section="agent" data-testid="nav-agent">
+          <span class="nav-item-dot nav-item-dot-good"></span>Marius <span class="nav-item-tag">command</span>
+        </button>
+        <button type="button" class="nav-item nav-item-agent" data-section="agents" data-testid="nav-agents">
+          <span class="nav-item-dot" id="nav-dot-agents"></span>Agent Library <span class="nav-item-tag">Codex · Jules</span>
+        </button>
+
+        <div class="sidebar-group-label">Tasks</div>
+        <button type="button" class="nav-item nav-item-agent" data-section="tasks" data-testid="nav-tasks">
+          <span class="nav-item-dot" id="nav-dot-tasks"></span>Tasks <span class="nav-item-tag" id="nav-tasks-count"></span>
+        </button>
+        <button type="button" class="nav-item nav-item-agent" data-section="evidence" data-testid="nav-proof">
+          <span class="nav-item-dot" id="nav-dot-proof"></span>Proof <span class="nav-item-tag" id="nav-proof-count"></span>
+        </button>
+
+        <div class="sidebar-group-label">Resources</div>
+        <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
+        <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-test-panel" data-testid="nav-mail">Mail</button>
+        <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
+        <button type="button" class="nav-item nav-item-muted" data-section="gateway" data-testid="nav-gateway">Model Gateway</button>
       </nav>
 
       <footer class="sidebar-footer">
-        <span class="warden-powered" data-testid="warden-powered">Powered by McHarness</span>
+        <button type="button" class="nav-item nav-item-settings" data-section="settings" data-testid="nav-settings">Settings</button>
+        <span id="warden-build-info" class="sidebar-build-info" data-testid="warden-build-info"></span>
       </footer>
     </aside>
 
     <main class="warden-workspace" data-testid="warden-workspace">
       <div class="warden-stage">
         <div class="warden-stage-main">
-      <section id="warden-section-mission" class="workspace-section active" data-section="mission" data-testid="warden-section-mission">
-        <header class="workspace-header">
-          <h2 class="workspace-title">Mission Command</h2>
-        </header>
+      <section id="warden-section-mission" class="workspace-section active cmd-section" data-section="mission" data-testid="warden-section-mission">
 
-        <div class="mission-command-panel" data-testid="mission-command">
-          <h3 class="hero-title">What do you want Warden to build?</h3>
-          <p class="hero-subtitle">Captain breaks goals into bounded agent steps. You approve what runs.</p>
-          <div class="mission-command-actions">
-            <button type="button" class="btn primary hero-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
-            <button type="button" class="btn" id="use-codex-directly" data-testid="use-codex-directly" style="display:none;">Use Codex Directly</button>
+        <!-- Thread header -->
+        <div class="thread-header" data-testid="thread-header">
+          <div class="thread-header-title">
+            <span class="thread-header-name">Command Center</span>
+            <span id="thread-status-pill" class="thread-status-pill">Local · Private</span>
           </div>
-          <div class="hero-status-row" data-testid="hero-status-row">
-            <span class="hero-status-chip" id="hero-captain-status" data-testid="hero-captain-status">Captain: Not configured</span>
-            <span class="hero-status-chip" id="hero-codex-status" data-testid="hero-codex-status">Codex: Disabled</span>
-            <span class="hero-status-chip" id="hero-jules-status" data-testid="hero-jules-status">Jules: Planning only</span>
+          <button type="button" id="warden-onboarding-toggle" class="thread-header-help" title="What is Warden?">What is this?</button>
+        </div>
+
+        <!-- Onboarding — slim, dismissable, shown once per session -->
+        <div id="warden-onboarding-card" class="warden-onboarding-card" data-testid="warden-onboarding-card">
+          <p class="onboarding-copy">Warden is a local-first AI workspace. Marius coordinates agents, captures sources into <strong>Brain</strong>, tracks <strong>Tasks</strong>, and shows <strong>Proof</strong> for everything it does.</p>
+          <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
+        </div>
+
+        <!-- Hero + command thread -->
+        <div class="thread-hero" data-testid="thread-hero">
+          <h2 class="thread-hero-title">What should Warden work on?</h2>
+          <p class="thread-hero-sub">Ask Marius to search your Brain, inspect mail, summarize a capture, or create an agent task.</p>
+        </div>
+
+        <!-- Command Center: Marius quick ask (dominant) -->
+        <div class="cc-ask-card" data-testid="cc-ask-card">
+          <form id="cc-ask-form" class="cc-ask-form" data-testid="cc-ask-form">
+            <span class="cc-ask-icon" aria-hidden="true">◈</span>
+            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Marius, create a task, or search your saved sources…" autocomplete="off" data-testid="cc-ask-input" />
+            <button type="submit" class="btn primary cc-ask-submit" data-testid="cc-ask-submit">Ask</button>
+          </form>
+          <div id="cc-ask-reply" class="cc-ask-reply" style="display:none;" data-testid="cc-ask-reply"></div>
+          <div class="cc-ask-suggestions" data-testid="cc-ask-suggestions">
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="What did I capture today?">What did I capture today?</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Search my inbox for recent client work">Search my inbox for recent client work</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Summarize my latest saved video">Summarize my latest saved video</button>
+            <button type="button" class="cc-suggestion-chip" data-cc-suggest="Show recent proof">Show recent proof</button>
           </div>
         </div>
 
-        <div class="mission-cards-grid">
-          <div class="mission-card mission-card-wide" data-testid="current-mission-card">
-            <div id="current-mission-empty" data-testid="current-mission-empty">
-              <h3 class="mission-card-title">Current Mission</h3>
-              <p id="current-mission-status" data-testid="current-mission-status" class="mission-card-lead">No active mission yet.</p>
-              <p class="mission-card-copy">Create a plan to start a supervised Warden run.</p>
-              <button type="button" class="btn primary" data-action="develop-plan" data-testid="develop-plan-mission">Develop Plan</button>
+        <!-- Recent Captures strip -->
+        <section class="cc-card cc-card-wide" data-testid="cc-card-captures">
+          <header class="cc-card-header">
+            <h3>Recent Captures</h3>
+            <span class="cc-card-sub">Brain vault</span>
+          </header>
+          <div id="cc-captures-list" class="cc-card-body"><p class="muted">Loading…</p></div>
+        </section>
+
+        <!-- Plan builder — advanced, collapsed by default -->
+        <details class="cc-plan-details" data-testid="cc-plan-details">
+          <summary class="cc-plan-summary">Build a multi-step agent plan (advanced)</summary>
+          <div class="cmd-hero cmd-hero-inline">
+            <p class="cmd-hero-sub">Warden breaks your goal into steps and dispatches supervised agent work.</p>
+
+            <div class="cmd-agent-chips" title="Supported agent targets — local runner required for execution">
+              <span class="cmd-agent-chip cmd-chip-active">Claude Code</span>
+              <span class="cmd-agent-chip">Codex</span>
+              <span class="cmd-agent-chip">Jules</span>
+              <span class="cmd-agent-chip">Gemini</span>
+              <span class="cmd-agent-chip">Agy</span>
             </div>
-            <div id="current-mission-plan" data-testid="current-mission-plan" style="display:none;">
-              <h3 class="mission-card-title">Current Mission</h3>
-              <div id="current-plan-header" data-testid="current-plan-header" class="mission-card-meta"></div>
-              <div id="captain-plan-steps" data-testid="captain-plan-steps" class="captain-plan-steps-list"></div>
-              <div id="captain-plan-controls" data-testid="captain-plan-controls" class="captain-plan-controls"></div>
-            </div>
+
+            <button type="button" class="btn primary cmd-cta" data-action="develop-plan" data-testid="develop-plan-hero">Develop Plan</button>
           </div>
-          <div class="mission-card mission-card-timeline" data-testid="mission-timeline-card">
-            <div class="mission-timeline-header">
-              <h3 class="mission-card-title">Mission Timeline</h3>
-              <div id="mission-timeline-filter" data-testid="mission-timeline-filter" class="mission-timeline-filter">
-                <button type="button" class="btn active" data-timeline-filter="all">All</button>
-                <button type="button" class="btn" data-timeline-filter="plans">Plans</button>
-                <button type="button" class="btn" data-timeline-filter="runs">Runs</button>
-                <button type="button" class="btn" data-timeline-filter="evidence">Evidence</button>
-                <button type="button" class="btn" data-timeline-filter="gates">Gates</button>
-              </div>
-            </div>
-            <div id="mission-worklog-list" data-testid="mission-timeline-list" class="mission-timeline-list"></div>
-            <p id="mission-worklog-empty" data-testid="mission-timeline-empty" class="mission-card-copy">No mission activity yet. Create a plan to start the timeline.</p>
-          </div>
+        </details>
+
+        <!-- Blocked dispatch notice -->
+        <div id="captain-blocked-notice" class="captain-blocked-notice" style="display:none;" data-testid="captain-blocked-notice"></div>
+
+        <!-- Plan preview — only visible after a plan is created -->
+        <div id="current-mission-plan" data-testid="current-mission-plan" class="cmd-plan-preview" style="display:none;">
+          <div id="current-plan-header" data-testid="current-plan-header" class="cmd-plan-header"></div>
+          <div id="captain-plan-steps" data-testid="captain-plan-steps" class="captain-plan-steps-list"></div>
+          <div id="captain-plan-controls" data-testid="captain-plan-controls" class="captain-plan-controls"></div>
         </div>
+
+        <!-- Hidden legacy refs kept for JS compatibility -->
+        <div style="display:none;">
+          <span id="current-mission-status" data-testid="current-mission-status"></span>
+          <div id="current-mission-empty" data-testid="current-mission-empty"></div>
+          <div id="mission-worklog-list" data-testid="mission-timeline-list"></div>
+          <p id="mission-worklog-empty" data-testid="mission-timeline-empty"></p>
+          <span id="hero-captain-status" data-testid="hero-captain-status"></span>
+          <span id="hero-codex-status" data-testid="hero-codex-status"></span>
+          <span id="hero-jules-status" data-testid="hero-jules-status"></span>
+          <button id="use-codex-directly" data-testid="use-codex-directly"></button>
+        </div>
+
       </section>
 
-      <section id="warden-section-agents" class="workspace-section" data-section="agents" data-testid="warden-section-agents">
+      <section id="warden-section-agents" class="workspace-section" data-section="agents" data-testid="warden-section-agents" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <div class="workspace-header-row">
             <div>
@@ -107,6 +169,24 @@
           <section class="agent-group" data-testid="agent-group-ready">
             <h3 class="agent-group-title">Ready to Run</h3>
             <div class="agent-group-cards">
+              <div id="marius-card" data-testid="marius-card" class="agent-card">
+                <div class="agent-card-top">
+                  <h3 class="agent-card-title">Marius Local Agent</h3>
+                  <span id="marius-status-pill" data-testid="marius-status-pill" class="status-pill status-ready">READY</span>
+                </div>
+                <div class="agent-card-meta-row" style="display: flex; gap: 12px; margin-bottom: 8px; font-size: 13px; color: var(--fg-muted);">
+                  <span class="agent-type-label">Provider: <span id="marius-provider-label" style="font-weight: 500;">Ollama</span></span>
+                  <span class="agent-mode-label">Model: <span id="marius-model-label" style="font-weight: 500;">auto</span></span>
+                  <span class="agent-mode-label">Profile: <span id="marius-profile-label" style="font-weight: 500;">fast</span></span>
+                </div>
+                <p class="agent-card-copy">Resident McServer assistant powered by local Ollama models.</p>
+                <div class="agent-card-actions">
+                  <button id="open-marius-chat-btn" class="btn primary" type="button">Open Chat</button>
+                  <button id="marius-test-drive-btn" class="btn" type="button" style="display:none;">Test Drive</button>
+                  <button id="marius-context-btn" class="btn" type="button">Context</button>
+                </div>
+              </div>
+
               <div id="codex-card" data-testid="codex-card" class="agent-card">
                 <div class="agent-card-top">
                   <h3 class="agent-card-title">Codex CLI</h3>
@@ -137,19 +217,26 @@
 
       </section>
 
-      <section id="warden-section-tasks" class="workspace-section" data-section="tasks" data-testid="warden-section-tasks">
+      <section id="warden-section-tasks" class="workspace-section" data-section="tasks" data-testid="warden-section-tasks" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <h2 class="workspace-title">Tasks</h2>
           <p class="workspace-subhead">Captain plan steps and supervised work items.</p>
         </header>
         <div class="empty-state-card" data-testid="tasks-empty-state">
           <h3>No active task plan yet.</h3>
-          <p>Use Develop Plan to create a supervised plan. Captain steps will appear here.</p>
+          <p>Type a build/fix request in the Command Center box, or use Develop Plan for a supervised multi-step plan.</p>
           <button type="button" class="btn primary" data-action="develop-plan" data-testid="develop-plan-tasks">Develop Plan</button>
+        </div>
+        <div id="tasks-board" class="cc-card cc-card-wide" data-testid="tasks-board" style="display:none;">
+          <header class="cc-card-header">
+            <h3 id="tasks-board-title">Active plan</h3>
+            <span class="cc-card-sub" id="tasks-board-meta"></span>
+          </header>
+          <div id="tasks-board-steps" class="cc-card-body"></div>
         </div>
       </section>
 
-      <section id="warden-section-runs" class="workspace-section" data-section="runs" data-testid="warden-section-runs">
+      <section id="warden-section-runs" class="workspace-section" data-section="runs" data-testid="warden-section-runs" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
           <h2 class="workspace-title">Runs</h2>
           <p class="workspace-subhead">Live and completed agent sessions.</p>
@@ -162,10 +249,10 @@
         </div>
       </section>
 
-      <section id="warden-section-evidence" class="workspace-section" data-section="evidence" data-testid="warden-section-evidence">
+      <section id="warden-section-evidence" class="workspace-section" data-section="evidence" data-testid="warden-section-evidence" style="display:none;" aria-hidden="true">
         <header class="workspace-header">
-          <h2 class="workspace-title">Evidence</h2>
-          <p class="workspace-subhead">Proof artifacts from supervised agent work.</p>
+          <h2 class="workspace-title">Proof</h2>
+          <p class="workspace-subhead">What Warden did, what source or tool it used, and what changed — the evidence trail behind every action.</p>
         </header>
         <div id="evidence-type-filter" data-testid="evidence-type-filter" class="evidence-type-filter" style="display:none;">
           <button type="button" class="btn active" data-evidence-filter="all">All</button>
@@ -181,78 +268,459 @@
         </div>
       </section>
 
-      <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
-        <header class="workspace-header">
-          <h2 class="workspace-title">Settings</h2>
-          <p class="workspace-subhead">Captain planning and service configuration.</p>
+      <!-- ============================================================== -->
+      <!-- Memory Chat                                                   -->
+      <!-- ============================================================== -->
+      <section id="warden-section-memory" class="workspace-section mem-section" data-section="memory" data-testid="warden-section-memory">
+
+        <!-- Hidden legacy refs kept for JS compatibility -->
+        <div style="display:none;">
+          <span id="mem-stat-total"></span><span id="mem-stat-vectors"></span>
+          <span id="mem-stat-decisions"></span><span id="mem-stat-proofs"></span>
+          <span id="mem-stat-failures"></span><span id="mem-stat-handoffs"></span>
+          <button id="mem-refresh-btn"></button><button id="mem-new-btn"></button>
+          <span id="mem-identity-name"></span><span id="mem-identity-bio"></span>
+          <button id="mem-edit-identity-btn"></button>
+          <div id="mem-identity-projects"></div>
+          <input id="mem-search-input" /><button id="mem-search-btn"></button>
+          <div id="mem-filter-chips"></div>
+          <select id="mem-project-filter"></select>
+          <select id="mem-sort-select"></select>
+          <span id="mem-list-count"></span>
+          <div id="mem-list"></div>
+          <div id="mem-detail"></div>
+          <div id="mem-detail-kind-chip"></div>
+          <h4 id="mem-detail-title"></h4>
+          <button id="mem-detail-close"></button>
+          <div id="mem-detail-meta"></div>
+          <pre id="mem-detail-body"></pre>
+          <div id="mem-detail-tags"></div>
+          <button id="mem-forget-btn"></button>
+        </div>
+
+        <!-- Memory Chat with Trace Inspector -->
+        <div class="mem-chat-outer">
+
+        <!-- Trace Inspector (right side, hidden until first response) -->
+        <div id="mem-trace-inspector-pane" class="mem-trace-inspector" style="display:none;">
+          <div class="mem-trace-inspector-header">
+            <span>Marius Trace</span>
+            <button type="button" id="mem-trace-toggle" class="wa-icon-btn" title="Hide trace">◀</button>
+          </div>
+          <div id="mem-trace-inspector-list" class="wa-trace-list">
+            <div class="mem-trace-empty">Trace will appear here after a response.</div>
+          </div>
+        </div>
+
+      <!-- Memory Chat (full width) -->
+        <div class="mem-chat-pane mem-chat-fullwidth">
+          <div class="mem-chat-header">
+            <div class="mem-chat-header-left">
+              <span class="mem-chat-title">Warden Memory Agent</span>
+              <span id="mem-chat-model-label" class="mem-chat-model-label"></span>
+              <span class="mem-trace-note">Reports memory reads/writes into Marius Trace</span>
+            </div>
+            <div class="mem-chat-header-right">
+              <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
+              <button id="mem-chat-clear-btn" class="btn" type="button" data-testid="mem-chat-clear-btn">Clear</button>
+            </div>
+          </div>
+
+          <!-- Context snapshot (hidden by default) -->
+          <div id="mem-chat-context-panel" class="mem-chat-context-panel" style="display:none;" data-testid="mem-chat-context-panel">
+            <div class="mem-chat-context-header">
+              <strong>Current context snapshot</strong>
+              <button id="mem-chat-context-close" class="btn" type="button">✕</button>
+            </div>
+            <pre id="mem-chat-context-body" class="mem-chat-context-body">Loading…</pre>
+          </div>
+
+          <!-- Welcome state -->
+          <div id="mem-chat-welcome" class="mem-chat-welcome" data-testid="mem-chat-welcome">
+            <h3 class="mem-chat-welcome-heading">Warden Memory Agent</h3>
+            <p class="mem-chat-welcome-copy">Ask what you were working on, what changed, and what decisions were made.</p>
+            <div class="mem-chat-starters">
+              <button class="mem-starter-btn" data-msg="What was I working on last?">What was I working on last?</button>
+              <button class="mem-starter-btn" data-msg="What did I decide about Warden?">What did I decide about Warden?</button>
+              <button class="mem-starter-btn" data-msg="What are my recent failures or blockers?">Recent failures or blockers</button>
+              <button class="mem-starter-btn" data-msg="Give me a handoff brief for today.">Handoff brief for today</button>
+            </div>
+          </div>
+
+          <!-- Thread -->
+          <div id="mem-chat-thread" class="mem-chat-thread" data-testid="mem-chat-thread" style="display:none;"></div>
+
+          <!-- Input -->
+          <div class="mem-chat-input-area">
+            <div id="mem-chat-status" class="mem-chat-status" style="display:none;"></div>
+            <div class="mem-chat-input-row">
+              <textarea id="mem-chat-input" class="mem-chat-input" placeholder="Ask about past decisions, blockers, and project history…" rows="2" data-testid="mem-chat-input"></textarea>
+              <button id="mem-chat-send-btn" class="btn primary mem-chat-send-btn" type="button" data-testid="mem-chat-send-btn">Ask</button>
+            </div>
+          </div>
+        </div>
+
+        </div><!-- /mem-chat-outer -->
+
+      </section>
+
+      <!-- ═══════════════════════════ AGENT SECTION ═══════════════════════════ -->
+      <section id="warden-section-agent" class="workspace-section wa-section" data-section="agent" data-testid="warden-section-agent">
+        <header class="wa-topbar">
+          <div class="wa-topbar-left">
+            <h2 class="wa-title">Marius Agent</h2>
+            <span class="wa-subtitle">Ask anything — git, GitHub, memory, web</span>
+          </div>
+          <div class="wa-topbar-right">
+            <span id="wa-model-badge" class="wa-model-badge"></span>
+            <button type="button" id="wa-clear-btn" class="wa-icon-btn" title="Clear conversation">↺</button>
+          </div>
         </header>
-        <div class="settings-grid">
-          <div class="settings-card">
-            <h3>Captain / OpenRouter</h3>
-            <div id="settings-captain-status" data-testid="settings-captain-status" class="settings-value">Loading Captain status...</div>
-            <div id="settings-captain-model" data-testid="settings-captain-model" class="settings-meta"></div>
-            <div id="settings-captain-key-source" data-testid="settings-captain-key-source" class="settings-meta"></div>
-            <button type="button" id="configure-captain-btn" data-testid="configure-captain" class="btn primary">Configure Captain</button>
+
+        <div class="wa-body">
+          <!-- Tool trace sidebar -->
+          <div class="wa-trace-pane" id="wa-trace-pane">
+            <div class="wa-trace-header">
+              <span>Marius Trace</span>
+              <button type="button" id="wa-trace-toggle" class="wa-icon-btn" title="Hide">◀</button>
+            </div>
+            <div class="wa-trace-list" id="wa-trace-list">
+              <div class="wa-trace-empty">Tools used will appear here.</div>
+            </div>
           </div>
-          <div class="settings-card">
-            <h3>Agent Registry</h3>
-            <p id="settings-agent-note" data-testid="settings-agent-note" class="settings-meta">Loading agent setup note...</p>
-          </div>
-          <div class="settings-card" data-testid="settings-safety-card">
-            <h3>Safety</h3>
-            <ul class="settings-safety-list" data-testid="settings-safety-list">
-              <li id="settings-public-runner" data-testid="settings-public-runner">Public runner: Disabled on public service</li>
-              <li id="settings-private-runner" data-testid="settings-private-runner">Private runner: Available only on private service</li>
-              <li id="settings-shell-input" data-testid="settings-shell-input">Arbitrary shell input: Disabled</li>
-              <li id="settings-agent-registration" data-testid="settings-agent-registration">Agent registration: Private only</li>
-            </ul>
-          </div>
-          <div class="settings-card">
-            <h3>Codex CLI</h3>
-            <p id="settings-codex-status" data-testid="settings-codex-status" class="settings-meta">Loading Codex status...</p>
-          </div>
-          <div class="settings-card">
-            <h3>Jules Remote</h3>
-            <p id="settings-jules-status" data-testid="settings-jules-status" class="settings-meta">Loading Jules status...</p>
+
+          <!-- Main chat -->
+          <div class="wa-chat-pane">
+            <!-- Welcome state -->
+            <div class="wa-welcome" id="wa-welcome">
+              <div class="wa-welcome-icon">⬡</div>
+              <h3 class="wa-welcome-title">What do you want to know?</h3>
+              <p class="wa-welcome-sub">Marius pulls from git, GitHub PRs &amp; issues, project memory, and the web.</p>
+              <div class="wa-starters">
+                <button type="button" class="wa-starter-btn" data-prompt="Where we at with Warden?">Where we at with Warden?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What's blocking us right now?">What's blocking us right now?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="Show me open PRs and recent commits">Show me open PRs and recent commits</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What decisions have we made about Warden architecture?">Architecture decisions</button>
+                <button type="button" class="wa-starter-btn" data-prompt="What did I work on last?">What did I work on last?</button>
+                <button type="button" class="wa-starter-btn" data-prompt="Any recent failures or blockers in memory?">Recent failures or blockers</button>
+              </div>
+            </div>
+
+            <!-- Thread -->
+            <div class="wa-thread" id="wa-thread" style="display:none;"></div>
+
+            <!-- Status bar -->
+            <div class="wa-status" id="wa-status"></div>
+
+            <!-- Input -->
+            <div class="wa-input-row">
+              <textarea
+                id="wa-input"
+                class="wa-input"
+                placeholder="Ask Warden anything… (Enter to send, Shift+Enter for newline)"
+                rows="1"
+              ></textarea>
+              <button type="button" id="wa-send-btn" class="wa-send-btn" title="Send">▶</button>
+            </div>
           </div>
         </div>
       </section>
+
+      <!-- ════════════════════ MODEL GATEWAY CONTROL ROOM ════════════════════ -->
+      <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
+
+        <div class="gw-intro-banner">
+          <strong>Gateway Status</strong> — Warden routes AI requests locally through a privacy-preserving model proxy. This page shows which AI providers are reachable and how requests are routed. You don't need to configure anything here to use Marius Agent or Memory Chat.
         </div>
 
-        <aside id="operator-inspector" class="operator-inspector" data-testid="operator-inspector">
-          <div class="inspector-card" data-testid="inspector-next-move">
-            <h3 class="inspector-title">Next Move</h3>
-            <p id="inspector-next-move-copy" data-testid="inspector-next-move-copy" class="inspector-copy">Loading operator guidance...</p>
-            <div class="inspector-actions">
+        <!-- ── Summary strip ──────────────────────────────────────────────── -->
+        <div class="gw-summary-strip">
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Gateway</div>
+            <div class="gw-stat-value" id="gw-stat-status-val">Checking…</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Active Route</div>
+            <div class="gw-stat-value" id="gw-stat-route-val">—</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Privacy Guard</div>
+            <div class="gw-stat-value">Private routing enforced</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Context Savings</div>
+            <div class="gw-stat-value" id="gw-stat-savings-val">—</div>
+          </div>
+          <button type="button" id="gw-refresh-btn" class="gw-refresh-btn" title="Refresh status">↺</button>
+        </div>
+
+        <div class="gw-body">
+
+          <!-- ── Route Preview ───────────────────────────────────────────── -->
+          <section class="gw-block">
+            <div class="gw-block-header">
+              <h3 class="gw-section-title">Route Preview</h3>
+              <span class="gw-quiet-badge">No tokens spent</span>
+            </div>
+            <div class="gw-route-layout">
+              <div class="gw-route-input-col">
+                <textarea id="gw-sim-input" class="gw-textarea" rows="4"
+                  placeholder="Describe a task — e.g. fix the login bug in auth.py"></textarea>
+                <button type="button" id="gw-sim-btn" class="gw-primary-btn">Preview Route</button>
+              </div>
+              <div class="gw-route-result-col">
+                <div id="gw-sim-result" class="gw-sim-result">
+                  <span class="gw-sim-hint">Enter a task to preview routing.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── Provider Health ────────────────────────────────────────── -->
+          <section class="gw-block">
+            <h3 class="gw-section-title">Provider Health</h3>
+            <div id="gw-providers"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <!-- ── Model Aliases ──────────────────────────────────────────── -->
+          <section class="gw-block">
+            <h3 class="gw-section-title">Model Aliases</h3>
+            <div id="gw-aliases"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <!-- ── Diagnostics (collapsed) ────────────────────────────────── -->
+          <section class="gw-block gw-diag-section">
+            <button type="button" class="gw-diag-toggle" id="gw-diag-toggle" aria-expanded="false">
+              <span>Diagnostics</span>
+              <span class="gw-toggle-caret" aria-hidden="true">›</span>
+            </button>
+            <div class="gw-diag-body" id="gw-diag-body" hidden>
+
+              <!-- Context Budget -->
+              <div class="gw-diag-block">
+                <h4 class="gw-diag-title">Context Budget</h4>
+                <p class="gw-diag-desc">See what Warden keeps, drops, or compresses for a given prompt.</p>
+                <textarea id="gw-ctx-input" class="gw-textarea" rows="2"
+                  placeholder="Describe what you'd send…"></textarea>
+                <div class="gw-ctx-controls">
+                  <select id="gw-ctx-alias" class="gw-select">
+                    <option value="">auto-route</option>
+                    <option value="warden-local">warden-local</option>
+                    <option value="warden-fast">warden-fast</option>
+                    <option value="warden-free">warden-free</option>
+                    <option value="warden-code">warden-code</option>
+                    <option value="warden-deep">warden-deep</option>
+                  </select>
+                  <button type="button" id="gw-ctx-btn" class="gw-secondary-btn">Inspect</button>
+                </div>
+                <div id="gw-ctx-result" class="gw-ctx-result" style="display:none;"></div>
+              </div>
+
+              <!-- Recent Traces -->
+              <div class="gw-diag-block">
+                <div class="gw-diag-title-row">
+                  <h4 class="gw-diag-title">Recent Traces</h4>
+                  <button type="button" id="gw-traces-refresh" class="gw-link-btn">Refresh</button>
+                </div>
+                <div id="gw-trace-timeline" class="gw-trace-timeline">
+                  <div class="gw-loading">Loading…</div>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+        </div>
+      </section>
+
+      <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
+        <header class="workspace-header">
+          <h2 class="workspace-title">Settings</h2>
+          <p class="workspace-subhead">Connect accounts, manage your Brain vault, and check what's set up.</p>
+        </header>
+
+        <!-- Connectors -->
+        <div class="settings-section-header">
+          <h3 class="settings-section-title">Account Connectors</h3>
+          <p class="settings-section-sub">Connect mail accounts to let Marius search your inbox. Credentials are stored locally — never sent to agents or included in API responses.</p>
+        </div>
+        <div id="connectors-provider-list" class="connectors-provider-list" data-testid="connectors-provider-list">
+          <div class="connectors-loading">Loading providers…</div>
+        </div>
+
+        <!-- Brain / Vault -->
+        <div class="settings-section-header" style="margin-top:28px;">
+          <h3 class="settings-section-title">Brain &amp; Vault</h3>
+          <p class="settings-section-sub">Where Warden Watcher captures and mail saves end up — a local, Obsidian-compatible Markdown vault.</p>
+        </div>
+        <div class="settings-grid settings-grid-brain">
+          <div class="settings-card" id="brain-vault-card" data-testid="brain-vault-card">
+            <h3>Local Vault</h3>
+            <div id="brain-vault-status" class="settings-value">Loading…</div>
+            <div id="brain-vault-meta" class="settings-meta"></div>
+            <div class="button-row" style="margin-top:8px;">
+              <button type="button" id="brain-vault-init-btn" class="btn">Initialize Vault</button>
+              <button type="button" id="brain-vault-reindex-btn" class="btn">Reindex</button>
+            </div>
+            <div id="brain-vault-action-status" class="settings-meta"></div>
+          </div>
+          <div class="settings-card" data-testid="brain-mirror-card">
+            <h3>Google Brain Mirror</h3>
+            <div id="brain-mirror-status" class="settings-value">Loading…</div>
+            <p class="settings-meta">Optional. Mirrors your vault into Vertex AI Search for hybrid recall. Off by default — everything works locally without it.</p>
+          </div>
+        </div>
+
+        <!-- Mail -->
+        <div class="settings-section-header" style="margin-top:28px;">
+          <h3 class="settings-section-title">Mail</h3>
+          <p class="settings-section-sub">Search a connected inbox. Read-only — no send, delete, or bulk actions. Save anything useful into Brain.</p>
+        </div>
+        <div class="mail-test-panel" id="mail-test-panel">
+          <div class="mail-test-row">
+            <select id="mail-test-account" class="connector-select">
+              <option value="">— select account —</option>
+            </select>
+            <input type="text" id="mail-test-query" class="connector-input" placeholder="Search query (e.g. invoice, from:boss@co.com)" />
+            <button type="button" id="mail-test-search-btn" class="btn primary" style="white-space:nowrap;">Search Mail</button>
+          </div>
+          <div id="mail-test-results" class="mail-test-results" style="display:none;"></div>
+          <p class="connector-provider-note" style="margin-top:8px;">Agents never receive raw tokens or passwords. Mail send is disabled unless explicitly enabled.</p>
+        </div>
+
+        <!-- Advanced: service configuration -->
+        <details class="cc-plan-details" style="margin-top:28px;" data-testid="settings-advanced-details">
+          <summary class="cc-plan-summary">Advanced: service configuration (Captain, agents, safety)</summary>
+          <div class="settings-grid" style="margin-top:12px;">
+            <div class="settings-card">
+              <h3>Captain / OpenRouter</h3>
+              <div id="settings-captain-status" data-testid="settings-captain-status" class="settings-value">Loading Captain status...</div>
+              <div id="settings-captain-model" data-testid="settings-captain-model" class="settings-meta"></div>
+              <div id="settings-captain-key-source" data-testid="settings-captain-key-source" class="settings-meta"></div>
+              <button type="button" id="configure-captain-btn" data-testid="configure-captain" class="btn primary">Configure Captain</button>
+            </div>
+            <div class="settings-card">
+              <h3>Agent Registry</h3>
+              <p id="settings-agent-note" data-testid="settings-agent-note" class="settings-meta">Loading agent setup note...</p>
+            </div>
+            <div class="settings-card" data-testid="settings-safety-card">
+              <h3>Safety</h3>
+              <ul class="settings-safety-list" data-testid="settings-safety-list">
+                <li id="settings-public-runner" data-testid="settings-public-runner">Public runner: Disabled on public service</li>
+                <li id="settings-private-runner" data-testid="settings-private-runner">Private runner: Available only on private service</li>
+                <li id="settings-shell-input" data-testid="settings-shell-input">Arbitrary shell input: Disabled</li>
+                <li id="settings-agent-registration" data-testid="settings-agent-registration">Agent registration: Private only</li>
+              </ul>
+            </div>
+            <div class="settings-card">
+              <h3>Codex CLI</h3>
+              <p id="settings-codex-status" data-testid="settings-codex-status" class="settings-meta">Loading Codex status...</p>
+            </div>
+            <div class="settings-card">
+              <h3>Jules Remote</h3>
+              <p id="settings-jules-status" data-testid="settings-jules-status" class="settings-meta">Loading Jules status...</p>
+            </div>
+          </div>
+        </details>
+
+      </section>
+        </div>
+
+        <aside id="operator-inspector" class="operator-inspector" data-testid="operator-inspector" style="display:none;" aria-hidden="true">
+          <div class="inspector-card cc-card" data-testid="inspector-next-move">
+            <h3 class="inspector-title">Next Best Move</h3>
+            <div id="cc-next-action" class="cc-card-body"><p class="muted">Loading…</p></div>
+            <!-- legacy hooks kept for JS compatibility, not shown -->
+            <p id="inspector-next-move-copy" data-testid="inspector-next-move-copy" class="inspector-copy" style="display:none;"></p>
+            <div class="inspector-actions" style="display:none;">
               <button type="button" class="btn primary" id="inspector-develop-plan" data-action="develop-plan" data-testid="inspector-develop-plan">Develop Plan</button>
               <button type="button" class="btn" id="inspector-view-codex" data-testid="inspector-view-codex">View Codex</button>
             </div>
           </div>
-          <div class="inspector-card" data-testid="control-room-status">
-            <h3 class="inspector-title">Control Room Status</h3>
-            <ul class="control-room-list">
-              <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
-              <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
-              <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
-              <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
-            </ul>
+
+          <div class="inspector-card cc-card" data-testid="cc-card-connections">
+            <h3 class="inspector-title">Connected Sources</h3>
+            <div id="cc-connections-list" class="cc-card-body"><p class="muted">Loading…</p></div>
           </div>
-          <div class="inspector-card" data-testid="inspector-connected-agents">
-            <h3 class="inspector-title">Connected Agents</h3>
-            <ul class="control-room-list">
-              <li id="inspector-captain-agent" data-testid="inspector-captain-agent">Captain — Not configured</li>
-              <li id="inspector-codex-agent" data-testid="inspector-codex-agent">Codex CLI — Disabled</li>
-              <li id="inspector-jules-agent" data-testid="inspector-jules-agent">Jules Remote — Planning only</li>
-            </ul>
-            <button type="button" id="inspector-refresh-agents" data-testid="inspector-refresh-agents" class="btn" style="margin-top:8px;">Refresh Status</button>
+
+          <div class="inspector-card cc-card" data-testid="cc-card-trace">
+            <h3 class="inspector-title">Recent Proof</h3>
+            <div id="cc-trace-list" class="cc-card-body"><p class="muted">Loading…</p></div>
           </div>
-          <div class="inspector-card" data-testid="inspector-proof-gates">
-            <h3 class="inspector-title">Proof Gates</h3>
-            <div id="inspector-gates-summary" data-testid="inspector-gates-summary" class="inspector-copy">No proof gates yet.</div>
-          </div>
+
+          <details class="inspector-advanced" data-testid="inspector-advanced-status">
+            <summary class="cc-plan-summary">Advanced: System Status</summary>
+            <div class="inspector-card" data-testid="control-room-status">
+              <h3 class="inspector-title">Control Room Status</h3>
+              <ul class="control-room-list">
+                <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
+                <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
+                <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
+                <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
+              </ul>
+            </div>
+            <div class="inspector-card" data-testid="inspector-connected-agents">
+              <h3 class="inspector-title">Connected Agents (raw)</h3>
+              <ul class="control-room-list">
+                <li id="inspector-captain-agent" data-testid="inspector-captain-agent">Captain — Not configured</li>
+                <li id="inspector-codex-agent" data-testid="inspector-codex-agent">Codex CLI — Disabled</li>
+                <li id="inspector-jules-agent" data-testid="inspector-jules-agent">Jules Remote — Planning only</li>
+              </ul>
+              <button type="button" id="inspector-refresh-agents" data-testid="inspector-refresh-agents" class="btn" style="margin-top:8px;">Refresh Status</button>
+            </div>
+            <div class="inspector-card" data-testid="inspector-proof-gates">
+              <h3 class="inspector-title">Proof Gates</h3>
+              <div id="inspector-gates-summary" data-testid="inspector-gates-summary" class="inspector-copy">No proof gates yet.</div>
+            </div>
+          </details>
         </aside>
       </div>
     </main>
+  </div>
+
+  <!-- New Memory Modal -->
+  <div id="mem-new-modal" data-testid="mem-new-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:10010;">
+    <div style="background:var(--bg-2);border:1px solid var(--line);padding:20px;width:90%;max-width:560px;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+      <h3 style="margin:0 0 14px;">Remember Something</h3>
+      <div style="display:grid;gap:10px;">
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Title (optional)</label>
+          <input id="mem-new-title" data-testid="mem-new-title" style="width:100%;padding:7px;" placeholder="Short label…" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="display:block;font-size:0.82em;margin-bottom:3px;">Kind</label>
+            <select id="mem-new-kind" data-testid="mem-new-kind" style="width:100%;padding:7px;">
+              <option value="user_note">Note</option>
+              <option value="decision">Decision</option>
+              <option value="proof">Proof</option>
+              <option value="failure">Failure</option>
+              <option value="handoff">Handoff</option>
+              <option value="constraint">Constraint</option>
+              <option value="claim">Claim</option>
+              <option value="acceptance_test">Acceptance Test</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.82em;margin-bottom:3px;">Project</label>
+            <input id="mem-new-project" data-testid="mem-new-project" style="width:100%;padding:7px;" placeholder="e.g. warden" />
+          </div>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Tags (comma separated)</label>
+          <input id="mem-new-tags" data-testid="mem-new-tags" style="width:100%;padding:7px;" placeholder="e.g. agent, memory, wip" />
+        </div>
+        <div>
+          <label style="display:block;font-size:0.82em;margin-bottom:3px;">Content <span style="color:var(--bad)">*</span></label>
+          <textarea id="mem-new-content" data-testid="mem-new-content" style="width:100%;padding:7px;min-height:100px;font-family:inherit;" placeholder="What should Warden remember?"></textarea>
+        </div>
+      </div>
+      <div id="mem-new-error" data-testid="mem-new-error" style="color:var(--bad);font-size:0.82em;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button id="mem-new-submit" data-testid="mem-new-submit" class="btn primary" type="button">Save Memory</button>
+        <button id="mem-new-cancel" data-testid="mem-new-cancel" class="btn" type="button">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- Add Agent Modal -->
@@ -488,6 +956,91 @@
     </div>
   </div>
 
-  <script src="./app.js"></script>
+  <!-- Marius Chat Modal -->
+  <div id="marius-chat-modal" data-testid="marius-chat-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10005;">
+    <div style="background:var(--bg-2); border:1px solid var(--line); width:90%; max-width:800px; height:85vh; max-height:800px; border-radius:8px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+      <div style="padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; background:var(--bg-1);">
+        <h3 style="margin:0; font-size:16px;">Marius Local Agent</h3>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <select id="marius-chat-profile-select" class="btn" style="padding:4px 8px; font-size:13px; height:auto; width:auto; border-radius:4px; appearance:auto;">
+            <option value="fast">fast</option>
+            <option value="balanced">balanced</option>
+            <option value="code">code</option>
+            <option value="deep">deep</option>
+          </select>
+          <select id="marius-chat-model-select" class="btn" style="padding:4px 8px; font-size:13px; height:auto; width:auto; border-radius:4px; appearance:auto;"></select>
+          <span id="marius-chat-provider-mode" style="font-size:12px; color:var(--muted); padding:4px 8px; border:1px solid var(--line); border-radius:4px; margin-right:4px;">local</span>
+          <button type="button" id="marius-chat-test-drive-btn" class="btn">Test Drive</button>
+          <button type="button" id="marius-chat-context-btn" class="btn">Show Context</button>
+          <button type="button" id="marius-chat-close-btn" class="btn" style="margin-left:8px;">Close</button>
+        </div>
+      </div>
+      <div id="marius-chat-messages" style="flex:1; padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:16px; background:var(--bg-0);">
+        <!-- Messages will go here -->
+      </div>
+      <div style="padding:12px 16px; border-top:1px solid var(--line); background:var(--bg-1);">
+        <div id="marius-chat-error" style="color:var(--bad); font-size:13px; margin-bottom:8px; display:none;"></div>
+        <div id="marius-chat-progress" style="color:var(--muted); font-size:13px; margin-bottom:8px; display:none;">thinking...</div>
+        <div style="display:flex; gap:8px;">
+          <textarea id="marius-chat-input" placeholder="Ask Marius..." style="flex:1; padding:10px; border-radius:6px; border:1px solid var(--line); background:var(--bg-2); color:var(--fg); resize:none; height:44px; font-family:inherit;"></textarea>
+          <button type="button" id="marius-chat-send-btn" class="btn primary" style="align-self:flex-end; height:44px;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Marius Model/Test-Drive Modal -->
+  <div id="marius-model-modal" data-testid="marius-model-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10006;">
+    <div style="background:var(--bg-2); border:1px solid var(--line); width:90%; max-width:600px; max-height:85vh; border-radius:8px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+      <div style="padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; background:var(--bg-1);">
+        <h3 id="marius-model-modal-title" style="margin:0; font-size:16px;">Marius Models & Benchmarks</h3>
+        <button type="button" id="marius-model-close-btn" class="btn">Close</button>
+      </div>
+      <div style="flex:1; padding:20px; overflow-y:auto;">
+        <div style="margin-bottom:20px;">
+          <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--fg);">Current Status</h4>
+          <div style="font-size:13px; color:var(--muted); line-height:1.6;">
+            Profile: <span id="marius-model-status-profile" style="color:var(--fg);"></span><br>
+            Forced Model: <span id="marius-model-status-forced" style="color:var(--fg);"></span><br>
+            Mode: <span id="marius-model-status-mode" style="color:var(--fg);"></span>
+          </div>
+        </div>
+        
+        <div style="margin-bottom:20px;">
+          <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--fg);">Available Local Models</h4>
+          <div id="marius-model-available-list" style="font-size:13px; color:var(--muted); background:var(--bg-1); padding:10px; border-radius:6px; border:1px solid var(--line); font-family:monospace;"></div>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--fg);">Missing Recommended Models</h4>
+          <div id="marius-model-missing-list" style="font-size:13px; color:var(--muted); background:var(--bg-1); padding:10px; border-radius:6px; border:1px solid var(--line); font-family:monospace;"></div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <button type="button" id="marius-model-run-bench-btn" class="btn primary">Run Quick Benchmark</button>
+        </div>
+        <div id="marius-bench-progress" style="display:none; font-size:13px; color:var(--warn, #f0c66a); margin-bottom:10px;">Benchmarking fast/chat candidates... this may take a minute.</div>
+        
+        <div id="marius-bench-results" style="display:none; margin-top:20px;">
+          <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--fg);">Benchmark Results</h4>
+          <div id="marius-bench-table-container" style="background:var(--bg-1); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:12px; overflow-x:auto; white-space:pre; font-family:monospace; margin-bottom:16px; color:var(--muted);"></div>
+          
+          <h4 style="margin:0 0 8px 0; font-size:14px; color:var(--fg);">Recommendations</h4>
+          <div style="font-size:13px; color:var(--muted); line-height:1.6; background:var(--bg-1); padding:10px; border-radius:6px; border:1px solid var(--line); margin-bottom:16px;">
+            Best Terminal Default: <span id="marius-bench-rec-best" style="color:var(--good); font-weight:bold;"></span><br>
+            Fastest Safe Model: <span id="marius-bench-rec-fastest" style="color:var(--fg);"></span><br>
+            Best Code Model: <span id="marius-bench-rec-code" style="color:var(--fg);"></span>
+          </div>
+          
+          <button type="button" id="marius-model-apply-rec-btn" class="btn good">Apply Recommended Default</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js?v=phase2-redesign"></script>
+  <script src="./memory.js"></script>
+  <script src="./agent.js"></script>
+  <script src="./gateway.js"></script>
 </body>
 </html>

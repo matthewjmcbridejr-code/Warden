@@ -1,73 +1,139 @@
-# Warden Control Room — 3-Minute Demo Script
+# Warden — 5-Minute Demo Script
 
-Use private service: `http://127.0.0.1:8125/web/warden/index.html`
+**URL:** `http://127.0.0.1:6969/web/warden/app.html`  
+**CLI:** `scripts/warden-chat`
 
-For screenshot/demo visuals without a live mission: `?demo=1` (clearly labeled simulated).
+> Warden is a local-first AI command center that remembers everything you work on, answers questions about what happened, develops plans, dispatches coding agents, and tracks proof.
+
+---
+
+## The Story (Say This Up Front)
+
+> "I built a personal AI command center. It watches what I work on — git commits, files I change, sites I browse, searches I run, things I type — and stores all of it as memory. Then I can ask it what happened, get a briefing on any project, develop a plan, and dispatch coding agents to execute it. The model gateway routes every AI call intelligently so nothing private leaves the machine unless I decide it should."
+
+---
 
 ## 1. Open Warden (15s)
 
-Open Control Room. Point out:
+Open `http://127.0.0.1:6969/web/warden/app.html`
 
-- Warden by Marius Systems
-- Left nav: Control Room, Missions, Agents, Runs, Evidence, Proof Gates, Runner Sessions
-- Top bar: Live indicator, Refresh, Command palette
+Point out the four tabs: **Command · Warden Chat · Memory Chat · Gateway Status**
 
-## 2. Explain Control Room (20s)
+> "Four tabs. That's the whole product. No clutter."
 
-Hero message: **Supervised control room for AI coding agents.**
+---
 
-Warden tracks missions, runs, transcripts, evidence, and proof gates before anything moves forward.
+## 2. Memory Chat — Ask What You Did (60s)
 
-## 3. Mission snapshot (25s)
+Click **Memory Chat** tab.
 
-Show mission progress card (or honest idle state in real mode).
+Type: `What did I just work on?`
 
-- Real mode: “No active mission” with next actions (Open Captain, Configure agents, View runner sessions)
-- Demo mode: active mission with progress bar
+Warden will pull from:
+- Git commits (branch, files changed, commit messages)
+- Browser activity (pages visited, searches, things typed)
+- Shell history
 
-## 4. Connected agents (20s)
+**What to show:** Warden knows the recent commits, knows what sites were visited, knows what was searched. No manual logging.
 
-Right rail **Connected Agents**:
+> "I didn't write any of that down. Warden captured it automatically — from git hooks, from a Chrome extension that captures every page I visit, every search I run, every form I fill out."
 
-- Codex CLI — private runnable when configured
-- Jules — planning only, not executable
-- Captain — orchestrator when configured
+Follow up: `What did I search for today?`
 
-## 5. Proof gates (25s)
+Expected: Google searches like `kali ai tools`, `was ask jeeves retired`, `warden memory architecture`.
 
-Right rail **Proof Gates** + Proof Gates tab:
+> "That's a real Google search I ran during testing. Warden remembered it."
 
-- Passed / pending / blocked / needs evidence counts
-- Human review required — no auto-dispatch
+---
 
-## 6. Runner session safety (25s)
+## 3. Warden Chat — Project Status (45s)
 
-Right rail **Runner Sessions**:
+Click **Warden Chat** tab.
 
-- Active / max / stale counts
-- Limit warning when at capacity
-- Dry-run cleanup (show candidates, no kills)
+Type: `Where are we at with Warden?`
 
-## 7. Dry-run cleanup (20s)
+Warden Agent will use tools — git log, file inspection, memory context — and give a structured briefing.
 
-Click **Dry-run cleanup** on private service.
+> "This agent has access to the actual repo. It can read files, check git history, run searches. It's not guessing."
 
-Show modal: `dry_run: true`, candidates listed, `killed: []`.
+---
 
-## 8. Next Move (15s)
+## 4. Command — Develop a Plan (60s)
 
-Right rail **Next Move** — operator guidance only; buttons route to manual UI.
+Click **Command** tab.
 
-## 9. Human approval gates (20s)
+Show the hero: `What do you want to build?`
 
-Open a run or gate review (if available). Emphasize:
+Type a small, real goal: `Add a --plain flag to the mem subcommand in warden-chat`
 
-- Approve / block / request more evidence
-- Mark step complete manually after approval
-- No automatic progression
+Select **Claude Code** chip. Click **Develop Plan**.
 
-## 10. Close (15s)
+Wait ~5s. Captain returns 3–5 bounded steps.
 
-> AI agents work faster when Warden keeps them supervised.
+> "Captain is the orchestrator. It breaks the goal into steps that a coding agent can execute one at a time. I review the plan before anything runs. Nothing is automatic."
 
-Public runner disabled. Jules not executable. Secrets never printed.
+Point out the Deploy button is disabled:
+
+> "Deploy is greyed out. That's intentional — dispatching to a real agent requires a private runner to be configured. The plan is ready; execution is a separate gate."
+
+---
+
+## 5. Gateway Status — Supporting Infrastructure (30s)
+
+Click **Gateway Status** tab.
+
+Show the provider health table and alias summary strip.
+
+> "This is the supporting infrastructure. Six model aliases — local Ollama, Groq for speed, OpenRouter for depth. Every AI call in Warden routes through this. Private content never goes to the free tier. That's the privacy guard."
+
+Keep this brief. Gateway is the engine, not the product.
+
+---
+
+## 6. CLI Demo (30s)
+
+In terminal:
+
+```bash
+scripts/warden-chat mem "What did I search for today?"
+```
+
+Then:
+
+```bash
+scripts/warden-chat ask "What files changed in the last three commits?"
+```
+
+> "Same memory, same agents, from the terminal. No browser required."
+
+---
+
+## 7. Close (15s)
+
+> "Everything I work on goes into Warden memory. I can ask about it anytime — in the UI, in the terminal, or from another agent. The Chrome extension captures browsing silently. Git hooks capture commits. The memory watcher captures file changes and shell history. Nothing is manual. Warden just knows."
+
+---
+
+## What's Live vs. What's Not
+
+| Feature | Status |
+|---|---|
+| Memory capture (git, files, shell) | Live via memory watcher daemon |
+| Memory capture (browser) | Live via Chrome extension |
+| Memory Agent chat | Live |
+| Warden Agent chat (tools) | Live |
+| Captain plan generation | Live (OpenRouter key required) |
+| Agent dispatch (Deploy) | Not yet — requires private runner |
+| LiteLLM proxy routing | Live (Ollama local, cloud via env keys) |
+
+---
+
+## Proof Point
+
+Memory end-to-end was verified on 2026-06-29:
+
+- Chrome extension installed, real session performed
+- Activity captured: Google searches, Snyk browsing + form input, GitHub OAuth, Wikipedia, Hyperagent
+- Memory Agent recalled activity accurately without being told what to look for
+- Proof memory ID: `proof-browser-ext-e2e-verified`
+- 68 total memories at time of proof, 34 from browser extension

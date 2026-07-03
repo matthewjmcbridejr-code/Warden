@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Warden Brain ingest for Obsidian notes
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+Unit=warden-brain-ingest-obsidian.service
+
+[Install]
+WantedBy=timers.target

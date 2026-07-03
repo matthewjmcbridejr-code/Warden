@@ -1,5 +1,25 @@
 (function () {
   const MCH = "/api/mcharness";
+  const UI_BUILD_VERSION = "phase2-redesign";
+
+  // Proof-of-freshness: fetch the server's actual on-disk commit + file
+  // hashes and render them in the sidebar. If this doesn't match
+  // `sha256sum web/warden/app.css`, the browser is not talking to the
+  // service you think it is — not a caching mystery, a fact you can check.
+  async function loadBuildInfo() {
+    const el = document.getElementById("warden-build-info");
+    if (!el) return;
+    try {
+      const info = await requestJson(`${MCH}/warden/build-info`);
+      const shortCommit = info.commit ? info.commit.slice(0, 7) : "unknown";
+      const cssHash = info.app_css_hash ? info.app_css_hash.slice(0, 10) : "unknown";
+      const jsHash = info.app_js_hash ? info.app_js_hash.slice(0, 10) : "unknown";
+      el.textContent = `Build: ${shortCommit} (${info.branch || "?"}) · CSS: ${cssHash}`;
+      el.title = `commit ${info.commit || "unknown"}\napp.html ${info.app_html_hash || "unknown"}\napp.css ${info.app_css_hash || "unknown"}\napp.js ${jsHash === "unknown" ? "unknown" : info.app_js_hash}\nui build tag: ${UI_BUILD_VERSION}`;
+    } catch (e) {
+      el.textContent = "Build: unavailable";
+    }
+  }
   const JULES_VIEW_URL = "https://jules.google.com/session";
   const CAPTAIN_PROFILE_BASE = "/web/warden/agent_profiles";
   const CAPTAIN_PROFILE_STORAGE_KEY = "warden.captain.instructionProfile";
@@ -183,295 +203,6 @@
     return { projectId, repoPath };
   }
 
-  function memoryMatchesProject(memory, project) {
-    const scope = String(memory.scope || "").toLowerCase();
-    const projectId = String(memory.project_id || "").toLowerCase();
-    const wanted = String(project.projectId || "").toLowerCase();
-    return scope === wanted
-      || projectId === wanted
-      || (!!project.repoPath && memory.repo_path === project.repoPath);
-  }
-
-  function memoryTimestamp(value) {
-    if (!value) return "";
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(new Date(value));
-    } catch (_error) {
-      return "";
-    }
-  }
-
-  function memoryCardHtml(memory) {
-    const title = redactVisibleMemory(memory.title || memory.kind || "Memory");
-    const summary = redactVisibleMemory(memory.summary || memory.content || "");
-    const kind = redactVisibleMemory(memory.kind || "note");
-    const tags = Array.isArray(memory.tags)
-      ? memory.tags.filter((tag) => String(tag).toLowerCase() !== String(kind).toLowerCase()).slice(0, 6)
-      : [];
-    const chips = [kind, ...tags].filter(Boolean).map((tag, index) => {
-      const kindClass = index === 0 ? ` kind-${String(kind).replace(/[^a-z0-9_-]/gi, "")}` : "";
-      return `<span class="memory-chip${kindClass}">${escapeHtml(redactVisibleMemory(tag))}</span>`;
-    }).join("");
-    const source = redactVisibleMemory(memory.source || "");
-    const sourceRef = redactVisibleMemory(memory.source_ref || "");
-    const created = memoryTimestamp(memory.created_at || memory.updated_at);
-    return `
-      <article class="memory-card" data-memory-id="${escapeHtml(memory.memory_id || "")}">
-        <div class="memory-card-top">
-          <h4 class="memory-card-title">${escapeHtml(title)}</h4>
-          <div class="memory-chip-row">${chips}</div>
-        </div>
-        <p class="memory-card-summary">${escapeHtml(summary)}</p>
-        <div class="memory-card-meta">
-          ${source ? `<span>${escapeHtml(source)}</span>` : ""}
-          ${sourceRef ? `<span>${escapeHtml(sourceRef)}</span>` : ""}
-          ${created ? `<span>${escapeHtml(created)}</span>` : ""}
-        </div>
-        <span class="memory-card-id">${escapeHtml(memory.memory_id || "")}</span>
-      </article>
-    `;
-  }
-
-  function renderMemoryList(targetId, memories, emptyCopy) {
-    const target = document.getElementById(targetId);
-    if (!target) return;
-    if (!memories.length) {
-      target.innerHTML = `<div class="memory-empty">${escapeHtml(emptyCopy)}</div>`;
-      return;
-    }
-    target.innerHTML = memories.map(memoryCardHtml).join("");
-  }
-
-  function renderUseAgentMemoryNote() {
-    const note = document.getElementById("use-agent-memory-note");
-    if (!note) return;
-    if (state.memory.available && state.memory.lastContext && (state.memory.lastContext.memory_count || 0) > 0) {
-      note.textContent = `Memory attached: ${state.memory.lastContext.memory_count} source memory${state.memory.lastContext.memory_count === 1 ? "" : "s"} ready for the next launch.`;
-      return;
-    }
-    if (state.memory.available) {
-      note.textContent = "Memory context will be attached when available.";
-      return;
-    }
-    note.textContent = "Memory attachment requires the private runner service.";
-  }
-
-  function setMemoryControlsEnabled(enabled) {
-    [
-      "memory-search-query",
-      "memory-note-title",
-      "memory-note-tags",
-      "memory-note-content",
-      "memory-note-kind",
-      "memory-context-agent",
-      "memory-context-prompt",
-      "memory-context-build",
-      "memory-refresh",
-    ].forEach((id) => {
-      const element = document.getElementById(id);
-      if (element) element.disabled = !enabled;
-    });
-    document.querySelectorAll("#memory-search-form button, #memory-remember-form button").forEach((button) => {
-      button.disabled = !enabled;
-    });
-  }
-
-  function renderMemoryStatus() {
-    const memoryState = state.memory;
-    const project = currentMemoryProject();
-    const status = document.getElementById("memory-status-value");
-    const detail = document.getElementById("memory-status-detail");
-    const count = document.getElementById("memory-count-value");
-    const projectValue = document.getElementById("memory-project-value");
-    const updated = document.getElementById("memory-updated-value");
-    const notice = document.getElementById("memory-private-notice");
-    if (status) status.textContent = memoryState.loading
-      ? "Checking…"
-      : memoryState.available
-        ? "Memory ready"
-        : memoryState.error
-          ? "Memory unavailable"
-          : "Private runner only";
-    if (detail) detail.textContent = memoryState.available ? "Private · available" : "Private runner only";
-    if (count) count.textContent = memoryState.available ? String(memoryState.memories.length) : "—";
-    if (projectValue) projectValue.textContent = redactVisibleMemory(project.projectId);
-    const newest = memoryState.memories[0];
-    if (updated) updated.textContent = newest
-      ? `Updated ${memoryTimestamp(newest.updated_at || newest.created_at)}`
-      : "No memories yet";
-    if (notice) notice.style.display = memoryState.available ? "none" : "block";
-    setMemoryControlsEnabled(memoryState.available && !memoryState.loading);
-    renderUseAgentMemoryNote();
-  }
-
-  async function loadMemory() {
-    const memoryState = state.memory;
-    memoryState.loading = true;
-    memoryState.error = "";
-    renderMemoryStatus();
-    try {
-      const [health, listing] = await Promise.all([
-        requestJson(`${MCH}/memory/health`),
-        requestJson(`${MCH}/memories`),
-      ]);
-      memoryState.available = !!health.ok;
-      memoryState.privateOnly = health.private_only !== false;
-      const project = currentMemoryProject();
-      memoryState.memories = (listing.memories || [])
-        .filter((memory) => memoryMatchesProject(memory, project))
-        .slice(0, 20);
-      renderMemoryList("memory-recent-list", memoryState.memories, "No memories saved for this project yet.");
-    } catch (error) {
-      memoryState.available = false;
-      memoryState.memories = [];
-      memoryState.error = error.message || "Memory unavailable.";
-      renderMemoryList("memory-recent-list", [], "Memory is private-runner-only on this service.");
-      renderMemoryList("memory-search-results", [], "Memory is unavailable on this service.");
-    } finally {
-      memoryState.loading = false;
-      renderMemoryStatus();
-    }
-  }
-
-  async function searchMemory(query) {
-    const status = document.getElementById("memory-search-status");
-    const project = currentMemoryProject();
-    const cleanQuery = String(query || "").trim().slice(0, 500);
-    if (!cleanQuery) {
-      state.memory.searchResults = state.memory.memories.slice();
-      renderMemoryList("memory-search-results", state.memory.searchResults, "No memories saved for this project yet.");
-      if (status) status.textContent = "";
-      return;
-    }
-    if (status) {
-      status.className = "memory-form-status";
-      status.textContent = "Searching…";
-    }
-    try {
-      const data = await requestJson(
-        `${MCH}/memories/search?q=${encodeURIComponent(cleanQuery)}&scope=${encodeURIComponent(project.projectId)}&limit=20`,
-      );
-      state.memory.searchResults = (data.memories || []).slice(0, 20);
-      renderMemoryList("memory-search-results", state.memory.searchResults, "No matching memories for this query.");
-      if (status) status.textContent = `${state.memory.searchResults.length} result${state.memory.searchResults.length === 1 ? "" : "s"}`;
-    } catch (error) {
-      renderMemoryList("memory-search-results", [], "Memory search unavailable.");
-      if (status) {
-        status.className = "memory-form-status error";
-        status.textContent = "Memory search unavailable.";
-      }
-    }
-  }
-
-  function parseMemoryTags(value) {
-    return String(value || "")
-      .split(",")
-      .map((tag) => tag.trim().toLowerCase())
-      .filter(Boolean)
-      .filter((tag, index, tags) => tags.indexOf(tag) === index)
-      .slice(0, 10);
-  }
-
-  async function rememberMemoryNote() {
-    const titleInput = document.getElementById("memory-note-title");
-    const kindInput = document.getElementById("memory-note-kind");
-    const tagsInput = document.getElementById("memory-note-tags");
-    const contentInput = document.getElementById("memory-note-content");
-    const status = document.getElementById("memory-remember-status");
-    const content = String(contentInput && contentInput.value || "").trim().slice(0, 5000);
-    if (!content) {
-      if (status) {
-        status.className = "memory-form-status error";
-        status.textContent = "Add a note first.";
-      }
-      return;
-    }
-    const project = currentMemoryProject();
-    if (status) {
-      status.className = "memory-form-status";
-      status.textContent = "Remembering…";
-    }
-    try {
-      const data = await requestJson(`${MCH}/memory/remember`, {
-        method: "POST",
-        body: {
-          scope: project.projectId,
-          project_id: project.projectId,
-          repo_path: project.repoPath || null,
-          title: String(titleInput && titleInput.value || "").trim().slice(0, 160) || null,
-          content,
-          kind: String(kindInput && kindInput.value || "user_note"),
-          tags: parseMemoryTags(tagsInput && tagsInput.value),
-          source: "manual",
-        },
-      });
-      if (!data.ok) throw new Error(data.error || "Memory was not saved.");
-      const returned = data.memory || {};
-      if (status) {
-        status.className = "memory-form-status success";
-        status.textContent = `Remembered ${redactVisibleMemory(returned.title || returned.memory_id || "note")}.`;
-      }
-      if (titleInput) titleInput.value = "";
-      if (tagsInput) tagsInput.value = "";
-      if (contentInput) contentInput.value = "";
-      await loadMemory();
-    } catch (error) {
-      if (status) {
-        status.className = "memory-form-status error";
-        status.textContent = "Memory could not be saved.";
-      }
-    }
-  }
-
-  async function buildMemoryContextPreview() {
-    const agent = document.getElementById("memory-context-agent");
-    const prompt = document.getElementById("memory-context-prompt");
-    const preview = document.getElementById("memory-context-preview");
-    const meta = document.getElementById("memory-context-meta");
-    const sources = document.getElementById("memory-context-sources");
-    const status = document.getElementById("memory-context-status");
-    const project = currentMemoryProject();
-    if (status) {
-      status.className = "memory-form-status";
-      status.textContent = "Building context…";
-    }
-    try {
-      const data = await requestJson(`${MCH}/memory/context-pack`, {
-        method: "POST",
-        body: {
-          project_id: project.projectId,
-          repo_path: project.repoPath || null,
-          agent: String(agent && agent.value || "codex_cli"),
-          prompt: String(prompt && prompt.value || "").trim().slice(0, 5000),
-          max_memories: 8,
-          max_chars: 6000,
-        },
-      });
-      state.memory.lastContext = data;
-      if (preview) preview.textContent = redactVisibleMemory(data.context || "No relevant memory for this task.");
-      if (meta) meta.textContent = `${data.memory_count || 0} memories${data.truncated ? " · truncated" : ""}`;
-      if (sources) {
-        const ids = Array.isArray(data.memory_ids) ? data.memory_ids : [];
-        sources.textContent = ids.length ? `Sources: ${redactVisibleMemory(ids.join(", "))}` : "No source memories.";
-      }
-      if (status) status.textContent = "";
-    } catch (error) {
-      if (preview) preview.textContent = "Context preview unavailable.";
-      if (meta) meta.textContent = "Unavailable";
-      if (sources) sources.textContent = "";
-      if (status) {
-        status.className = "memory-form-status error";
-        status.textContent = "Memory is private-runner-only.";
-      }
-    }
-    renderUseAgentMemoryNote();
-  }
-
   function assistantPayload() {
     const project = currentMemoryProject();
     const message = document.getElementById("assistant-message");
@@ -616,6 +347,279 @@
       if (status) {
         status.className = "memory-form-status";
         status.textContent = "Copy is unavailable in this browser.";
+      }
+    }
+  }
+
+  function memoryMatchesProject(memory, project) {
+    const scope = String(memory.scope || "").toLowerCase();
+    const projectId = String(memory.project_id || "").toLowerCase();
+    const wanted = String(project.projectId || "").toLowerCase();
+    return scope === wanted
+      || projectId === wanted
+      || (!!project.repoPath && memory.repo_path === project.repoPath);
+  }
+
+  function memoryTimestamp(value) {
+    if (!value) return "";
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date(value));
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function memoryCardHtml(memory) {
+    const title = redactVisibleMemory(memory.title || memory.kind || "Memory");
+    const summary = redactVisibleMemory(memory.summary || memory.content || "");
+    const kind = redactVisibleMemory(memory.kind || "note");
+    const tags = Array.isArray(memory.tags)
+      ? memory.tags.filter((tag) => String(tag).toLowerCase() !== String(kind).toLowerCase()).slice(0, 6)
+      : [];
+    const chips = [kind, ...tags].filter(Boolean).map((tag, index) => {
+      const kindClass = index === 0 ? ` kind-${String(kind).replace(/[^a-z0-9_-]/gi, "")}` : "";
+      return `<span class="memory-chip${kindClass}">${escapeHtml(redactVisibleMemory(tag))}</span>`;
+    }).join("");
+    const source = redactVisibleMemory(memory.source || "");
+    const sourceRef = redactVisibleMemory(memory.source_ref || "");
+    const created = memoryTimestamp(memory.created_at || memory.updated_at);
+    return `
+      <article class="memory-card" data-memory-id="${escapeHtml(memory.memory_id || "")}">
+        <div class="memory-card-top">
+          <h4 class="memory-card-title">${escapeHtml(title)}</h4>
+          <div class="memory-chip-row">${chips}</div>
+        </div>
+        <p class="memory-card-summary">${escapeHtml(summary)}</p>
+        <div class="memory-card-meta">
+          ${source ? `<span>${escapeHtml(source)}</span>` : ""}
+          ${sourceRef ? `<span>${escapeHtml(sourceRef)}</span>` : ""}
+          ${created ? `<span>${escapeHtml(created)}</span>` : ""}
+        </div>
+        <span class="memory-card-id">${escapeHtml(memory.memory_id || "")}</span>
+      </article>
+    `;
+  }
+
+  function renderMemoryList(targetId, memories, emptyCopy) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    if (!memories.length) {
+      target.innerHTML = `<div class="memory-empty">${escapeHtml(emptyCopy)}</div>`;
+      return;
+    }
+    target.innerHTML = memories.map(memoryCardHtml).join("");
+  }
+
+  function setMemoryControlsEnabled(enabled) {
+    [
+      "memory-search-query",
+      "memory-note-title",
+      "memory-note-tags",
+      "memory-note-content",
+      "memory-note-kind",
+      "memory-context-agent",
+      "memory-context-prompt",
+      "memory-context-build",
+      "memory-refresh",
+    ].forEach((id) => {
+      const element = document.getElementById(id);
+      if (element) element.disabled = !enabled;
+    });
+    document.querySelectorAll("#memory-search-form button, #memory-remember-form button").forEach((button) => {
+      button.disabled = !enabled;
+    });
+  }
+
+  function renderMemoryStatus() {
+    const memoryState = state.memory;
+    const project = currentMemoryProject();
+    const status = document.getElementById("memory-status-value");
+    const detail = document.getElementById("memory-status-detail");
+    const count = document.getElementById("memory-count-value");
+    const projectValue = document.getElementById("memory-project-value");
+    const updated = document.getElementById("memory-updated-value");
+    const notice = document.getElementById("memory-private-notice");
+    if (status) status.textContent = memoryState.loading
+      ? "Checking…"
+      : memoryState.available
+        ? "Memory ready"
+        : memoryState.error
+          ? "Memory unavailable"
+          : "Private runner only";
+    if (detail) detail.textContent = memoryState.available ? "Private · available" : "Private runner only";
+    if (count) count.textContent = memoryState.available ? String(memoryState.memories.length) : "—";
+    if (projectValue) projectValue.textContent = redactVisibleMemory(project.projectId);
+    const newest = memoryState.memories[0];
+    if (updated) updated.textContent = newest
+      ? `Updated ${memoryTimestamp(newest.updated_at || newest.created_at)}`
+      : "No memories yet";
+    if (notice) notice.style.display = memoryState.available ? "none" : "block";
+    setMemoryControlsEnabled(memoryState.available && !memoryState.loading);
+  }
+
+  async function loadMemory() {
+    const memoryState = state.memory;
+    memoryState.loading = true;
+    memoryState.error = "";
+    renderMemoryStatus();
+    try {
+      const [health, listing] = await Promise.all([
+        requestJson(`${MCH}/memory/health`),
+        requestJson(`${MCH}/memories`),
+      ]);
+      memoryState.available = !!health.ok;
+      memoryState.privateOnly = health.private_only !== false;
+      const project = currentMemoryProject();
+      memoryState.memories = (listing.memories || [])
+        .filter((memory) => memoryMatchesProject(memory, project))
+        .slice(0, 20);
+      renderMemoryList("memory-recent-list", memoryState.memories, "No memories yet.");
+    } catch (error) {
+      memoryState.available = false;
+      memoryState.memories = [];
+      memoryState.error = error.message || "Memory unavailable.";
+      renderMemoryList("memory-recent-list", [], "Memory is private-runner-only.");
+      renderMemoryList("memory-search-results", [], "Memory is unavailable on this service.");
+    } finally {
+      memoryState.loading = false;
+      renderMemoryStatus();
+    }
+  }
+
+  async function searchMemory(query) {
+    const status = document.getElementById("memory-search-status");
+    const project = currentMemoryProject();
+    const cleanQuery = String(query || "").trim().slice(0, 500);
+    if (!cleanQuery) {
+      state.memory.searchResults = state.memory.memories.slice();
+      renderMemoryList("memory-search-results", state.memory.searchResults, "No memories yet.");
+      if (status) status.textContent = "";
+      return;
+    }
+    if (status) {
+      status.className = "memory-form-status";
+      status.textContent = "Searching…";
+    }
+    try {
+      const data = await requestJson(
+        `${MCH}/memories/search?q=${encodeURIComponent(cleanQuery)}&scope=${encodeURIComponent(project.projectId)}&limit=20`,
+      );
+      state.memory.searchResults = (data.memories || []).slice(0, 20);
+      renderMemoryList("memory-search-results", state.memory.searchResults, "No matching memories.");
+      if (status) status.textContent = `${state.memory.searchResults.length} result${state.memory.searchResults.length === 1 ? "" : "s"}`;
+    } catch (error) {
+      renderMemoryList("memory-search-results", [], "Memory search unavailable.");
+      if (status) {
+        status.className = "memory-form-status error";
+        status.textContent = "Memory search unavailable.";
+      }
+    }
+  }
+
+  function parseMemoryTags(value) {
+    return String(value || "")
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean)
+      .filter((tag, index, tags) => tags.indexOf(tag) === index)
+      .slice(0, 10);
+  }
+
+  async function rememberMemoryNote() {
+    const titleInput = document.getElementById("memory-note-title");
+    const kindInput = document.getElementById("memory-note-kind");
+    const tagsInput = document.getElementById("memory-note-tags");
+    const contentInput = document.getElementById("memory-note-content");
+    const status = document.getElementById("memory-remember-status");
+    const content = String(contentInput && contentInput.value || "").trim().slice(0, 5000);
+    if (!content) {
+      if (status) {
+        status.className = "memory-form-status error";
+        status.textContent = "Add a note first.";
+      }
+      return;
+    }
+    const project = currentMemoryProject();
+    if (status) {
+      status.className = "memory-form-status";
+      status.textContent = "Remembering…";
+    }
+    try {
+      const data = await requestJson(`${MCH}/memory/remember`, {
+        method: "POST",
+        body: {
+          scope: project.projectId,
+          project_id: project.projectId,
+          repo_path: project.repoPath || null,
+          title: String(titleInput && titleInput.value || "").trim().slice(0, 160) || null,
+          content,
+          kind: String(kindInput && kindInput.value || "user_note"),
+          tags: parseMemoryTags(tagsInput && tagsInput.value),
+          source: "manual",
+        },
+      });
+      if (!data.ok) throw new Error(data.error || "Memory was not saved.");
+      const returned = data.memory || {};
+      if (status) {
+        status.className = "memory-form-status success";
+        status.textContent = `Remembered ${redactVisibleMemory(returned.title || returned.memory_id || "note")}.`;
+      }
+      if (titleInput) titleInput.value = "";
+      if (tagsInput) tagsInput.value = "";
+      if (contentInput) contentInput.value = "";
+      await loadMemory();
+    } catch (error) {
+      if (status) {
+        status.className = "memory-form-status error";
+        status.textContent = "Memory could not be saved.";
+      }
+    }
+  }
+
+  async function buildMemoryContextPreview() {
+    const agent = document.getElementById("memory-context-agent");
+    const prompt = document.getElementById("memory-context-prompt");
+    const preview = document.getElementById("memory-context-preview");
+    const meta = document.getElementById("memory-context-meta");
+    const sources = document.getElementById("memory-context-sources");
+    const status = document.getElementById("memory-context-status");
+    const project = currentMemoryProject();
+    if (status) {
+      status.className = "memory-form-status";
+      status.textContent = "Building context…";
+    }
+    try {
+      const data = await requestJson(`${MCH}/memory/context-pack`, {
+        method: "POST",
+        body: {
+          project_id: project.projectId,
+          repo_path: project.repoPath || null,
+          agent: String(agent && agent.value || "codex_cli"),
+          prompt: String(prompt && prompt.value || "").trim().slice(0, 5000),
+          max_memories: 8,
+          max_chars: 6000,
+        },
+      });
+      state.memory.lastContext = data;
+      if (preview) preview.textContent = redactVisibleMemory(data.context || "No relevant memory for this task.");
+      if (meta) meta.textContent = `${data.memory_count || 0} memories${data.truncated ? " · truncated" : ""}`;
+      if (sources) {
+        const ids = Array.isArray(data.memory_ids) ? data.memory_ids : [];
+        sources.textContent = ids.length ? `Sources: ${redactVisibleMemory(ids.join(", "))}` : "No source memories.";
+      }
+      if (status) status.textContent = "";
+    } catch (error) {
+      if (preview) preview.textContent = "Context preview unavailable.";
+      if (meta) meta.textContent = "Unavailable";
+      if (sources) sources.textContent = "";
+      if (status) {
+        status.className = "memory-form-status error";
+        status.textContent = "Memory is private-runner-only.";
       }
     }
   }
@@ -783,10 +787,10 @@
     }
 
     if (createBtn) {
-      const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
-      const agentRunnable = selectedAgent.runnable !== false && selectedAgent.adapter === "codex_cli";
-      createBtn.disabled = !!deck.loading || !deck.configured || !agentRunnable;
-      createBtn.textContent = deck.loading ? "Captain is building the plan..." : "Create Plan";
+      // Planning works locally even without cloud key — only block while loading
+      const hasGoal = !!(deck.goal && deck.goal.trim());
+      createBtn.disabled = !!deck.loading;
+      createBtn.textContent = deck.loading ? "Building plan…" : "Create Plan";
     }
     if (deployBtn) {
       const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
@@ -797,10 +801,10 @@
     if (captainAgentNote) {
       const selectedAgent = (state.agents || []).find((agent) => agent.id === deck.laneId) || {};
       if (selectedAgent.adapter === "jules_remote") {
-        captainAgentNote.textContent = "Jules Remote is configured for planning/status only. Execution comes next.";
+        captainAgentNote.textContent = "Jules Remote: planning available, execution coming soon.";
         captainAgentNote.style.display = "block";
       } else if (selectedAgent.id && !selectedAgent.runnable) {
-        captainAgentNote.textContent = "This agent is registered but not runnable yet.";
+        captainAgentNote.textContent = "Planning enabled. Agent execution requires private runner.";
         captainAgentNote.style.display = "block";
       } else {
         captainAgentNote.textContent = "";
@@ -815,33 +819,45 @@
         statusEl.textContent = deck.error;
         statusEl.style.color = "var(--bad, #ff7e91)";
       } else if (deck.loading) {
-        statusEl.textContent = "Captain is building the plan...";
+        statusEl.textContent = deck.configured ? "Captain is building the plan…" : "Building local preview plan…";
         statusEl.style.color = "var(--muted, #9cacbf)";
       } else if (deck.plan) {
-        statusEl.textContent = `Plan ready: ${deck.plan.title}`;
-        statusEl.style.color = "var(--good, #63db9d)";
+        const src = deck.plan.source === "local_preview" ? " · Local preview" : "";
+        statusEl.textContent = `Plan ready: ${deck.plan.title}${src}`;
+        statusEl.style.color = deck.plan.source === "local_preview" ? "var(--warn, #f0c66a)" : "var(--good, #63db9d)";
       } else if (!deck.configured) {
-        statusEl.textContent = "Captain is not configured. Set OPENROUTER_API_KEY on the private service.";
-        statusEl.style.color = "var(--warn, #f0c66a)";
+        statusEl.textContent = "No cloud key — will use local preview planner. Enter a goal and click Create Plan.";
+        statusEl.style.color = "var(--muted, #9cacbf)";
       } else {
         statusEl.textContent = "";
       }
     }
     if (planBody) {
       if (!deck.plan) {
-        planBody.innerHTML = '<div class="muted" style="font-size:0.82em;">Create a plan to see the Captain steps here.</div>';
+        planBody.innerHTML = '<div class="muted" style="font-size:0.82em;">Enter a goal and click Create Plan.</div>';
       } else {
         const steps = deck.plan.steps || [];
-        const stepsHtml = steps.map((step) => `
-          <details class="captain-step">
-            <summary><strong>${escapeHtml(step.title || step.id)}</strong><span class="muted" style="margin-left:8px;">${escapeHtml(step.agent || "codex_cli")}</span></summary>
-            <div class="muted" style="font-size:0.76em; margin:4px 0 6px;">Status: ${escapeHtml(step.status || "queued")}</div>
-            <pre class="captain-step-prompt">${escapeHtml(step.prompt || "")}</pre>
+        const isLocal = deck.plan.source === "local_preview";
+        const sourceBadge = isLocal
+          ? '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(240,198,106,0.15);color:var(--warn,#f0c66a);border:1px solid var(--warn,#f0c66a);">Local Preview</span>'
+          : '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(99,219,157,0.12);color:var(--good,#63db9d);border:1px solid var(--good,#63db9d);">AI Plan</span>';
+        const stepsHtml = steps.map((step, i) => `
+          <details class="captain-step" style="margin-bottom:6px;">
+            <summary style="cursor:pointer;padding:6px 0;">
+              <strong style="margin-right:6px;">${i + 1}.</strong>
+              <strong>${escapeHtml(step.title || step.id || "Step")}</strong>
+              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(step.agent || step.recommended_agent || "codex_cli")}</span>
+              <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(step.status || "queued")}</span>
+            </summary>
+            <pre class="captain-step-prompt" style="margin:6px 0 4px;font-size:0.78em;white-space:pre-wrap;word-break:break-word;">${escapeHtml(step.prompt || "")}</pre>
+            <div style="margin-top:4px;">
+              <button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Agent dispatch coming in next sprint">Dispatch Step — Coming Next</button>
+            </div>
           </details>
         `).join("");
         planBody.innerHTML = `
-          <div class="captain-plan-title"><strong>${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
-          <div class="captain-plan-summary muted">${escapeHtml(deck.plan.summary || "")}</div>
+          <div style="margin-bottom:6px;">${sourceBadge}<strong style="margin-left:6px;">${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
+          <div class="muted" style="font-size:0.82em;margin-bottom:10px;">${escapeHtml(deck.plan.summary || deck.plan.goal || "")}</div>
           <div class="captain-plan-steps">${stepsHtml}</div>
         `;
       }
@@ -975,6 +991,20 @@
     renderCaptainAgentCard();
   }
 
+  async function loadLatestCaptainPlan() {
+    try {
+      const data = await requestJson(`${MCH}/captain/plans/recent`);
+      const plans = data.plans || [];
+      if (plans.length && !state.captainDeck.plan) {
+        const latest = plans[0];
+        state.captainDeck.plan = latest;
+        if (latest.goal) state.captainDeck.goal = latest.goal;
+        const goalEl = document.getElementById("captain-goal");
+        if (goalEl && latest.goal && !goalEl.value) goalEl.value = latest.goal;
+      }
+    } catch (e) { /* non-fatal */ }
+  }
+
   async function openCaptainDeckModal() {
     const modal = document.getElementById("captain-deck-modal");
     if (!modal) return;
@@ -985,6 +1015,7 @@
     renderCaptainDeck();
     await Promise.all([populateCaptainDeckRepos(), loadCaptainDeckStatus(), loadAgents()]);
     populateCaptainAgents();
+    await loadLatestCaptainPlan();
     renderCaptainDeck();
   }
 
@@ -1232,7 +1263,8 @@
       return;
     }
     capsEl.style.display = "flex";
-    capsEl.innerHTML = caps.slice(0, 4).map((cap) => `<span class="cap-chip">${escapeHtml(cap)}</span>`).join("");
+    const formatCap = (cap) => String(cap).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    capsEl.innerHTML = caps.slice(0, 4).map((cap) => `<span class="cap-chip">${escapeHtml(formatCap(cap))}</span>`).join("");
   }
 
   function updateRunsEvidenceActions() {
@@ -1873,6 +1905,55 @@
     return !!(window.WardenControlRoom && window.WardenControlRoom.isDemoMode && window.WardenControlRoom.isDemoMode());
   }
 
+  const TASK_STATUS_LABEL = {
+    queued: "Ready",
+    revised: "Ready",
+    dispatched: "Running",
+    running: "Running",
+    passed: "Done",
+    done: "Done",
+    blocked: "Blocked",
+    needs_review: "Needs Review",
+  };
+
+  function renderTasksBoard() {
+    const empty = document.querySelector("[data-testid='tasks-empty-state']");
+    const board = document.getElementById("tasks-board");
+    const titleEl = document.getElementById("tasks-board-title");
+    const metaEl = document.getElementById("tasks-board-meta");
+    const stepsEl = document.getElementById("tasks-board-steps");
+    if (!empty || !board || !stepsEl) return;
+    const plan = state.activeCaptainPlan;
+    if (!plan || !plan.steps || !plan.steps.length || plan.status === "stopped") {
+      empty.style.display = "";
+      board.style.display = "none";
+      return;
+    }
+    empty.style.display = "none";
+    board.style.display = "";
+    if (titleEl) titleEl.textContent = plan.title || "Active plan";
+    if (metaEl) metaEl.textContent = `${plan.steps.length} step${plan.steps.length === 1 ? "" : "s"} · ${plan.status || "active"}`;
+    stepsEl.innerHTML = plan.steps.map((step) => {
+      const rawStatus = step.status || "queued";
+      const label = TASK_STATUS_LABEL[rawStatus] || rawStatus;
+      const dotClass = rawStatus === "blocked" ? "cc-dot-bad" : (rawStatus === "passed" || rawStatus === "done") ? "cc-dot-good" : (rawStatus === "running" || rawStatus === "dispatched") ? "cc-dot-warn" : "";
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-dot ${dotClass}"></span>
+          <span class="cc-row-title">${escapeHtml(step.title || step.id)}</span>
+        </div>
+        <div class="cc-row-meta">
+          <span class="cc-status-pill-mini ${dotClass === "cc-dot-good" ? "cc-pill-good" : dotClass === "cc-dot-bad" ? "cc-pill-warn" : ""}">${escapeHtml(label)}</span>
+        </div>
+      </div>`;
+    }).join("");
+    stepsEl.insertAdjacentHTML("beforeend", `<button type="button" class="btn primary" id="tasks-board-manage-btn" style="margin-top:12px;">Manage in Command Center</button>`);
+    document.getElementById("tasks-board-manage-btn")?.addEventListener("click", () => {
+      setActiveSection("mission");
+      setTimeout(() => document.getElementById("current-mission-plan")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+    });
+  }
+
   function renderMissionPlanPanel() {
     const empty = document.getElementById("current-mission-empty");
     const panel = document.getElementById("current-mission-plan");
@@ -1881,6 +1962,7 @@
     const controls = document.getElementById("captain-plan-controls");
     const plan = state.activeCaptainPlan;
     if (!empty || !panel || !header || !stepsEl || !controls) return;
+    renderTasksBoard();
 
     if (isControlRoomDemoMode()) {
       empty.style.display = "none";
@@ -2026,6 +2108,35 @@
       method: "POST",
     });
     if (result.plan) setActiveCaptainPlan(result.plan);
+
+    // Blocked path: runner unavailable — show message, don't open monitor
+    if (result.blocked) {
+      closeCaptainDeckModal();
+      const memId = result.memory_id || "";
+      const runId = result.run_id || "";
+      const noticeEl = document.getElementById("captain-blocked-notice");
+      if (noticeEl) {
+        noticeEl.innerHTML = `
+          <div class="blocked-notice-body">
+            <span class="blocked-notice-icon">⊗</span>
+            <div>
+              <strong>Runner unavailable</strong> — blocked attempt saved to Memory.
+              ${runId ? `<span class="blocked-id-pill" title="Copy run ID" onclick="navigator.clipboard.writeText('${escapeHtml(runId)}')">Run: ${escapeHtml(runId.slice(0,20))}</span>` : ""}
+              ${memId ? `<span class="blocked-id-pill" title="Copy memory ID" onclick="navigator.clipboard.writeText('${escapeHtml(memId)}')">Mem: ${escapeHtml(memId.slice(0,24))}</span>` : ""}
+            </div>
+          </div>
+          <div class="blocked-notice-actions">
+            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'memory\\']').click()">Ask Memory what happened</button>
+            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'agent\\']').click()">Ask Marius Agent</button>
+            <button type="button" class="onboarding-dismiss-btn" onclick="this.closest('.captain-blocked-notice').style.display='none'" title="Dismiss">✕</button>
+          </div>`;
+        noticeEl.style.display = "";
+      }
+      await loadMissionWorklog();
+      return;
+    }
+
+    // Happy path: runner started
     const dispatch = result.dispatch || {};
     state.selectedThreadId = dispatch.session_id || state.selectedThreadId;
     state.activeWardenRunId = dispatch.runner_id || state.activeWardenRunId;
@@ -2191,24 +2302,26 @@
       section.classList.toggle("active", section.dataset.section === state.activeSection);
     });
     document.querySelectorAll(".nav-item").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.section === state.activeSection);
+      const isResourceShortcut = btn.hasAttribute("data-scroll-target");
+      btn.classList.toggle("active", !isResourceShortcut && btn.dataset.section === state.activeSection);
     });
     const inspector = document.getElementById("operator-inspector");
-    const showInspector = state.activeSection === "mission" || state.activeSection === "agents";
+    const showInspector = ["mission", "agents", "tasks", "evidence"].includes(state.activeSection);
     if (inspector) inspector.style.display = showInspector ? "" : "none";
     const stage = document.querySelector(".warden-stage");
     if (stage) stage.classList.toggle("inspector-visible", showInspector);
     const titles = {
-      mission: "Control Room",
-      tasks: "Missions",
-      agents: "Agents",
+      mission: "Command Center",
+      tasks: "Tasks",
+      agents: "Agent Library",
       runs: "Runs",
-      evidence: "Evidence",
+      evidence: "Proof",
       memory: "Memory",
       assistant: "Warden Assistant",
       "proof-gates": "Proof Gates",
       "runner-sessions": "Runner Sessions",
       settings: "Settings",
+      projects: "Projects",
     };
     const topTitle = document.getElementById("topbar-page-title");
     if (topTitle) topTitle.textContent = titles[state.activeSection] || "Warden";
@@ -2228,6 +2341,651 @@
       loadMemory().catch((e) => console.error(e));
     } else if (state.activeSection === "assistant") {
       loadAssistantHealth().catch((e) => console.error(e));
+    } else if (state.activeSection === "settings") {
+      loadConnectorsProviders().catch((e) => console.error(e));
+      loadMailTestAccountOptions().catch((e) => console.error(e));
+    }
+  }
+
+  async function loadMailTestAccountOptions() {
+    const select = document.getElementById("mail-test-account");
+    if (!select) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/mail/accounts`);
+      const accounts = (data && data.accounts) || [];
+      select.innerHTML = accounts.length
+        ? '<option value="">— select account —</option>' + accounts.map((a) =>
+            `<option value="${escapeHtml(a.account_id)}">${escapeHtml(a.display_email || a.account_id)} (${escapeHtml(a.provider)})</option>`
+          ).join("")
+        : '<option value="">No mail accounts connected</option>';
+    } catch (e) {
+      select.innerHTML = '<option value="">Could not load accounts</option>';
+    }
+  }
+
+  async function loadBrainVaultSettings() {
+    const statusEl = document.getElementById("brain-vault-status");
+    const metaEl = document.getElementById("brain-vault-meta");
+    const mirrorEl = document.getElementById("brain-mirror-status");
+    if (!statusEl) return;
+    try {
+      const data = await requestJson(`${MCH}/warden/brain/health`);
+      const local = data.local || {};
+      if (local.vault_exists) {
+        statusEl.innerHTML = `<span class="cc-dot cc-dot-good" style="display:inline-block;margin-right:6px;"></span>Ready — ${local.source_count || 0} source${local.source_count === 1 ? "" : "s"} indexed`;
+      } else {
+        statusEl.innerHTML = `<span class="cc-dot cc-dot-warn" style="display:inline-block;margin-right:6px;"></span>Not initialized`;
+      }
+      if (metaEl) metaEl.textContent = local.vault_path ? `Vault: ${local.vault_path}` : "";
+      if (mirrorEl) {
+        mirrorEl.innerHTML = data.hybrid_enabled
+          ? `<span class="cc-dot cc-dot-good" style="display:inline-block;margin-right:6px;"></span>Enabled`
+          : `<span class="cc-dot" style="display:inline-block;margin-right:6px;"></span>Not enabled`;
+      }
+    } catch (e) {
+      statusEl.textContent = "Could not reach Brain service.";
+    }
+  }
+
+  function wireBrainVaultSettings() {
+    const initBtn = document.getElementById("brain-vault-init-btn");
+    const reindexBtn = document.getElementById("brain-vault-reindex-btn");
+    const actionStatus = document.getElementById("brain-vault-action-status");
+    if (initBtn) initBtn.addEventListener("click", async () => {
+      initBtn.disabled = true;
+      if (actionStatus) actionStatus.textContent = "Initializing…";
+      try {
+        await requestJson(`${MCH}/warden/brain/init-vault`, { method: "POST" });
+        if (actionStatus) actionStatus.textContent = "Vault initialized.";
+        await loadBrainVaultSettings();
+      } catch (e) {
+        if (actionStatus) actionStatus.textContent = `Error: ${e.message}`;
+      } finally {
+        initBtn.disabled = false;
+      }
+    });
+    if (reindexBtn) reindexBtn.addEventListener("click", async () => {
+      reindexBtn.disabled = true;
+      if (actionStatus) actionStatus.textContent = "Reindexing…";
+      try {
+        const res = await requestJson(`${MCH}/warden/brain/reindex`, { method: "POST" });
+        if (actionStatus) actionStatus.textContent = `Reindexed ${res.indexed || 0} source(s).`;
+        await loadBrainVaultSettings();
+      } catch (e) {
+        if (actionStatus) actionStatus.textContent = `Error: ${e.message}`;
+      } finally {
+        reindexBtn.disabled = false;
+      }
+    });
+  }
+
+  async function saveMailToBrain(btn, { accountId, messageId, subject, fromAddr, bodyText }) {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Saving…";
+    try {
+      await requestJson(`${MCH}/warden/brain/ingest`, {
+        method: "POST",
+        body: {
+          url: `mail://${accountId}/${messageId}`,
+          title: subject || "(no subject)",
+          source_type: "webpage",
+          content_text: bodyText || `From: ${fromAddr || "unknown"}\n\n(subject only — open the message to save its body)`,
+          tags: ["mail"],
+        },
+      });
+      btn.textContent = "Saved to Brain ✓";
+    } catch (e) {
+      btn.textContent = "Save failed";
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+      return;
+    }
+  }
+
+  function wireMailTestPanel() {
+    const searchBtn = document.getElementById("mail-test-search-btn");
+    if (!searchBtn) return;
+    searchBtn.addEventListener("click", async () => {
+      const accountId = (document.getElementById("mail-test-account") || {}).value || "";
+      const query = ((document.getElementById("mail-test-query") || {}).value || "").trim();
+      const resultsEl = document.getElementById("mail-test-results");
+      if (!accountId) { if (resultsEl) { resultsEl.style.display = ""; resultsEl.innerHTML = '<p class="connectors-empty">Select an account first.</p>'; } return; }
+      searchBtn.disabled = true;
+      searchBtn.textContent = "Searching…";
+      if (resultsEl) resultsEl.style.display = "none";
+      try {
+        const params = new URLSearchParams({account_id: accountId, q: query || "ALL", limit: "10"});
+        const data = await requestJson(`${MCH}/warden/mail/search?${params}`);
+        const messages = data.messages || [];
+        if (resultsEl) {
+          resultsEl.style.display = "";
+          if (!messages.length) {
+            resultsEl.innerHTML = '<p class="connectors-empty">No messages found.</p>';
+          } else {
+            resultsEl.innerHTML = `<p class="connector-provider-note">${messages.length} result${messages.length !== 1 ? "s" : ""}</p>` +
+              messages.map((m) => `<div class="mail-result-card" data-message-id="${escapeHtml(m.id)}" data-account-id="${escapeHtml(m.account_id)}">
+                <div class="mail-result-top">
+                  <strong class="mail-result-subject">${escapeHtml(m.subject || "(no subject)")}</strong>
+                  <span class="mail-result-date">${escapeHtml(m.date || "")}</span>
+                </div>
+                <div class="mail-result-from">From: ${escapeHtml(m.from_addr || "")}</div>
+                <div class="mail-result-snippet">${escapeHtml(m.snippet || "")}</div>
+                <div class="mail-result-actions" style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+                  <button type="button" class="btn mail-read-btn" style="font-size:0.75rem;"
+                    data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}">Read</button>
+                  <button type="button" class="btn mail-save-brain-btn" style="font-size:0.75rem;"
+                    data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}"
+                    data-subject="${escapeHtml(m.subject || "")}" data-from="${escapeHtml(m.from_addr || "")}">Save to Brain</button>
+                  <button type="button" class="btn mail-ask-marius-btn" style="font-size:0.75rem;"
+                    data-subject="${escapeHtml(m.subject || "")}">Ask Marius</button>
+                </div>
+                <div class="mail-read-body" style="display:none;"></div>
+              </div>`).join("");
+            // Wire read buttons
+            resultsEl.querySelectorAll(".mail-read-btn").forEach((btn) => {
+              btn.addEventListener("click", async () => {
+                const msgId = btn.getAttribute("data-msg-id");
+                const accId = btn.getAttribute("data-acc-id");
+                const bodyEl = btn.closest(".mail-result-card").querySelector(".mail-read-body");
+                btn.disabled = true;
+                btn.textContent = "Loading…";
+                try {
+                  const msgData = await requestJson(`${MCH}/warden/mail/messages/${encodeURIComponent(accId)}/${encodeURIComponent(msgId)}`);
+                  const body = (msgData.message && msgData.message.body_text) || "(empty body)";
+                  if (bodyEl) {
+                    bodyEl.style.display = "";
+                    bodyEl.textContent = body.slice(0, 2000) + (body.length > 2000 ? "\n…[truncated]" : "");
+                    bodyEl.dataset.fullBody = body;
+                  }
+                  btn.style.display = "none";
+                } catch (e) {
+                  if (bodyEl) { bodyEl.style.display = ""; bodyEl.textContent = `Error: ${e.message}`; }
+                  btn.textContent = "Read";
+                  btn.disabled = false;
+                }
+              });
+            });
+            // Wire save-to-brain buttons
+            resultsEl.querySelectorAll(".mail-save-brain-btn").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                const card = btn.closest(".mail-result-card");
+                const bodyEl = card ? card.querySelector(".mail-read-body") : null;
+                saveMailToBrain(btn, {
+                  accountId: btn.getAttribute("data-acc-id"),
+                  messageId: btn.getAttribute("data-msg-id"),
+                  subject: btn.getAttribute("data-subject"),
+                  fromAddr: btn.getAttribute("data-from"),
+                  bodyText: bodyEl ? bodyEl.dataset.fullBody : "",
+                });
+              });
+            });
+            // Wire ask-marius buttons
+            resultsEl.querySelectorAll(".mail-ask-marius-btn").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                setActiveSection("mission");
+                ccAskMariusAbout(btn.getAttribute("data-subject") || "this email");
+              });
+            });
+          }
+        }
+      } catch (e) {
+        if (resultsEl) { resultsEl.style.display = ""; resultsEl.innerHTML = `<p class="connectors-empty">Error: ${e.message}</p>`; }
+      } finally {
+        searchBtn.disabled = false;
+        searchBtn.textContent = "Search Mail";
+      }
+    });
+  }
+
+  // Listen for postMessage from OAuth popup — refresh connectors immediately
+  window.addEventListener("message", (evt) => {
+    if (evt.data && evt.data.type === "warden_connector_connected") {
+      loadConnectorsProviders().catch(() => {});
+    }
+  });
+
+  async function loadConnectorsProviders() {
+    const listEl = document.getElementById("connectors-provider-list");
+    if (!listEl) return;
+    try {
+      const [provData, accData] = await Promise.all([
+        requestJson(`${MCH}/warden/connectors/providers`),
+        requestJson(`${MCH}/warden/connectors/accounts`),
+      ]);
+      const providers = (provData && provData.providers) || [];
+      const accounts = (accData && accData.accounts) || [];
+
+      if (!providers.length) {
+        listEl.innerHTML = '<p class="connectors-empty">No connector providers registered.</p>';
+        return;
+      }
+
+      // Index connected accounts by provider
+      const connectedByProvider = {};
+      accounts.forEach((a) => {
+        if (!connectedByProvider[a.provider]) connectedByProvider[a.provider] = [];
+        connectedByProvider[a.provider].push(a);
+      });
+
+      listEl.innerHTML = providers.map((p) => {
+        const caps = (p.capabilities || []).join(", ") || "—";
+        const connected = connectedByProvider[p.provider_id] || [];
+        const isConnected = connected.length > 0;
+        const configuredClass = isConnected ? "connector-configured" : (p.configured ? "connector-ready" : "connector-unconfigured");
+        const statusLabel = isConnected ? `${connected.length} account${connected.length > 1 ? "s" : ""} connected` : (p.configured ? "Ready to connect" : "Setup required");
+        const statusPillClass = isConnected ? "status-connected" : (p.configured ? "status-ready" : "status-coming");
+
+        // Connected accounts rows
+        const accountsHtml = connected.map((a) => `
+          <div class="connector-account-row" data-account-id="${escapeHtml(a.account_id)}">
+            <span class="connector-account-email">${escapeHtml(a.display_email || a.account_id)}</span>
+            <span class="status-pill status-connected" style="font-size:0.72rem;">Connected</span>
+            <button type="button" class="btn connector-disconnect-btn"
+              data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
+          </div>`).join("");
+
+        // Connect action area
+        let connectAction = "";
+        if (p.provider_id === "gmail" && !isConnected) {
+          // Gmail primary path: App Password (IMAP), no OAuth required
+          const guideUrl = "https://console.cloud.google.com/apis/credentials";
+          const redirectUri = `${location.origin}/api/mcharness/warden/connectors/gmail/callback`;
+          connectAction = `
+            <div class="connector-icloud-form" data-provider="gmail">
+              <p class="connector-provider-note">
+                Connect Gmail using a <strong>Google App Password</strong> — no OAuth verification needed.
+                <a href="#" class="connector-icloud-help-toggle" style="font-size:.8rem;">How to create one</a>
+              </p>
+              <div class="connector-icloud-help" style="display:none;">
+                <ol style="margin:.5rem 0 .5rem 1.2rem;padding:0;font-size:.85rem;color:var(--text-secondary);">
+                  <li>Go to <a href="https://myaccount.google.com/security" target="_blank" rel="noopener">Google Account → Security</a></li>
+                  <li>Enable <strong>2-Step Verification</strong> if not already on</li>
+                  <li>Search for <strong>App passwords</strong> at the top of Google Account</li>
+                  <li>Create a new app password — name it "Warden"</li>
+                  <li>Copy the 16-character password (no spaces needed)</li>
+                </ol>
+                <p style="font-size:.8rem;color:var(--text-secondary);">
+                  Note: Some Google Workspace or Advanced Protection accounts may block IMAP or app passwords.
+                  Also confirm IMAP is enabled in Gmail → Settings → Forwarding and POP/IMAP.
+                </p>
+              </div>
+              <div class="connector-form-row">
+                <label class="connector-label">Gmail Address</label>
+                <input type="email" class="connector-input" placeholder="you@gmail.com"
+                  id="gmail-imap-email-input" autocomplete="email" />
+              </div>
+              <div class="connector-form-row">
+                <label class="connector-label">Google App Password</label>
+                <input type="password" class="connector-input" placeholder="16-character app password"
+                  id="gmail-imap-pass-input" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="connector-setup-actions">
+                <button type="button" class="btn primary connector-gmail-imap-submit-btn">
+                  Connect Gmail
+                </button>
+                <span class="connector-setup-note">App password stored locally only. Never sent anywhere.</span>
+              </div>
+              <div class="connector-icloud-status" id="gmail-imap-connect-status"></div>
+            </div>
+            <details class="connector-advanced-details" style="margin-top:.5rem;">
+              <summary style="font-size:.8rem;color:var(--text-secondary);cursor:pointer;">Advanced setup / OAuth</summary>
+              <div class="connector-advanced-body" style="font-size:.82rem;color:var(--text-secondary);padding:.5rem 0;">
+                <p>OAuth is optional and may require Google app verification.<br>App Password is simpler for local/private Warden.</p>
+                ${p.configured ? `
+                  <button type="button" class="btn primary connector-oauth-btn"
+                    data-provider="gmail" style="margin-top:.4rem;">Sign in with Google (OAuth)</button>
+                  <a href="#" class="connector-popup-fallback" style="display:none;" data-provider="gmail">Open sign-in page</a>
+                  <br><button type="button" class="btn connector-clear-config-btn"
+                    data-provider="gmail" style="font-size:.8rem;padding:2px 8px;margin-top:.4rem;">Clear OAuth app config</button>
+                ` : `
+                  <details class="connector-setup-wizard" data-provider="gmail" style="margin-top:.4rem;">
+                    <summary class="connector-setup-summary" style="font-size:.82rem;">Set up OAuth app (advanced)</summary>
+                    <div class="connector-setup-body">
+                      <p>Create at <a href="${escapeHtml(guideUrl)}" target="_blank" rel="noopener">Google Cloud Console</a></p>
+                      <p><strong>Redirect URI:</strong></p>
+                      <div class="connector-redirect-row">
+                        <code class="connector-redirect-uri">${escapeHtml(redirectUri)}</code>
+                        <button type="button" class="btn connector-copy-uri-btn" data-uri="${escapeHtml(redirectUri)}">Copy</button>
+                      </div>
+                      <div class="connector-form-row">
+                        <label class="connector-label">Client ID</label>
+                        <input type="text" class="connector-input connector-client-id-input"
+                          placeholder="Paste Client ID" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="connector-form-row">
+                        <label class="connector-label">Client Secret</label>
+                        <input type="password" class="connector-input connector-client-secret-input"
+                          placeholder="Paste Client Secret" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="connector-setup-actions">
+                        <button type="button" class="btn primary connector-save-config-btn"
+                          data-provider="gmail">Save OAuth config</button>
+                        <span class="connector-setup-note">Saved to local vault only.</span>
+                      </div>
+                      <div class="connector-setup-status" id="setup-status-gmail"></div>
+                    </div>
+                  </details>`}
+              </div>
+            </details>`;
+        } else if (p.auth_type === "oauth2_authorization_code" && p.provider_id !== "gmail") {
+          const connectBtnLabel = p.display_name.includes("Outlook") ? "Sign in with Microsoft"
+            : `Connect ${p.display_name}`;
+          const signInNote = "Warden stores read-only access locally. Your Microsoft password is never shared.";
+
+          if (!p.configured) {
+            const guideUrl = "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps";
+            const redirectUri = `${location.origin}/api/mcharness/warden/connectors/${p.provider_id}/callback`;
+            connectAction = `
+              <details class="connector-setup-wizard" data-provider="${escapeHtml(p.provider_id)}">
+                <summary class="connector-setup-summary">
+                  <span class="connector-setup-icon">&#9881;</span> Set up ${escapeHtml(p.display_name)} connection
+                </summary>
+                <div class="connector-setup-body">
+                  <p class="connector-setup-desc">
+                    Warden needs a free OAuth app.
+                    Register one at <a href="${escapeHtml(guideUrl)}" target="_blank" rel="noopener">Azure App Registrations</a> (free).
+                  </p>
+                  <p class="connector-setup-step"><strong>Redirect URI</strong> to add in the OAuth app:</p>
+                  <div class="connector-redirect-row">
+                    <code class="connector-redirect-uri">${escapeHtml(redirectUri)}</code>
+                    <button type="button" class="btn connector-copy-uri-btn" data-uri="${escapeHtml(redirectUri)}">Copy</button>
+                  </div>
+                  <div class="connector-form-row">
+                    <label class="connector-label">Client ID</label>
+                    <input type="text" class="connector-input connector-client-id-input"
+                      placeholder="Paste your Client ID here" autocomplete="off" spellcheck="false" />
+                  </div>
+                  <div class="connector-form-row">
+                    <label class="connector-label">Client Secret</label>
+                    <input type="password" class="connector-input connector-client-secret-input"
+                      placeholder="Paste your Client Secret here" autocomplete="off" spellcheck="false" />
+                  </div>
+                  <div class="connector-setup-actions">
+                    <button type="button" class="btn primary connector-save-config-btn"
+                      data-provider="${escapeHtml(p.provider_id)}">Save and activate</button>
+                    <span class="connector-setup-note">Saved to local vault only. Never sent to any server.</span>
+                  </div>
+                  <div class="connector-setup-status" id="setup-status-${escapeHtml(p.provider_id)}"></div>
+                </div>
+              </details>`;
+          } else {
+            connectAction = `
+              <p class="connector-signin-note">${escapeHtml(signInNote)}</p>
+              <button type="button" class="btn primary connector-oauth-btn"
+                data-provider="${escapeHtml(p.provider_id)}">${escapeHtml(connectBtnLabel)}</button>
+              <a href="#" class="connector-popup-fallback" style="display:none;"
+                data-provider="${escapeHtml(p.provider_id)}">Open sign-in page</a>
+              <details class="connector-advanced-details">
+                <summary>Advanced setup</summary>
+                <div class="connector-advanced-body">
+                  <p>OAuth app configured. <button type="button" class="btn connector-clear-config-btn"
+                    data-provider="${escapeHtml(p.provider_id)}" style="font-size:.8rem;padding:2px 8px;">Clear app config</button></p>
+                </div>
+              </details>`;
+          }
+        } else if (p.auth_type === "app_password") {
+          if (!isConnected) {
+            connectAction = `
+              <div class="connector-icloud-form" data-provider="icloud">
+                <p class="connector-provider-note">
+                  Enter your iCloud email and an
+                  <a href="https://appleid.apple.com/account/manage/section/security" target="_blank" rel="noopener">app-specific password</a>
+                  (not your main Apple password).
+                  <a href="#" class="connector-icloud-help-toggle" style="font-size:.8rem;">How to create one</a>
+                </p>
+                <div class="connector-icloud-help" style="display:none;">
+                  <ol style="margin:.5rem 0 .5rem 1.2rem;padding:0;font-size:.85rem;color:var(--text-secondary);">
+                    <li>Go to <a href="https://appleid.apple.com" target="_blank" rel="noopener">appleid.apple.com</a></li>
+                    <li>Sign in → Sign-In and Security → App-Specific Passwords</li>
+                    <li>Click + and name it "Warden"</li>
+                    <li>Copy the password shown (xxxx-xxxx-xxxx-xxxx)</li>
+                  </ol>
+                </div>
+                <div class="connector-form-row">
+                  <label class="connector-label">iCloud Email</label>
+                  <input type="email" class="connector-input" placeholder="your@icloud.com or me.com"
+                    id="icloud-email-input" autocomplete="email" />
+                </div>
+                <div class="connector-form-row">
+                  <label class="connector-label">App-Specific Password</label>
+                  <input type="password" class="connector-input" placeholder="xxxx-xxxx-xxxx-xxxx"
+                    id="icloud-pass-input" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="connector-setup-actions">
+                  <button type="button" class="btn primary connector-icloud-submit-btn">
+                    Connect iCloud Mail
+                  </button>
+                  <span class="connector-setup-note">Password stored locally only. Never sent anywhere.</span>
+                </div>
+                <div class="connector-icloud-status" id="icloud-connect-status"></div>
+              </div>`;
+          }
+        }
+
+        return `<div class="connector-provider-card ${configuredClass}" data-provider-id="${escapeHtml(p.provider_id)}">
+          <div class="connector-provider-top">
+            <strong class="connector-provider-name">${escapeHtml(p.display_name)}</strong>
+            <span class="connector-status-pill ${statusPillClass}">${escapeHtml(statusLabel)}</span>
+          </div>
+          <div class="connector-provider-meta">
+            <span>Capabilities: ${escapeHtml(caps)}</span>
+          </div>
+          ${accountsHtml ? `<div class="connector-accounts-list">${accountsHtml}</div>` : ""}
+          <div class="connector-action-area">${connectAction}</div>
+        </div>`;
+      }).join("");
+
+      // Wire "Copy redirect URI" buttons
+      listEl.querySelectorAll(".connector-copy-uri-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const uri = btn.getAttribute("data-uri");
+          if (uri && navigator.clipboard) {
+            navigator.clipboard.writeText(uri).then(() => {
+              btn.textContent = "Copied!";
+              setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+            });
+          }
+        });
+      });
+
+      // Wire "Save and activate" (provider OAuth config) buttons
+      listEl.querySelectorAll(".connector-save-config-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          const wizard = btn.closest(".connector-setup-wizard");
+          const clientIdInput = wizard ? wizard.querySelector(".connector-client-id-input") : null;
+          const clientSecretInput = wizard ? wizard.querySelector(".connector-client-secret-input") : null;
+          const statusEl = document.getElementById(`setup-status-${provider}`);
+
+          const clientId = (clientIdInput && clientIdInput.value.trim()) || "";
+          const clientSecret = (clientSecretInput && clientSecretInput.value.trim()) || "";
+
+          if (!clientId || !clientSecret) {
+            if (statusEl) statusEl.textContent = "Both Client ID and Client Secret are required.";
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = "Saving…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/config`, {
+              method: "POST",
+              body: JSON.stringify({client_id: clientId, client_secret: clientSecret}),
+            });
+            if (result.ok) {
+              if (clientSecretInput) clientSecretInput.value = "";  // clear secret from DOM
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || "Save failed.";
+              btn.disabled = false;
+              btn.textContent = "Save and activate";
+            }
+          } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+            btn.textContent = "Save and activate";
+          }
+        });
+      });
+
+      // Wire "Clear app config" buttons
+      listEl.querySelectorAll(".connector-clear-config-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          if (!confirm(`Remove the saved ${provider} OAuth app config? You will need to re-enter the credentials to reconnect.`)) return;
+          btn.disabled = true;
+          try {
+            await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/config`, {method: "DELETE"});
+            await loadConnectorsProviders();
+          } catch (e) {
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire OAuth connect buttons
+      listEl.querySelectorAll(".connector-oauth-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          btn.disabled = true;
+          btn.textContent = "Opening…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/${encodeURIComponent(provider)}/connect/start`, {method: "POST"});
+            if (result.auth_url) {
+              const popup = window.open(result.auth_url, "warden_oauth", "width=560,height=760");
+              // Show fallback link for popup blockers
+              const fallbackLink = btn.parentElement.querySelector(".connector-popup-fallback");
+              if (fallbackLink) {
+                fallbackLink.href = result.auth_url;
+                fallbackLink.style.display = "";
+              }
+              const displayName = provider.charAt(0).toUpperCase() + provider.slice(1);
+              btn.textContent = `Sign in with ${displayName}`;
+              btn.disabled = false;
+              // Poll in case postMessage doesn't fire (popup blocked/cross-origin)
+              const pollTimer = setInterval(async () => {
+                if (popup && popup.closed) {
+                  clearInterval(pollTimer);
+                  await loadConnectorsProviders();
+                }
+              }, 800);
+            } else {
+              btn.textContent = "Setup required — see above";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            btn.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire iCloud help toggle
+      listEl.querySelectorAll(".connector-icloud-help-toggle").forEach((link) => {
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          const help = link.closest(".connector-icloud-form").querySelector(".connector-icloud-help");
+          if (help) {
+            const hidden = help.style.display === "none";
+            help.style.display = hidden ? "" : "none";
+            link.textContent = hidden ? "Hide instructions" : "How to create one";
+          }
+        });
+      });
+
+      // Wire iCloud submit buttons
+      listEl.querySelectorAll(".connector-icloud-submit-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".connector-icloud-form");
+          const emailInput = form ? form.querySelector("#icloud-email-input") : null;
+          const passInput = form ? form.querySelector("#icloud-pass-input") : null;
+          const statusEl = form ? form.querySelector("#icloud-connect-status") : null;
+
+          const email = (emailInput && emailInput.value.trim()) || "";
+          const appPassword = (passInput && passInput.value.trim()) || "";
+
+          if (!email || !appPassword) {
+            if (statusEl) statusEl.textContent = "Email and app-specific password are required.";
+            return;
+          }
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = "Connecting…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/icloud/connect/app-password`, {
+              method: "POST",
+              body: JSON.stringify({email, app_password: appPassword}),
+            });
+            if (result.ok) {
+              if (passInput) passInput.value = "";  // clear password from DOM immediately
+              if (statusEl) statusEl.textContent = "";
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || "Connection failed.";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire Gmail IMAP submit buttons
+      listEl.querySelectorAll(".connector-gmail-imap-submit-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".connector-icloud-form[data-provider='gmail']");
+          const emailInput = form ? form.querySelector("#gmail-imap-email-input") : null;
+          const passInput = form ? form.querySelector("#gmail-imap-pass-input") : null;
+          const statusEl = form ? form.querySelector("#gmail-imap-connect-status") : null;
+
+          const email = (emailInput && emailInput.value.trim()) || "";
+          const appPassword = (passInput && passInput.value.trim()) || "";
+
+          if (!email || !appPassword) {
+            if (statusEl) statusEl.textContent = "Gmail address and app password are required.";
+            return;
+          }
+          btn.disabled = true;
+          if (statusEl) statusEl.textContent = "Connecting…";
+          try {
+            const result = await requestJson(`${MCH}/warden/connectors/gmail/connect/app-password`, {
+              method: "POST",
+              body: JSON.stringify({email, app_password: appPassword}),
+            });
+            if (passInput) passInput.value = "";  // clear app password from DOM immediately
+            if (result.ok) {
+              if (statusEl) statusEl.textContent = "";
+              await loadConnectorsProviders();
+            } else {
+              if (statusEl) statusEl.textContent = result.detail || result.note || "Connection failed.";
+              btn.disabled = false;
+            }
+          } catch (e) {
+            if (passInput) passInput.value = "";  // clear even on error
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Wire disconnect buttons
+      listEl.querySelectorAll(".connector-disconnect-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const accountId = btn.getAttribute("data-disconnect-id");
+          if (!accountId) return;
+          btn.disabled = true;
+          btn.textContent = "Disconnecting…";
+          try {
+            await requestJson(`${MCH}/warden/connectors/accounts/${encodeURIComponent(accountId)}/disconnect`, {method: "POST"});
+            await loadConnectorsProviders();
+          } catch (e) {
+            btn.textContent = "Error";
+            btn.disabled = false;
+          }
+        });
+      });
+
+    } catch (e) {
+      listEl.innerHTML = '<p class="connectors-empty">Could not load connector providers.</p>';
     }
   }
 
@@ -2759,6 +3517,7 @@
       ]);
       state.lanes = lanesData.lanes || [];
       state.health = health || {};
+      loadBuildInfo().catch((e) => console.error("build-info load error", e));
       await loadAgents();
       const codex = (state.agents || []).find((agent) => agent.id === "codex_cli")
         || state.lanes.find((l) => l.lane_id === "codex_cli")
@@ -3468,7 +4227,7 @@
         if (mLabel) mLabel.textContent = res.data.forced_model || 'auto';
         const prLabel = document.getElementById('marius-profile-label');
         if (prLabel) prLabel.textContent = res.data.current_profile || 'fast';
-
+        
         // Update modals if open
         const statusMode = document.getElementById('marius-model-status-mode');
         if (statusMode) statusMode.textContent = "local";
@@ -3476,7 +4235,7 @@
         if (statusProfile) statusProfile.textContent = res.data.current_profile || 'fast';
         const statusForced = document.getElementById('marius-model-status-forced');
         if (statusForced) statusForced.textContent = res.data.forced_model || 'None (Auto)';
-
+        
         const available = res.data.available_ollama || [];
         const availList = document.getElementById('marius-model-available-list');
         if (availList) availList.innerHTML = available.join('<br>') || 'None';
@@ -3484,7 +4243,7 @@
         // Update chat dropdowns
         const profSel = document.getElementById('marius-chat-profile-select');
         if (profSel) profSel.value = res.data.current_profile || 'fast';
-
+        
         const modSel = document.getElementById('marius-chat-model-select');
         if (modSel) {
           modSel.innerHTML = '<option value="auto">Auto-select</option>' + available.map(m => `<option value="${m}">${m}</option>`).join('');
@@ -3505,19 +4264,19 @@
   async function openMariusChat() {
     const modal = document.getElementById("marius-chat-modal");
     if (modal) modal.style.display = "flex";
-
+    
     // Refresh to get latest state
     await refreshMariusStatus();
-
+    
     // Check for router-only model lockout
     const mLabel = document.getElementById('marius-model-label');
     const currentModel = mLabel ? mLabel.textContent : '';
-
+    
     if (currentModel === 'marius-fast') {
       const availListEl = document.getElementById('marius-model-available-list');
       const availText = availListEl ? availListEl.innerHTML : '';
       const available = availText.split('<br>').map(m => m.trim());
-
+      
       const chatPriorities = ['llama3.2:1b', 'gemma3:1b', 'qwen3:0.6b', 'llama3.2:3b'];
       let targetModel = null;
       for (const m of chatPriorities) {
@@ -3526,7 +4285,7 @@
           break;
         }
       }
-
+      
       if (targetModel) {
         try {
           await requestJson(`${MCH}/agents/marius/model/set`, { method: "POST", body: { model: targetModel } });
@@ -3541,7 +4300,7 @@
         }
       }
     }
-
+    
     setTimeout(() => document.getElementById("marius-chat-input")?.focus(), 100);
   }
 
@@ -3570,17 +4329,17 @@
     if (!msg) return;
 
     input.value = "";
-
+    
     const messagesEl = document.getElementById("marius-chat-messages");
     const progEl = document.getElementById("marius-chat-progress");
     const errEl = document.getElementById("marius-chat-error");
-
+    
     messagesEl.innerHTML += `<div style="align-self:flex-end; background:var(--bg-2); padding:10px 14px; border-radius:14px 14px 2px 14px; max-width:85%; border:1px solid var(--line);">${escapeHtml(msg)}</div>`;
     messagesEl.scrollTop = messagesEl.scrollHeight;
-
+    
     progEl.style.display = "block";
     errEl.style.display = "none";
-
+    
     try {
       // Gather workspace context safely
       const repoPath = (state && state.captainDeck && state.captainDeck.repoPath) || "";
@@ -3594,16 +4353,16 @@
 
       const res = await requestJson(`${MCH}/agents/marius/chat`, {
         method: "POST",
-        body: {
+        body: { 
           message: msg,
           workspace: workspaceCtx
         }
       });
-
+      
       if (res && res.ok && res.data) {
         const reply = res.data.response;
         const footer = `provider: ${res.data.provider} | model: ${res.data.model} | profile: ${res.data.profile || 'fast'} | ${res.data.elapsed}s`;
-
+        
         messagesEl.innerHTML += `
           <div style="align-self:flex-start; background:var(--bg-1); padding:10px 14px; border-radius:14px 14px 14px 2px; max-width:85%; border:1px solid var(--line);">
             <div style="line-height:1.5; white-space:pre-wrap;">${escapeHtml(reply)}</div>
@@ -3627,16 +4386,16 @@
     const progEl = document.getElementById("marius-bench-progress");
     const resEl = document.getElementById("marius-bench-results");
     const tableEl = document.getElementById("marius-bench-table-container");
-
+    
     progEl.style.display = "block";
     resEl.style.display = "none";
-
+    
     try {
       const res = await requestJson(`${MCH}/agents/marius/model/bench`, {
         method: "POST",
         body: { quick: true }
       });
-
+      
       if (res && res.ok && res.data) {
         const d = res.data;
         let table = "Model                Time     Overall  Safety   Preview\n";
@@ -3649,14 +4408,14 @@
           table += `${m} ${t}s ${o} ${s} ${r.response_preview}\n`;
         });
         tableEl.textContent = table;
-
+        
         const bestEl = document.getElementById("marius-bench-rec-best");
         if (bestEl) bestEl.textContent = d.recommendations.best_terminal_default || "None";
         const fastestEl = document.getElementById("marius-bench-rec-fastest");
         if (fastestEl) fastestEl.textContent = d.recommendations.fastest_safe_terminal_model || "None";
         const codeEl = document.getElementById("marius-bench-rec-code");
         if (codeEl) codeEl.textContent = d.recommendations.best_code_local || "None";
-
+        
         resEl.style.display = "block";
       }
     } catch (e) {
@@ -3718,7 +4477,7 @@
     if (btnCtx) btnCtx.addEventListener("click", showMariusContext);
     const btnChatCtx = document.getElementById("marius-chat-context-btn");
     if (btnChatCtx) btnChatCtx.addEventListener("click", showMariusContext);
-
+    
     const input = document.getElementById("marius-chat-input");
     if (input) {
       input.addEventListener("keypress", (e) => {
@@ -3736,7 +4495,7 @@
         refreshMariusStatus();
       });
     }
-
+    
     const selMod = document.getElementById("marius-chat-model-select");
     if (selMod) {
       selMod.addEventListener("change", async (e) => {
@@ -3750,6 +4509,591 @@
   }
 
   // Init
+  // ─── Command Center dashboard ────────────────────────────────────────────
+
+  function timeAgo(iso) {
+    if (!iso) return "";
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return "";
+    const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (diffSec < 60) return "just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return `${diffDay}d ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  const CC_TYPE_BADGE = {
+    webpage: { label: "Webpage", cls: "cc-badge-web" },
+    selection: { label: "Selection", cls: "cc-badge-selection" },
+    youtube: { label: "YouTube", cls: "cc-badge-youtube" },
+    pdf: { label: "PDF", cls: "cc-badge-pdf" },
+    mail: { label: "Mail", cls: "cc-badge-mail" },
+  };
+
+  function ccSourceTypeOf(source) {
+    let tags = source.tags;
+    if (typeof tags === "string") {
+      try {
+        const parsed = JSON.parse(tags);
+        tags = Array.isArray(parsed) ? parsed : String(tags).split(/[\s,]+/);
+      } catch (_) {
+        tags = tags.split(/[\s,]+/);
+      }
+    }
+    tags = Array.isArray(tags) ? tags : [];
+    if (tags.includes("video")) return "youtube";
+    const found = tags.find((t) => CC_TYPE_BADGE[t]);
+    return found || "webpage";
+  }
+
+  function ccAskMariusAbout(label) {
+    const input = document.getElementById("cc-ask-input");
+    if (input) {
+      input.value = `Tell me about "${label}"`;
+      input.focus();
+    }
+    document.querySelector(".cc-ask-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function requestJsonTimeout(url, opts = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await requestJson(url, { ...opts, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function renderCommandCenterCaptures() {
+    const el = document.getElementById("cc-captures-list");
+    if (!el) return;
+    const sources = state.cc.sources;
+    if (sources === null) {
+      el.innerHTML = `<div class="cc-empty"><p class="muted">Brain vault didn't respond in time. <button type="button" class="cc-inline-retry" id="cc-captures-retry">Retry</button></p></div>`;
+      document.getElementById("cc-captures-retry")?.addEventListener("click", () => loadCommandCenter());
+      return;
+    }
+    if (!sources.length) {
+      el.innerHTML = `<div class="cc-empty">
+        <p>No captures yet.</p>
+        <p class="muted">Install <strong>Warden Watcher</strong> and save a page, selection, or video — it'll show up here.</p>
+      </div>`;
+      return;
+    }
+    el.innerHTML = sources.slice(0, 5).map((s) => {
+      const type = ccSourceTypeOf(s);
+      const badge = CC_TYPE_BADGE[type] || CC_TYPE_BADGE.webpage;
+      const title = escapeHtml(s.title || s.path || "Untitled");
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-type-badge ${badge.cls}">${badge.label}</span>
+          <span class="cc-row-title" title="${title}">${title}</span>
+        </div>
+        <div class="cc-row-meta">
+          <span class="muted">${escapeHtml(timeAgo(s.indexed_at))}</span>
+          <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+        </div>
+      </div>`;
+    }).join("");
+    el.querySelectorAll("[data-cc-ask]").forEach((btn) => {
+      btn.addEventListener("click", () => ccAskMariusAbout(btn.getAttribute("data-cc-ask")));
+    });
+  }
+
+  function renderCommandCenterConnections() {
+    const el = document.getElementById("cc-connections-list");
+    if (!el) return;
+    const brainHealth = state.cc.brainHealth;
+    const accounts = state.cc.accounts;
+    if (brainHealth === null && accounts === null) {
+      el.innerHTML = `<p class="muted">Connections didn't respond in time. <button type="button" class="cc-inline-retry" id="cc-conn-retry">Retry</button></p>`;
+      document.getElementById("cc-conn-retry")?.addEventListener("click", () => loadCommandCenter());
+      return;
+    }
+    const rows = [];
+    const vaultOk = !!(brainHealth && brainHealth.local && brainHealth.local.vault_exists);
+    rows.push({
+      label: "Local Brain vault",
+      ok: brainHealth === null ? null : vaultOk,
+      detail: brainHealth === null ? "Unknown" : (vaultOk ? "Indexed & ready" : "Not initialized"),
+    });
+    if (brainHealth && brainHealth.hybrid_enabled) {
+      rows.push({ label: "Google Brain mirror", ok: true, detail: "Enabled" });
+    }
+    if (accounts === null) {
+      rows.push({ label: "Mail accounts", ok: null, detail: "Unknown — retry" });
+    } else if (!accounts.length) {
+      rows.push({ label: "Mail accounts", ok: false, detail: "None connected — add in Settings" });
+    } else {
+      accounts.forEach((a) => {
+        rows.push({
+          label: `${a.provider || "account"} · ${a.display_email || a.account_id || ""}`,
+          ok: a.status === "connected" || a.status === "active",
+          detail: a.status || "unknown",
+        });
+      });
+    }
+    el.innerHTML = rows.map((r) => `<div class="cc-row">
+      <div class="cc-row-main">
+        <span class="cc-dot ${r.ok === null ? "" : (r.ok ? "cc-dot-good" : "cc-dot-warn")}"></span>
+        <span class="cc-row-title">${escapeHtml(r.label)}</span>
+      </div>
+      <span class="muted cc-row-meta">${escapeHtml(r.detail)}</span>
+    </div>`).join("");
+  }
+
+  function renderCommandCenterTrace() {
+    const el = document.getElementById("cc-trace-list");
+    if (!el) return;
+    const items = (state.recentEvidence || []).slice(0, 5);
+    if (!items.length) {
+      el.innerHTML = `<div class="cc-empty"><p class="muted">No recent proof yet. Once an agent runs or a capture is saved, it shows up here.</p></div>`;
+      return;
+    }
+    el.innerHTML = items.map((ev) => {
+      const label = ev.title || ev.kind || ev.evidence_type || "Run artifact";
+      const ok = ev.status ? ev.status !== "failed" && ev.status !== "error" : true;
+      return `<div class="cc-row">
+        <div class="cc-row-main">
+          <span class="cc-dot ${ok ? "cc-dot-good" : "cc-dot-bad"}"></span>
+          <span class="cc-row-title">${escapeHtml(label)}</span>
+        </div>
+        <span class="muted cc-row-meta">${escapeHtml(timeAgo(ev.created_at || ev.timestamp))}</span>
+      </div>`;
+    }).join("");
+  }
+
+  // ─── Next Best Move decision engine ──────────────────────────────────────
+  // Reads only data already fetched elsewhere in this session — no guessing,
+  // no fabricated numbers. Unknown inputs (fetch failed/timed out) are treated
+  // as "unknown", never silently coerced into a false-good or false-bad state.
+
+  function computeNextBestMove() {
+    const cc = state.cc || {};
+    const brainHealth = cc.brainHealth;
+    const brainUnknown = brainHealth === null || brainHealth === undefined;
+    const vaultOk = !brainUnknown && !!(brainHealth.local && brainHealth.local.vault_exists);
+    const sourceCount = !brainUnknown && brainHealth.local ? (brainHealth.local.source_count || 0) : (Array.isArray(cc.sources) ? cc.sources.length : null);
+
+    const accounts = cc.accounts;
+    const accountsUnknown = accounts === null || accounts === undefined;
+    const mailConnected = !accountsUnknown && accounts.some((a) => a.status === "connected" || a.status === "active");
+
+    const evidenceCount = (state.recentEvidence || []).length;
+    const steps = (state.activeCaptainPlan && state.activeCaptainPlan.steps) || [];
+    const blockedStep = steps.find((s) => s.status === "blocked");
+
+    const health = state.health || {};
+    const runnerKnown = Object.prototype.hasOwnProperty.call(health, "tmux_runner_enabled");
+    const runnerAvailable = !!(health.tmux_runner_enabled && health.codex_runner_enabled);
+
+    const pills = [
+      { label: "Brain", ok: brainUnknown ? null : vaultOk },
+      { label: "Mail", ok: accountsUnknown ? null : mailConnected },
+      { label: "Watcher", ok: sourceCount === null ? null : sourceCount > 0 },
+      { label: "Proof", ok: evidenceCount > 0 },
+      { label: "Runner", ok: runnerKnown ? (runnerAvailable ? true : null) : null, optional: true },
+    ];
+
+    let move;
+    if (brainUnknown && accountsUnknown) {
+      move = {
+        title: "Checking Warden status…",
+        reason: "Brain and Mail didn't respond yet — this will update automatically.",
+        ctaLabel: "Retry now",
+        ctaAction: "retry",
+      };
+    } else if (!brainUnknown && !vaultOk) {
+      move = {
+        title: "Initialize Warden Brain",
+        reason: "Watcher captures and saved mail need a local vault before they become searchable.",
+        ctaLabel: "Initialize Vault",
+        ctaAction: "init-vault",
+      };
+    } else if (sourceCount === 0) {
+      move = {
+        title: "Save your first source",
+        reason: "Use Warden Watcher to capture a webpage, YouTube video, PDF, or selected text.",
+        ctaLabel: "Go to Brain",
+        ctaAction: "goto-brain",
+      };
+    } else if (!accountsUnknown && !mailConnected) {
+      move = {
+        title: "Connect Gmail or iCloud",
+        reason: "Marius can search your inbox once a read-only mail account is connected.",
+        ctaLabel: "Open Mail Settings",
+        ctaAction: "goto-mail",
+      };
+    } else if (blockedStep) {
+      move = {
+        title: "Review blocked task",
+        reason: `"${blockedStep.title || blockedStep.step_id}" needs a decision before continuing.`,
+        ctaLabel: "Open Proof / Tasks",
+        ctaAction: "goto-tasks",
+      };
+    } else if (sourceCount > 0 && evidenceCount === 0) {
+      move = {
+        title: "Ask Marius what you captured",
+        reason: "You have saved sources. Turn them into a summary, decision, or task.",
+        ctaLabel: "Ask about recent captures",
+        ctaAction: "ask-captures",
+      };
+    } else if (Array.isArray(cc.sources) && cc.sources.length) {
+      const latest = cc.sources[0];
+      move = {
+        title: "Review latest capture",
+        reason: `"${latest.title || latest.path}" is ready in Brain.`,
+        ctaLabel: "Ask Marius about it",
+        ctaAction: "ask-latest",
+      };
+    } else if (runnerKnown && !runnerAvailable) {
+      move = {
+        title: "Agent running is not enabled yet",
+        reason: "You can still use Brain, Mail, Watcher, and Marius. Enable a private runner when you want code/task execution.",
+        ctaLabel: "Open Advanced System Status",
+        ctaAction: "goto-advanced",
+      };
+    } else {
+      move = {
+        title: "Ask Marius what changed today",
+        reason: "Warden has Brain sources, connected mail, and proof history available.",
+        ctaLabel: "Ask Marius",
+        ctaAction: "ask-general",
+      };
+    }
+
+    const secondary = [
+      { label: "Search Brain", action: "goto-brain" },
+      { label: "Open Mail", action: "goto-mail" },
+      { label: "View Proof", action: "goto-tasks" },
+      { label: "Ask Marius", action: "ask-general" },
+    ].filter((s) => s.action !== move.ctaAction).slice(0, 3);
+
+    return { ...move, pills, secondary };
+  }
+
+  function runNextMoveAction(action) {
+    switch (action) {
+      case "retry":
+        loadCommandCenter();
+        break;
+      case "init-vault":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("brain-vault-init-btn")?.click(), 200);
+        break;
+      case "goto-brain":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("brain-vault-card")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        break;
+      case "goto-mail":
+        setActiveSection("settings");
+        setTimeout(() => document.getElementById("mail-test-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        break;
+      case "goto-tasks":
+        setActiveSection("evidence");
+        break;
+      case "goto-advanced":
+        setActiveSection("settings");
+        setTimeout(() => document.querySelector("[data-testid='settings-advanced-details']")?.setAttribute("open", ""), 100);
+        break;
+      case "ask-captures":
+        ccAskMariusAbout("what I captured recently");
+        break;
+      case "ask-latest": {
+        const latest = state.cc.sources && state.cc.sources[0];
+        ccAskMariusAbout(latest ? (latest.title || latest.path) : "my latest capture");
+        break;
+      }
+      case "ask-general":
+      default:
+        document.getElementById("cc-ask-input")?.focus();
+        document.querySelector(".cc-ask-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        break;
+    }
+  }
+
+  function renderCommandCenterNextAction() {
+    const el = document.getElementById("cc-next-action");
+    if (!el) return;
+    const move = computeNextBestMove();
+    el.innerHTML = `
+      <div class="cc-next">
+        <h4 class="cc-next-title">${escapeHtml(move.title)}</h4>
+        <p class="cc-next-reason">${escapeHtml(move.reason)}</p>
+        <button type="button" class="btn primary cc-next-cta" id="cc-next-cta">${escapeHtml(move.ctaLabel)}</button>
+        ${move.secondary.length ? `<div class="cc-next-secondary">${move.secondary.map((s) => `<button type="button" class="cc-suggestion-chip cc-next-chip" data-cc-next-action="${s.action}">${escapeHtml(s.label)}</button>`).join("")}</div>` : ""}
+      </div>
+      <div class="cc-next-pills">
+        ${move.pills.map((p) => `<span class="cc-status-pill-mini ${p.ok === null ? "cc-pill-unknown" : (p.ok ? "cc-pill-good" : "cc-pill-warn")}">${escapeHtml(p.label)}${p.optional && p.ok === null ? " (optional)" : ""}</span>`).join("")}
+      </div>
+    `;
+    document.getElementById("cc-next-cta")?.addEventListener("click", () => runNextMoveAction(move.ctaAction));
+    el.querySelectorAll("[data-cc-next-action]").forEach((btn) => {
+      btn.addEventListener("click", () => runNextMoveAction(btn.getAttribute("data-cc-next-action")));
+    });
+  }
+
+  function ccSkeleton(lines = 3) {
+    const widths = ["w-80", "w-60", "w-40"];
+    return `<div class="wcc-skeleton">${widths.slice(0, lines).map((w) => `<div class="wcc-skeleton-line ${w}"></div>`).join("")}</div>`;
+  }
+
+  async function loadCommandCenter() {
+    state.cc = state.cc || {};
+    const captuesEl = document.getElementById("cc-captures-list");
+    const connEl = document.getElementById("cc-connections-list");
+    const nextEl = document.getElementById("cc-next-action");
+    if (captuesEl) captuesEl.innerHTML = ccSkeleton(3);
+    if (connEl) connEl.innerHTML = ccSkeleton(2);
+    if (nextEl) nextEl.innerHTML = ccSkeleton(3);
+
+    const [sourcesRes, healthRes, accountsRes] = await Promise.allSettled([
+      requestJsonTimeout(`${MCH}/warden/brain/sources?limit=6`, {}, 8000),
+      requestJsonTimeout(`${MCH}/warden/brain/health`, {}, 8000),
+      requestJsonTimeout(`${MCH}/warden/connectors/accounts`, {}, 8000),
+    ]);
+    state.cc.sources = sourcesRes.status === "fulfilled" ? (sourcesRes.value.sources || []) : null;
+    state.cc.brainHealth = healthRes.status === "fulfilled" ? healthRes.value : null;
+    state.cc.accounts = accountsRes.status === "fulfilled" ? (accountsRes.value.accounts || []) : null;
+
+    renderCommandCenterCaptures();
+    renderCommandCenterConnections();
+    renderCommandCenterTrace();
+    renderCommandCenterNextAction();
+  }
+
+  function wireSidebarExtras() {
+    // Suggestion chips fill + submit the ask form
+    document.querySelectorAll("[data-cc-suggest]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const input = document.getElementById("cc-ask-input");
+        if (!input) return;
+        input.value = chip.getAttribute("data-cc-suggest") || "";
+        document.getElementById("cc-ask-form")?.requestSubmit();
+      });
+    });
+
+    // Onboarding toggle
+    const toggleBtn = document.getElementById("warden-onboarding-toggle");
+    const onboardingCard = document.getElementById("warden-onboarding-card");
+    if (toggleBtn && onboardingCard) {
+      toggleBtn.addEventListener("click", () => {
+        const hidden = onboardingCard.style.display === "none";
+        onboardingCard.style.display = hidden ? "" : "none";
+        sessionStorage.setItem("warden-onboarding-dismissed", hidden ? "" : "1");
+      });
+    }
+
+    // Resource nav items that scroll to a specific settings card after switching section
+    document.querySelectorAll("[data-scroll-target]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-scroll-target");
+        setTimeout(() => {
+          document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 60);
+      });
+    });
+
+    // Sidebar Brain search
+    const searchForm = document.getElementById("sidebar-search-form");
+    if (searchForm) {
+      searchForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = document.getElementById("sidebar-search-input");
+        const resultsEl = document.getElementById("sidebar-search-results");
+        const q = (input.value || "").trim();
+        if (!q || !resultsEl) return;
+        resultsEl.style.display = "block";
+        resultsEl.innerHTML = `<p class="muted sidebar-search-empty">Searching…</p>`;
+        try {
+          const data = await requestJson(`${MCH}/warden/brain/search?q=${encodeURIComponent(q)}&limit=5`);
+          const results = data.results || [];
+          if (!results.length) {
+            resultsEl.innerHTML = `<p class="muted sidebar-search-empty">No matches in Brain yet.</p>`;
+            return;
+          }
+          resultsEl.innerHTML = results.map((r) => {
+            const title = escapeHtml(r.title || r.path || "Untitled");
+            return `<div class="sidebar-search-result">
+              <span class="sidebar-search-result-title" title="${title}">${title}</span>
+              <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+            </div>`;
+          }).join("");
+          resultsEl.querySelectorAll("[data-cc-ask]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              setActiveSection("mission");
+              ccAskMariusAbout(btn.getAttribute("data-cc-ask"));
+              resultsEl.style.display = "none";
+            });
+          });
+        } catch (e) {
+          resultsEl.innerHTML = `<p class="muted sidebar-search-empty">Brain search unavailable.</p>`;
+        }
+      });
+    }
+  }
+
+  async function loadSidebarAgentsAndTasks() {
+    const tasksDot = document.getElementById("nav-dot-tasks");
+    const tasksCount = document.getElementById("nav-tasks-count");
+    const proofDot = document.getElementById("nav-dot-proof");
+    const proofCount = document.getElementById("nav-proof-count");
+    const agentsDot = document.getElementById("nav-dot-agents");
+
+    const activeSteps = (state.activeCaptainPlan && state.activeCaptainPlan.steps) || [];
+    if (tasksCount) tasksCount.textContent = activeSteps.length ? String(activeSteps.length) : "";
+    if (tasksDot) tasksDot.className = `nav-item-dot ${activeSteps.length ? "nav-item-dot-good" : ""}`;
+
+    const evidenceCount = (state.recentEvidence || []).length;
+    if (proofCount) proofCount.textContent = evidenceCount ? String(evidenceCount) : "";
+    if (proofDot) proofDot.className = `nav-item-dot ${evidenceCount ? "nav-item-dot-good" : ""}`;
+
+    if (agentsDot) {
+      try {
+        const data = await requestJson(`${MCH}/agents`);
+        const runnable = (data.agents || []).some((a) => a.runnable);
+        agentsDot.className = `nav-item-dot ${runnable ? "nav-item-dot-good" : "nav-item-dot-warn"}`;
+      } catch (e) {
+        agentsDot.className = "nav-item-dot nav-item-dot-warn";
+      }
+    }
+  }
+
+  const CC_SOURCE_KEYWORDS = ["captur", "saved", "source", "brain", "note", "vault", "page", "video", "pdf"];
+
+  async function tryBrainAskFallback(msg, replyEl) {
+    const looksSourceRelated = CC_SOURCE_KEYWORDS.some((k) => msg.toLowerCase().includes(k));
+    if (!looksSourceRelated) return false;
+    try {
+      const res = await requestJsonTimeout(`${MCH}/warden/brain/ask`, {
+        method: "POST",
+        body: { question: msg },
+      }, 8000);
+      if (res && res.ok && res.answer) {
+        replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.answer)}</div>
+          <div class="cc-ask-footer muted">Answered from Brain search (Marius was unavailable)</div>`;
+        return true;
+      }
+    } catch (e) {
+      // fall through to timeout UI
+    }
+    return false;
+  }
+
+  function renderMariusTimeoutFallback(replyEl, msg) {
+    replyEl.innerHTML = `
+      <p class="cc-ask-error">Marius is taking too long.</p>
+      <div class="cc-ask-fallback-actions">
+        <button type="button" class="btn" id="cc-ask-retry">Try again</button>
+        <button type="button" class="btn" id="cc-ask-fallback-brain">Search Brain</button>
+        <button type="button" class="btn" id="cc-ask-fallback-captures">View Recent Captures</button>
+        <button type="button" class="btn" id="cc-ask-fallback-mail">Open Mail</button>
+      </div>`;
+    document.getElementById("cc-ask-retry")?.addEventListener("click", () => {
+      document.getElementById("cc-ask-input").value = msg;
+      document.getElementById("cc-ask-form")?.requestSubmit();
+    });
+    document.getElementById("cc-ask-fallback-brain")?.addEventListener("click", () => runNextMoveAction("goto-brain"));
+    document.getElementById("cc-ask-fallback-captures")?.addEventListener("click", () => {
+      document.querySelector("[data-testid='cc-card-captures']")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    document.getElementById("cc-ask-fallback-mail")?.addEventListener("click", () => runNextMoveAction("goto-mail"));
+  }
+
+  // ─── Command box intent routing ──────────────────────────────────────────
+  // "make a website that says hello world" -> task plan, not a chat answer.
+  // "search my inbox for..." -> Mail. Everything else -> Ask Marius (with the
+  // existing Brain-ask fallback on timeout).
+
+  const CC_TASK_INTENT_RE = /^(make|build|create|write|implement|fix|refactor|set ?up|add|deploy|ship|develop)\b/i;
+  const CC_TASK_KEYWORD_RE = /\b(website|webpage|app|script|feature|bug|endpoint|function|component)\b/i;
+  const CC_MAIL_INTENT_RE = /\b(inbox|email|mail)\b/i;
+
+  function classifyCommandIntent(msg) {
+    if (CC_TASK_INTENT_RE.test(msg) || CC_TASK_KEYWORD_RE.test(msg)) return "task";
+    if (CC_MAIL_INTENT_RE.test(msg)) return "mail";
+    return "ask";
+  }
+
+  async function handleTaskIntent(msg, replyEl) {
+    replyEl.innerHTML = `<p class="muted">Creating a task plan…</p>`;
+    try {
+      await openCaptainDeckModal();
+      const goalEl = document.getElementById("captain-goal");
+      if (goalEl) goalEl.value = msg;
+      await createCaptainPlan();
+      closeCaptainDeckModal();
+      const plan = state.activeCaptainPlan;
+      if (plan && plan.steps && plan.steps.length) {
+        replyEl.innerHTML = `<div class="cc-ask-answer">Created a task plan: <strong>${escapeHtml(plan.title || msg)}</strong> (${plan.steps.length} step${plan.steps.length === 1 ? "" : "s"}). Review it below.</div>
+          <div class="cc-ask-footer muted">${escapeHtml(plan.source === "real_captain" ? "Captain-planned" : "Local deterministic plan (no provider key configured)")}</div>`;
+      } else {
+        replyEl.innerHTML = `<p class="cc-ask-error">Plan came back empty — check Advanced: System Status for Captain configuration.</p>`;
+      }
+      document.getElementById("current-mission-plan")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      replyEl.innerHTML = `<p class="cc-ask-error">Couldn't create a task plan: ${escapeHtml(e.message || String(e))}</p>`;
+    }
+  }
+
+  function handleMailIntent(msg, replyEl) {
+    replyEl.innerHTML = `<p class="muted">Opening Mail search for this…</p>`;
+    setActiveSection("settings");
+    setTimeout(() => {
+      const queryEl = document.getElementById("mail-test-query");
+      if (queryEl) queryEl.value = msg.replace(CC_MAIL_INTENT_RE, "").replace(/\s+/g, " ").trim() || msg;
+      document.getElementById("mail-test-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  }
+
+  function wireCommandCenter() {
+    const form = document.getElementById("cc-ask-form");
+    if (!form) return;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.getElementById("cc-ask-input");
+      const replyEl = document.getElementById("cc-ask-reply");
+      const msg = (input.value || "").trim();
+      if (!msg) return;
+      const submitBtn = form.querySelector(".cc-ask-submit");
+      if (submitBtn) submitBtn.disabled = true;
+      replyEl.style.display = "block";
+
+      const intent = classifyCommandIntent(msg);
+      try {
+        if (intent === "task") {
+          await handleTaskIntent(msg, replyEl);
+          return;
+        }
+        if (intent === "mail") {
+          handleMailIntent(msg, replyEl);
+          return;
+        }
+        replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
+        const res = await requestJsonTimeout(`${MCH}/agents/marius/chat`, {
+          method: "POST",
+          body: { message: msg, workspace: null },
+        }, 10000);
+        if (res && res.ok && res.data) {
+          replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.data.response)}</div>
+            <div class="cc-ask-footer muted">${escapeHtml(res.data.model || "")}</div>`;
+        } else {
+          replyEl.innerHTML = `<p class="cc-ask-error">Marius couldn't answer that: ${escapeHtml((res && res.error) || "unknown error")}</p>`;
+        }
+      } catch (e) {
+        const usedFallback = await tryBrainAskFallback(msg, replyEl);
+        if (!usedFallback) renderMariusTimeoutFallback(replyEl, msg);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+
   async function init() {
     // Hide any remaining old complex UI elements (from previous full cockpit) - force SIMPLE MODE
     const oldSelectors = [".rail", ".panel", "#sessions-list", "#queue-list", "#artifact-list", "#evidence-list", "#gate-list", "#safety-list", "#log-hint", "section.layout-stack", "main.panel"];
@@ -3763,8 +5107,25 @@
       el.style.display = "none";
     });
 
+    // Onboarding card dismiss
+    const onboardingCard = document.getElementById("warden-onboarding-card");
+    const onboardingDismiss = document.getElementById("onboarding-dismiss-btn");
+    if (onboardingDismiss && onboardingCard) {
+      if (sessionStorage.getItem("warden-onboarding-dismissed")) {
+        onboardingCard.style.display = "none";
+      }
+      onboardingDismiss.addEventListener("click", () => {
+        onboardingCard.style.display = "none";
+        sessionStorage.setItem("warden-onboarding-dismissed", "1");
+      });
+    }
+
     wireSimpleUI();
     wireMariusEvents(); // Initialize Marius UI bindings
+    wireMailTestPanel();
+    wireBrainVaultSettings();
+    wireCommandCenter();
+    wireSidebarExtras();
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
@@ -3773,6 +5134,9 @@
     if (window.WardenControlRoom && window.WardenControlRoom.refresh) {
       await window.WardenControlRoom.refresh({ quiet: true });
     }
+    loadCommandCenter().catch((e) => console.error("command center load error", e));
+    loadBrainVaultSettings().catch((e) => console.error("brain vault settings load error", e));
+    loadSidebarAgentsAndTasks().catch((e) => console.error("sidebar agents/tasks load error", e));
 
     // initial status check for disabled note etc is handled in deploy
     // If user has runner flags in this process (e.g. private), card will reflect Ready

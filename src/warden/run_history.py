@@ -132,18 +132,21 @@ def create_run_record(
     transcript_excerpt: str | None = None,
     created_by: str = "operator",
     service_mode: str = "private",
+    original_prompt: str | None = None,
 ) -> dict[str, Any]:
     safe_prompt, prompt_redacted = redact_secrets(prompt or "")
     _reject_env_like_content(safe_prompt)
     safe_transcript, transcript_redacted = redact_secrets(transcript_excerpt or "")
+    safe_original, _ = redact_secrets(original_prompt or "") if original_prompt else ("", False)
     record = {
         "run_id": run_id,
-        "title": _derive_run_title(title, safe_prompt),
+        "title": _derive_run_title(title, safe_original or safe_prompt),
         "agent_id": agent_id,
         "agent_adapter": agent_adapter,
         "repo_id": repo_id,
         "branch": branch,
         "prompt": safe_prompt,
+        "original_prompt": safe_original or None,
         "status": status,
         "started_at": _now_iso(),
         "completed_at": None,
@@ -314,6 +317,7 @@ def evidence_summaries_for_run(root: Path, evidence_ids: list[str]) -> list[dict
 
 def sanitize_run_summary(run: dict[str, Any]) -> dict[str, Any]:
     prompt = run.get("prompt") or ""
+    excerpt_source = run.get("original_prompt") or prompt
     transcript = run.get("transcript_excerpt") or ""
     return {
         "run_id": run.get("run_id"),
@@ -325,7 +329,7 @@ def sanitize_run_summary(run: dict[str, Any]) -> dict[str, Any]:
         "status": run.get("status"),
         "started_at": run.get("started_at"),
         "completed_at": run.get("completed_at"),
-        "prompt_excerpt": _prompt_excerpt(prompt),
+        "prompt_excerpt": _prompt_excerpt(excerpt_source),
         "transcript_excerpt": _content_excerpt(transcript, 500),
         "evidence_count": len(run.get("evidence_ids") or []),
         "evidence_ids": list(run.get("evidence_ids") or []),
