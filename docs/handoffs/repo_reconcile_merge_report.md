@@ -217,3 +217,61 @@ This is a new, separate blocker class (external tooling/service provisioning for
 3. **PR #30 status:** `MERGEABLE`. CI: still `FAILURE`, but failure count dropped 33 → 14, and the 14 remaining are unrelated to both fixed blockers (confirmed by inspecting the CI log directly).
 4. **Ready to merge:** the two named blockers are resolved. CI is not fully green — 14 unrelated pre-existing environment-dependency failures remain, out of this session's scope.
 5. **Exact next action for Matt:** review commit `982b3a5` on [PR #30](https://github.com/matthewjmcbridejr-code/mcharness/pull/30). Decide whether to (a) merge now given CI's remaining failures are understood, documented, and unrelated to the code changes, or (b) request a follow-up to provision Ollama/`codex`/`google` in `ci.yml` (or mark those specific tests as requiring external services) before merging. No push to `master` was made or attempted.
+
+## 14. Final Merge Verification
+
+### PR State
+
+- PR #30, `feat/marius-resident-core` → `master`, **OPEN**, not draft.
+- `mergeable: MERGEABLE`.
+- `headRefOid`: `653c6d867f9e4cda11c0e3ba7496d42d43e8f07a`.
+- Checks: `tests` (CI workflow) → **FAILURE** (same known, pre-existing external-service gap documented in §12 — no Ollama/`codex` CLI/`google` package on the runner; 14 failures, none path- or code-related).
+- Working tree: clean except the same pre-existing untracked `docs/fable5_user_feature_audit.md` seen across every prior session — left untouched, not part of this PR.
+
+### Final Local Proof
+
+```
+git diff --check                          → exit 0, clean
+python3 -m py_compile $(find src -name '*.py')   → PY_COMPILE OK
+node --check web/warden/app.js             → SYNTAX OK
+pytest tests/test_warden_assistant.py -q   → 6 passed
+pytest tests/test_warden_api.py tests/test_warden_cockpit_static.py tests/test_warden_cockpit_functional.py -q
+                                            → 116 passed, 3 warnings
+pytest tests --ignore=tests/e2e --ignore=tests/browser -q
+                                            → 743 passed, 1 skipped, 3 warnings
+CI=1 pytest tests --ignore=tests/e2e --ignore=tests/browser -q
+                                            → 743 passed, 1 skipped, 3 warnings
+```
+
+Note on the `CI=1` run: it passes identically to the normal run because Matt's machine actually has Ollama, `codex`, and `google` available — setting the env var alone doesn't reproduce the GitHub runner's missing-dependency condition locally. The 14 CI failures documented in §12 can only be reproduced on a runner that genuinely lacks those services; they are not caught by `CI=1` locally, which is expected and doesn't change the merge decision.
+
+### Health Endpoint WIP
+
+**Included in PR #30**, as part of commit `982b3a5` (carried forward from a prior session's uncommitted WIP that was folded into that commit rather than risk a temporary revert). Located in `src/warden/api.py`'s `/health` endpoint:
+
+```python
+# Health must stay cheap: use static counts instead of _repo_entries()/
+# _lane_entries(), which shell out to git and probe CLI executables per
+# item and can push this endpoint past client-side timeouts (e.g. the
+# browser extension's 2s abort).
+"available_lanes_count": len(AGENT_LANES),
+"repo_count": len(SAFE_REPO_PATHS),
+```
+
+Reviewed in full context this session. It's a small, complete, well-reasoned perf/safety fix — the previous implementation called `_repo_entries()`/`_lane_entries()` on every health check, which shell out to `git` and probe CLI executables per entry; that's too slow for a health endpoint the browser extension polls with a 2-second abort. Replacing with static `len()` counts is correct and doesn't reduce information meaningfully (`/health` never needed live git status, just a count). Confirmed via the full test suite (743/743) that nothing depends on the old computed-count behavior. **Acceptable to include.**
+
+### Merge Decision
+
+**Safe to merge.**
+
+All criteria met:
+- PR open, not draft, mergeable
+- No unresolved conflicts (confirmed via `git diff --check` and the merge resolution work in §10)
+- Full local suite passes: 743/743 (both normal and `CI=1`)
+- No suspicious secrets or junk in the diff (`.env.*.example` templates and legitimate token-handling source only)
+- Health-endpoint WIP reviewed and judged acceptable
+- The one red GitHub check is proven, documented (§12, reconfirmed above), and external-service-only — not a code, path, or conflict defect
+
+### Merge Result
+
+_(filled in after merge — see below)_
