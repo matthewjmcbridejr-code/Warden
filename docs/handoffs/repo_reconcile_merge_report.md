@@ -1,10 +1,12 @@
 # Repo Reconcile Merge Report
 
-## 1. Executive Verdict
+## 1. Executive Verdict (superseded — see §10)
 
-**Not ready to merge.**
+**Not ready to merge** *(at time of original audit)*.
 
 Local state is clean, tests pass (737/737 non-skipped), and there are no secrets or junk files in the diff. The blocker is real: `feat/marius-resident-core` and `origin/master` have independently rewritten the same core files (`src/warden/api.py`, `src/warden/app.py`, the entire `web/warden/` UI), producing **158 textual conflict hunks across 18 files**. This is a feature-level divergence, not a mechanical one — resolving it means choosing, file by file, between two different implementations of overlapping functionality (this branch's Captain/webstudio/mail/OAuth work vs. master's newly-merged "local assistant / memory cockpit" work from PR #29). That decision requires product judgment I don't have authority to make unilaterally, so I stopped rather than guess.
+
+**Update:** conflicts have since been resolved in a follow-up session — see [§10](#10-conflict-resolution-update) below. PR #30 is now `MERGEABLE` with 743/743 local tests passing. GitHub Actions CI is red for a pre-existing, unrelated reason (see §10).
 
 ## 2. Repo State
 
@@ -103,3 +105,71 @@ pytest tests --ignore=tests/e2e --ignore=tests/browser -q
 ```
 
 Do this locally with real review of both UI/API implementations side by side — not as a scripted auto-resolution. Once conflicts are resolved and tests pass, this report's process (backup branch, diff capture, test run, then push) can be repeated to actually land the merge.
+
+## 10. Conflict Resolution Update
+
+Performed in a follow-up session. Backup branch used: `backup/pre-conflict-resolution-20260703-123749` (created fresh before starting; `backup/pre-reconcile-20260703-121741` from the original audit also still exists). Working tree had the same pre-existing unrelated dirty state as before (`src/warden/api.py` health-endpoint diff, untracked `docs/fable5_user_feature_audit.md`) — stashed before the merge, popped back cleanly after, unchanged.
+
+### Files Resolved
+
+All 18 originally-conflicted files, plus files that auto-merged cleanly (listed for completeness since they carry master's real feature work):
+
+**Resolved by hand:** `.gitignore`, `README.md`, `docs/architecture.md`, `docs/quickstart.md`, `docs/warden_demo_script.md`, `src/warden/api.py`, `src/warden/app.py`, `src/warden/agent_registry.py`, `src/warden/run_history.py`, `src/warden/workbench.py`, `tests/test_warden_api.py`, `tests/test_warden_cockpit_functional.py`, `tests/test_warden_cockpit_static.py`, `tests/browser/warden-cockpit.spec.js`, `web/warden/app.css`, `web/warden/app.html`, `web/warden/app.js`, `web/warden/index.html`.
+
+**Auto-merged cleanly (master-only additions, no conflict):** `src/warden/assistant.py`, `src/warden/rag_adapters.py`, `docs/warden_assistant.md`, `docs/warden_memory_examples.md`, `docs/warden_memory_style.md`, `tests/test_warden_assistant.py`.
+
+### Resolution Policy
+
+Not a blanket "ours" or "theirs" — each file was inspected individually:
+
+- **`.gitignore`:** union of both sides plus explicit `.env`/`.env.*`/`*.sqlite`/`*.sqlite3` coverage that neither side had.
+- **`README.md`, `docs/architecture.md`, `docs/quickstart.md`:** kept this branch's versions. Verified against the actual codebase — master's `quickstart.md` referenced `src.server.api:app`, a module that does not exist anywhere in the repo (`src/server/` has no `api.py`); this branch's version was the accurate one.
+- **`docs/warden_demo_script.md`:** both kept — master's version renamed to `docs/warden_control_room_demo_script.md` since it covers a genuinely different walkthrough (proof-gate/control-room angle vs. this branch's memory/command-center angle).
+- **`src/warden/agent_registry.py`, `run_history.py`, `workbench.py`:** kept this branch's versions after confirming each was a strict superset of master's (Marius agent listing with a working import, `original_prompt` field with test coverage, richer memory-search relevance scoring) — nothing from master's side was lost, only additive.
+- **Test files:** kept this branch's versions after diffing function-name sets. `test_warden_api.py` had exactly one master-only test (`test_mcharness_captain_plan_rejects_missing_key`) and it asserts behavior (hard-reject without a cloud key) that this branch deliberately replaced with a local-preview fallback — including it would assert against intentionally-changed behavior, not catch a real regression. `test_warden_cockpit_static.py` on master's side imported `src.server.api` (nonexistent, would fail at collection). `test_warden_cockpit_functional.py` on master's side hardcoded `/root/mcharness-public-export` instead of a portable path.
+
+### API/UI Decisions
+
+**`src/warden/api.py`** — kept this branch's implementation as the base (152 routes vs. master's 91 — a near-strict superset) and grafted in master's 3 unique routes: `GET /warden/assistant/health`, `POST /warden/assistant/context`, `POST /warden/assistant/chat`, plus the `AssistantRequest`/`WardenAssistantRequest` imports and model. Also added master's `_require_private_memory_access` gate to the `/memories`, `/memory/health`, `/memory/recall`, `/memories/search`, `/memories/recall` routes — that gate is the established, consistently-used convention elsewhere in this same file (already present unconflicted at 10+ other call sites), so applying it to the remaining ungated memory routes was a real consistency fix, not a feature swap.
+
+Two additional gate additions were tried and then **reverted** after the proof suite caught them: adding `_require_run_history_write` to the plan-dispatch endpoint, and adding `_run_history_read_enabled` gating to `/captain/plans/recent`. Both broke existing tests that explicitly assert those two endpoints are intentionally ungated on the public service (one test's docstring literally says "dispatch is now ungated — returns 404 (plan not found) not 403"). This branch's own test suite was treated as ground truth over a plausible-looking consistency argument.
+
+**`src/warden/app.py`** — kept both: this branch's `NoCacheWebAssetsMiddleware` (forces UI asset revalidation on every load) and master's Marius bot startup integration (`from src.marius.api import router as marius_router` + `start_bot()` on FastAPI startup, with an `ImportError` fallback). Neither conflicted with the other; both are additive to the base `create_app()`.
+
+**`web/warden/*`** — kept this branch's versions of `app.css`, `app.html`, `app.js`, `index.html` in full. Master's unique contribution here was a frontend "Assistant" panel: one nav button, one `<section>`, ~35 lines of CSS, and ~150 lines of JS (state object, 7 functions, event wiring) spread across 42 interleaved conflict blocks in a ~5,000-line `app.js`. Confirmed via function-name diffing that all master-unique JS functions belonged to this one feature (no unrelated fixes were bundled in). The backend for this feature is fully wired and testable (see above); the frontend panel was explicitly scoped out this session rather than hand-spliced without the ability to visually verify it in a browser. This was a disclosed tradeoff, confirmed with the user mid-session (they chose "resolve to match current UI, defer frontend panel" over porting it now or aborting the merge).
+
+### Tests After Resolution
+
+```bash
+git diff --check                                    # clean, no whitespace/marker issues
+python3 -m py_compile $(find src -name '*.py')      # PY_COMPILE OK
+pytest tests --ignore=tests/e2e --ignore=tests/browser -q
+```
+
+First run after initial resolution: **6 failed, 737 passed, 1 skipped** — all 6 failures traced to the two gate additions described above (plan-dispatch and `/captain/plans/recent`). Reverted both.
+
+Second run after fixes: **743 passed, 1 skipped, 0 failed** (743 vs. the original branch's 737 — the 6 extra are `test_warden_assistant.py`, auto-merged in from master, covering the newly-wired assistant backend).
+
+Also verified: `grep` repo-wide for `<<<<<<<`/`=======`/`>>>>>>>` outside `.git`/`.venv`/`node_modules`/`*.lock` — zero real conflict markers (only false-positive CSS/HTML comment-divider lines matched). `node --check` passed on all resolved `.js` files.
+
+### PR Status After Push
+
+Pushed `112d344` to `origin/feat/marius-resident-core`. `gh pr view 30` now reports **`mergeable: MERGEABLE`** (was `CONFLICTING`). GitHub Actions CI (`ci.yml`, added in the prior session) triggered for the first time on this push and reported **FAILURE** — but this is a pre-existing, unrelated environment issue, not a merge defect: `SAFE_REPO_PATHS` in `api.py` hardcodes `Path.home() / "workspaces" / "warden" / "mcharness-public-export"`, which resolves to a path that only exists on Matt's machine. On GitHub's runner (`/home/runner/...`), 33 tests that depend on that path failing to exist correctly fail with 400s ("Allowlisted repo path does not exist") and `FileNotFoundError`. The exact same 33 tests pass locally at the real path, confirmed in this session's own proof run (743/743). This gap predates the merge entirely — it's the reason CI never produced a check run before this push either.
+
+### Remaining Risks
+
+1. **CI is red for a portability reason, not a code defect.** `SAFE_REPO_PATHS` (and the `test_no_drift_in_canonical` workspace-authority test) assume a specific absolute path on Matt's local machine. Fixing this properly needs a decision about how CI should represent "the canonical repo path" (env var override vs. relative-path detection) — out of scope for a merge-conflict-resolution pass, flagged rather than patched blind.
+2. **The Assistant frontend panel does not exist yet.** The backend (`/warden/assistant/*` routes, `assistant.py`, `rag_adapters.py`) is fully live and tested, but there's no UI to reach it from `web/warden/index.html` today. This is real, scoped-out follow-up work (~150 lines of JS, one HTML section, one nav button, ported from master's now-superseded version at commit `4468018`).
+3. No other risks identified — no secrets, no conflict markers, no unmerged paths, local proof suite fully green.
+
+## 11. Final Proof Summary
+
+1. **Branch and HEAD before/after:** `feat/marius-resident-core` throughout. Before: `0701a09`. After: `112d344`.
+2. **Backup branch used/created:** `backup/pre-conflict-resolution-20260703-123749` (new, this session); `backup/pre-reconcile-20260703-121741` (from prior audit session, still intact).
+3. **Conflict files resolved:** 18 (listed above), plus 6 files that auto-merged cleanly carrying master's Assistant backend feature.
+4. **Key resolution decisions:** see §10 above (`.gitignore`, docs, `api.py`, `app.py`, `web/warden/*`).
+5. **Commits created:** `112d344` — `fix(warden): resolve resident core merge conflicts`; this report update commit.
+6. **Tests run and exact results:** `pytest tests --ignore=tests/e2e --ignore=tests/browser -q` → first pass 6 failed/737 passed; after reverting two bad gate additions, **743 passed, 1 skipped, 0 failed**. `py_compile` and `node --check` both clean.
+7. **PR #30 status after push:** `MERGEABLE` (was `CONFLICTING`). GitHub Actions CI: `FAILURE`, due to a pre-existing hardcoded-path portability gap unrelated to this merge (detailed above).
+8. **Ready to merge:** conflicts are resolved and local tests are fully green, but CI is red and the Assistant frontend panel is incomplete. Recommend Matt review the diff and decide whether to merge despite red CI (given the failure is understood and unrelated) or fix `SAFE_REPO_PATHS` portability first.
+9. **Exact next action for Matt:** review `112d344` on GitHub (`https://github.com/matthewjmcbridejr-code/mcharness/pull/30`), decide on the CI portability fix, and either merge PR #30 as-is or request the `SAFE_REPO_PATHS`/frontend-panel follow-ups first. No `master` push has been made or will be made without explicit instruction.
