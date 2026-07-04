@@ -130,3 +130,16 @@ async def test_gateway_chat_with_history():
         assert messages[0]["role"] == "system"
         assert messages[1]["content"] == "Hi"
         assert messages[2]["content"] == "How are you?"
+
+@pytest.mark.anyio
+async def test_gateway_chat_with_system_message_in_history_no_crash():
+    # Regression test: passing a history that already contains a system
+    # message used to skip the block that defines brain_pack, causing an
+    # UnboundLocalError later when building the return dict.
+    gateway = ProviderGateway()
+    with patch.object(ProviderGateway, "get_available_ollama_models", new_callable=AsyncMock) as mock_models:
+        mock_models.return_value = []
+        history = [{"role": "system", "content": "You are a helpful assistant."}]
+        result = await gateway.chat("How are you?", history=history)
+        assert result["provider"] == "fallback"
+        assert "response" in result

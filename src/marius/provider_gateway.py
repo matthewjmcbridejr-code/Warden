@@ -166,6 +166,7 @@ class ProviderGateway:
                 }
 
         messages = history or []
+        brain_pack = None
         # Build systematic grounding context
         if not any(m["role"] == "system" for m in messages):
             # 1. Base system behavior
@@ -184,7 +185,6 @@ class ProviderGateway:
                 ws_context = f"\n## Current Workspace\nRepo: {workspace.get('repo_path')}\nRunner Enabled: {workspace.get('runner_enabled')}\n"
             
             # 5. Brain Context Retrieval
-            brain_pack = None
             brain_context_text = ""
             
             # Selective brain context logic
