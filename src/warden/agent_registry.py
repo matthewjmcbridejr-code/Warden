@@ -16,11 +16,37 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 BUILTIN_CODEX_ID = "codex_cli"
+BUILTIN_CLAUDE_CODE_ID = "claude_code_cli"
+BUILTIN_GROK_BUILD_ID = "grok_build_cli"
 JULES_API_BASE = "https://jules.googleapis.com/v1alpha"
 JULES_TEST_TIMEOUT_SECONDS = 5.0
 
 AgentKind = Literal["cli", "remote"]
-AgentAdapter = Literal["codex_cli", "jules_remote", "agy_cli", "custom_cli", "custom_remote"]
+AgentAdapter = Literal[
+    "codex_cli", "claude_code_cli", "grok_build_cli",
+    "jules_remote", "agy_cli", "custom_cli", "custom_remote",
+]
+
+# Built-in CLI-subscription agents dispatchable from Captain Deck, gated by the same
+# private-runner env flags as codex_cli (see _codex_runner_ready in api.py) — no
+# per-agent gate. Binary detection is via `_detect_executable` (command -v + --version).
+BUILTIN_CLI_AGENTS: dict[str, dict[str, str]] = {
+    BUILTIN_CODEX_ID: {
+        "name": "Codex CLI",
+        "binary": "codex",
+        "description": "OpenAI Codex CLI for code generation and edits via the private tmux runner.",
+    },
+    BUILTIN_CLAUDE_CODE_ID: {
+        "name": "Claude Code CLI",
+        "binary": "claude",
+        "description": "Claude Code CLI for code generation and edits via the private tmux runner.",
+    },
+    BUILTIN_GROK_BUILD_ID: {
+        "name": "Grok Build CLI",
+        "binary": "grok",
+        "description": "Grok Build CLI for code generation and edits via the private tmux runner.",
+    },
+}
 AgentStatus = Literal["ready", "not_configured", "disabled", "unsupported", "error", "unverified"]
 ConnectionStatus = Literal["connected", "invalid_key", "not_verified", "error", "not_configured"]
 
@@ -336,6 +362,15 @@ def test_agent_config(payload: McHarnessAgentTestConfigRequest) -> dict[str, Any
     )
 
 
+def _probe_cli_binary(adapter: str) -> dict[str, Any]:
+    """Lightweight, dependency-free presence check for a built-in CLI agent's binary.
+    No subprocess/version fetch — just PATH resolution (safe, instant, no auth files)."""
+    import shutil
+    binary = BUILTIN_CLI_AGENTS.get(adapter, {}).get("binary", adapter)
+    path = shutil.which(binary)
+    return {"installed": bool(path), "executable_path": path, "version": None}
+
+
 def _codex_capabilities() -> list[str]:
     return ["live_terminal", "code_editing", "tests", "read_only_inspection"]
 
@@ -344,23 +379,25 @@ def _jules_default_capabilities() -> list[str]:
     return ["remote_planning", "status_tracking"]
 
 
-def build_builtin_codex_profile(
+def build_builtin_cli_profile(
+    agent_id: str,
     *,
     codex_runner_ready: bool,
     private_only: bool,
 ) -> dict[str, Any]:
+    info = BUILTIN_CLI_AGENTS[agent_id]
     now = _now_iso()
     status: AgentStatus = "ready" if codex_runner_ready else "disabled"
     return {
-        "id": BUILTIN_CODEX_ID,
-        "name": "Codex CLI",
+        "id": agent_id,
+        "name": info["name"],
         "kind": "cli",
-        "adapter": "codex_cli",
+        "adapter": agent_id,
         "enabled": True,
         "private_only": private_only,
         "builtin": True,
         "user_created": False,
-        "description": "OpenAI Codex CLI for code generation and edits via the private tmux runner.",
+        "description": info["description"],
         "capabilities": _codex_capabilities(),
         "default_repo_id": None,
         "default_branch": None,
@@ -371,8 +408,18 @@ def build_builtin_codex_profile(
         "connection_status": "connected" if codex_runner_ready else "not_configured",
         "configured": True,
         "runnable": codex_runner_ready,
-        "lane_id": BUILTIN_CODEX_ID,
+        "lane_id": agent_id,
     }
+
+
+def build_builtin_codex_profile(
+    *,
+    codex_runner_ready: bool,
+    private_only: bool,
+) -> dict[str, Any]:
+    return build_builtin_cli_profile(
+        BUILTIN_CODEX_ID, codex_runner_ready=codex_runner_ready, private_only=private_only,
+    )
 
 
 def _jules_profile_status(agent: dict[str, Any], *, has_secret: bool) -> AgentStatus:
@@ -402,7 +449,7 @@ def _status_for_registered(agent: dict[str, Any], *, codex_runner_ready: bool, r
     enabled = bool(agent.get("enabled", True))
     if adapter in DISABLED_TEMPLATE_ADAPTERS:
         return "unsupported"
-    if adapter == "codex_cli":
+    if adapter in BUILTIN_CLI_AGENTS:
         return "ready" if codex_runner_ready and enabled else "disabled"
     if adapter == "jules_remote":
         has_secret = agent_has_secret(root, str(agent.get("id") or "")) if root is not None else bool(agent.get("configured"))
@@ -416,19 +463,20 @@ def _runnable_for_agent(agent: dict[str, Any], *, codex_runner_ready: bool) -> b
     if not bool(agent.get("enabled", True)):
         return False
     adapter = str(agent.get("adapter") or "")
-    if adapter == "codex_cli":
+    if adapter in BUILTIN_CLI_AGENTS:
         return codex_runner_ready
     return False
 
 
 def enrich_agent_profile(agent: dict[str, Any], *, codex_runner_ready: bool, root: Path | None = None) -> dict[str, Any]:
     enriched = sanitize_agent_profile(dict(agent))
-    if enriched.get("builtin"):
+    adapter = str(enriched.get("adapter") or "")
+    if enriched.get("builtin") and adapter in BUILTIN_CLI_AGENTS:
         enriched["status"] = "ready" if codex_runner_ready else "disabled"
         enriched["connection_status"] = "connected" if codex_runner_ready else "not_configured"
         enriched["configured"] = True
         enriched["runnable"] = codex_runner_ready
-        enriched["lane_id"] = BUILTIN_CODEX_ID
+        enriched["lane_id"] = adapter
     else:
         agent_id = str(enriched.get("id") or "")
         has_secret = agent_has_secret(root, agent_id) if root is not None else bool(enriched.get("configured"))
@@ -436,13 +484,15 @@ def enrich_agent_profile(agent: dict[str, Any], *, codex_runner_ready: bool, roo
         enriched["connection_status"] = _jules_connection_status(enriched, has_secret=has_secret) if enriched.get("adapter") == "jules_remote" else enriched.get("connection_status")
         enriched["status"] = _status_for_registered(enriched, codex_runner_ready=codex_runner_ready, root=root)
         enriched["runnable"] = _runnable_for_agent(enriched, codex_runner_ready=codex_runner_ready)
-        adapter = str(enriched.get("adapter") or "")
-        enriched["lane_id"] = BUILTIN_CODEX_ID if adapter == "codex_cli" else None
+        enriched["lane_id"] = adapter if adapter in BUILTIN_CLI_AGENTS else None
     return enriched
 
 
 def list_all_agents(root: Path, *, codex_runner_ready: bool, private_only: bool) -> list[dict[str, Any]]:
-    builtin = build_builtin_codex_profile(codex_runner_ready=codex_runner_ready, private_only=private_only)
+    builtins = [
+        build_builtin_cli_profile(agent_id, codex_runner_ready=codex_runner_ready, private_only=private_only)
+        for agent_id in BUILTIN_CLI_AGENTS
+    ]
     registered = [
         enrich_agent_profile(item, codex_runner_ready=codex_runner_ready, root=root)
         for item in load_registered_agents(root)
@@ -482,8 +532,8 @@ def list_all_agents(root: Path, *, codex_runner_ready: bool, private_only: bool)
         pass
 
     if marius_agent:
-        return [builtin, marius_agent, *registered]
-    return [builtin, *registered]
+        return [*builtins, marius_agent, *registered]
+    return [*builtins, *registered]
 
 
 def get_agent_by_id(root: Path, agent_id: str, *, codex_runner_ready: bool, private_only: bool) -> dict[str, Any] | None:
@@ -684,6 +734,11 @@ def agent_status_payload(
             payload["notes"].append("Codex executable detected.")
         else:
             payload["notes"].append("Codex executable not detected on host.")
+    elif adapter in BUILTIN_CLI_AGENTS:
+        probe = _probe_cli_binary(adapter)
+        payload["probe"] = probe
+        label = BUILTIN_CLI_AGENTS[adapter]["name"]
+        payload["notes"].append(f"{label} executable detected." if probe.get("installed") else f"{label} executable not detected on host.")
     elif adapter == "jules_remote":
         connection_status = enriched.get("connection_status")
         if connection_status == "connected":
@@ -710,6 +765,17 @@ def probe_agent(
         if probe_codex is None:
             raise HTTPException(status_code=503, detail="Codex probe is unavailable.")
         probe = probe_codex()
+        return {
+            "id": agent.get("id"),
+            "adapter": adapter,
+            "status": "ready" if probe.get("installed") and codex_runner_ready else "disabled",
+            "runnable": bool(probe.get("installed") and codex_runner_ready),
+            "probe": probe,
+            "last_checked_at": checked_at,
+            "notes": ["Probe checks executable presence only. No run was started."],
+        }
+    if adapter in BUILTIN_CLI_AGENTS:
+        probe = _probe_cli_binary(adapter)
         return {
             "id": agent.get("id"),
             "adapter": adapter,

@@ -4,8 +4,11 @@ from unittest.mock import patch
 
 import pytest
 
+import json
+from datetime import datetime, timedelta, timezone
+
 from src.warden.resident.state import ResidentState
-from src.warden.resident.watchers import Watcher, WatcherService, check_dns, check_website
+from src.warden.resident.watchers import Watcher, WatcherService, check_captain_dispatch, check_dns, check_website
 
 
 @pytest.fixture
@@ -119,3 +122,53 @@ def test_delete_watcher(service):
     w = service.create(title="a", kind="generic", query="x")
     assert service.delete(w.id) is True
     assert service.get(w.id) is None
+
+
+def _captain_dispatch_watcher(service, *, tmux_session_name="mch_test_session", started_at=None):
+    query = json.dumps({
+        "plan_id": "plan_1",
+        "step_id": "step_1",
+        "run_id": "run_1",
+        "lane_id": "codex_cli",
+        "tmux_session_name": tmux_session_name,
+        "started_at": started_at or datetime.now(timezone.utc).isoformat(),
+    })
+    return service.create(title="Captain step watcher", kind="captain_dispatch", query=query)
+
+
+def test_check_captain_dispatch_completed_when_tmux_session_gone(service):
+    w = _captain_dispatch_watcher(service, tmux_session_name="mch_definitely_not_a_real_session")
+    result = check_captain_dispatch(w)
+    assert result["outcome"] == "completed"
+    assert result["plan_id"] == "plan_1"
+    assert result["step_id"] == "step_1"
+
+
+def test_check_captain_dispatch_stalled_past_threshold(service):
+    old_started_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    w = _captain_dispatch_watcher(service, tmux_session_name="mch_still_running", started_at=old_started_at)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0  # session still exists
+        result = check_captain_dispatch(w)
+    assert result["outcome"] == "stalled"
+    assert result["elapsed_seconds"] > 3000
+
+
+def test_check_captain_dispatch_running_when_session_alive_and_fresh(service):
+    w = _captain_dispatch_watcher(service, tmux_session_name="mch_still_running")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0  # session still exists
+        result = check_captain_dispatch(w)
+    assert result["outcome"] == "running"
+
+
+def test_check_captain_dispatch_errors_on_invalid_query(service):
+    w = service.create(title="bad", kind="captain_dispatch", query="not json")
+    result = check_captain_dispatch(w)
+    assert result["outcome"] == "error"
+
+
+def test_check_captain_dispatch_registered_in_checkers(service):
+    w = _captain_dispatch_watcher(service, tmux_session_name="mch_definitely_not_a_real_session")
+    watcher, notified = service.run(w.id, force=True)
+    assert watcher.last_result["outcome"] == "completed"

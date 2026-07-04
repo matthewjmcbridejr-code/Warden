@@ -147,6 +147,10 @@ def persist_plan(
         "current_step_id": current_step_id,
         "steps": steps,
         "decision_log": list(plan_data.get("decision_log") or []),
+        # Opt-in: let the Captain Watcher auto-dispatch the next queued step when the
+        # current one completes cleanly (YOLO/unattended execution). Off by default —
+        # the manual, gate-approved flow stays the default experience.
+        "auto_advance": bool(plan_data.get("auto_advance", False)),
     }
     if not record["decision_log"]:
         append_decision_log(record, action="plan_created", detail="Captain plan persisted.", step_id=current_step_id)
@@ -280,6 +284,60 @@ def complete_step(
     return sanitize_plan_detail(saved)
 
 
+def note_step_awaiting_gate_review(
+    root: Path,
+    plan_id: str,
+    step_id: str,
+    *,
+    note: str,
+) -> dict[str, Any]:
+    """Log that the Captain Watcher observed a clean CLI exit for this step. Does NOT
+    change step status or complete the step — a pending proof gate (created by the
+    caller) still has to be approved by a human before `complete_step` can succeed
+    (assert_step_completion_allowed enforces this). Auto-advance to the next step only
+    happens after that gate is approved, not on watcher completion alone — see
+    post_mcharness_gate_decision in api.py.
+    """
+    plan = get_plan_record(root, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
+    append_decision_log(
+        plan,
+        action="step_awaiting_gate_review",
+        detail=note,
+        step_id=step_id,
+    )
+    saved = _save_plan(root, plan)
+    return sanitize_plan_detail(saved)
+
+
+def mark_step_needs_review(
+    root: Path,
+    plan_id: str,
+    step_id: str,
+    *,
+    note: str,
+) -> dict[str, Any]:
+    """Mark the current step needs_review when the Captain Watcher detects a stalled or
+    errored run. Stops auto-advance for this plan (needs_review is not auto-dispatched)
+    and surfaces the reason in the decision log instead of retrying silently.
+    """
+    plan = get_plan_record(root, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
+    step = _find_step(plan, step_id)
+    step["status"] = "needs_review"
+    step["updated_at"] = _now_iso()
+    append_decision_log(
+        plan,
+        action="step_needs_review",
+        detail=note,
+        step_id=step_id,
+    )
+    saved = _save_plan(root, plan)
+    return sanitize_plan_detail(saved)
+
+
 def revise_step(
     root: Path,
     plan_id: str,
@@ -379,6 +437,7 @@ def sanitize_plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "updated_at": plan.get("updated_at"),
         "status": plan.get("status"),
         "current_step_id": plan.get("current_step_id"),
+        "auto_advance": bool(plan.get("auto_advance", False)),
         "step_count": len(steps),
         "steps": [
             {

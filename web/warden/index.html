@@ -994,6 +994,12 @@
           <select id="captain-agent-select" data-testid="captain-agent-select" style="width:100%; padding:6px;"></select>
           <div id="captain-agent-note" data-testid="captain-agent-note" style="display:none; font-size:0.78em; color:var(--warn, #f0c66a); margin-top:4px;"></div>
         </div>
+        <div style="grid-column:1 / -1;">
+          <label style="display:block; font-size:0.82em; cursor:pointer;">
+            <input type="checkbox" id="captain-auto-advance-toggle" data-testid="captain-auto-advance-toggle" />
+            Auto-advance — dispatch each next step automatically once you approve its predecessor's proof gate
+          </label>
+        </div>
       </div>
       <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
         <button id="captain-create-plan" data-testid="captain-create-plan" class="btn primary" type="button">Create Plan</button>
