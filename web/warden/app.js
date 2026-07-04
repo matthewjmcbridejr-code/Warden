@@ -841,25 +841,41 @@
         const sourceBadge = isLocal
           ? '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(240,198,106,0.15);color:var(--warn,#f0c66a);border:1px solid var(--warn,#f0c66a);">Local Preview</span>'
           : '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(99,219,157,0.12);color:var(--good,#63db9d);border:1px solid var(--good,#63db9d);">AI Plan</span>';
-        const stepsHtml = steps.map((step, i) => `
-          <details class="captain-step" style="margin-bottom:6px;">
+        const currentStepId = deck.plan.current_step_id;
+        const stepsHtml = steps.map((step, i) => {
+          const stepId = step.id || step.step_id;
+          const isCurrent = stepId === currentStepId;
+          const dispatchableStatuses = ["queued", "revised", "needs_review", "dispatched"];
+          const canDispatch = isCurrent && dispatchableStatuses.includes(step.status || "queued");
+          const dispatchBtn = canDispatch
+            ? `<button class="btn captain-dispatch-step-btn" style="font-size:0.75em;padding:3px 10px;" data-step-id="${escapeHtml(stepId)}">Dispatch Step</button>`
+            : `<button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Only the current step can be dispatched">Dispatch Step</button>`;
+          return `
+          <details class="captain-step" style="margin-bottom:6px;" ${isCurrent ? "open" : ""}>
             <summary style="cursor:pointer;padding:6px 0;">
               <strong style="margin-right:6px;">${i + 1}.</strong>
               <strong>${escapeHtml(step.title || step.id || "Step")}</strong>
-              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(step.agent || step.recommended_agent || "codex_cli")}</span>
+              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(step.agent || step.agent_id || "codex_cli")}</span>
               <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(step.status || "queued")}</span>
             </summary>
             <pre class="captain-step-prompt" style="margin:6px 0 4px;font-size:0.78em;white-space:pre-wrap;word-break:break-word;">${escapeHtml(step.prompt || "")}</pre>
             <div style="margin-top:4px;">
-              <button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Agent dispatch coming in next sprint">Dispatch Step — Coming Next</button>
+              ${dispatchBtn}
             </div>
           </details>
-        `).join("");
+        `;
+        }).join("");
+        const autoAdvanceNote = deck.plan.auto_advance
+          ? '<div class="muted" style="font-size:0.78em;margin-bottom:6px;">Auto-advance is ON for this plan — approving a step\'s proof gate dispatches the next step automatically.</div>'
+          : "";
         planBody.innerHTML = `
           <div style="margin-bottom:6px;">${sourceBadge}<strong style="margin-left:6px;">${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
-          <div class="muted" style="font-size:0.82em;margin-bottom:10px;">${escapeHtml(deck.plan.summary || deck.plan.goal || "")}</div>
+          <div class="muted" style="font-size:0.82em;margin-bottom:6px;">${escapeHtml(deck.plan.summary || deck.plan.goal || "")}</div>
+          ${autoAdvanceNote}
+          <div id="captain-watcher-status" class="muted" style="font-size:0.78em;margin-bottom:8px;"></div>
           <div class="captain-plan-steps">${stepsHtml}</div>
         `;
+        bindCaptainStepButtons();
       }
     }
     renderCaptainAgentCard();
@@ -1017,11 +1033,13 @@
     populateCaptainAgents();
     await loadLatestCaptainPlan();
     renderCaptainDeck();
+    startCaptainWatcherPolling();
   }
 
   function closeCaptainDeckModal() {
     const modal = document.getElementById("captain-deck-modal");
     if (modal) modal.style.display = "none";
+    stopCaptainWatcherPolling();
   }
 
   function openCaptainKeyForm() {
@@ -1130,6 +1148,7 @@
     deck.repoPath = repoPath;
     deck.laneId = laneId;
     renderCaptainDeck();
+    const autoAdvanceEl = document.getElementById("captain-auto-advance-toggle");
     try {
       const plan = await requestJson(`${MCH}/captain/plan`, {
         method: "POST",
@@ -1137,6 +1156,7 @@
           goal,
           repo_id: repoId,
           lane_id: laneId,
+          auto_advance: !!(autoAdvanceEl && autoAdvanceEl.checked),
         },
       });
       deck.plan = plan;
@@ -2096,6 +2116,63 @@
         await window.WardenControlRoom.refresh({ quiet: true });
       }
       return null;
+    }
+  }
+
+  function bindCaptainStepButtons() {
+    document.querySelectorAll(".captain-dispatch-step-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const stepId = btn.dataset.stepId;
+        if (stepId) dispatchCaptainStep(stepId).catch((e) => console.error(e));
+      });
+    });
+  }
+
+  let _captainWatcherPollTimer = null;
+  let _captainWatcherPollInFlight = false;
+
+  async function pollCaptainWatchers() {
+    if (_captainWatcherPollInFlight) return;
+    const plan = state.captainDeck && state.captainDeck.plan;
+    const planId = plan && plan.plan_id;
+    const statusEl = document.getElementById("captain-watcher-status");
+    if (!planId) return;
+    _captainWatcherPollInFlight = true;
+    try {
+      const result = await requestJson(`${MCH}/captain/plans/${encodeURIComponent(planId)}/watchers/poll`, {
+        method: "POST",
+      });
+      const watchers = result.watchers || [];
+      if (statusEl) {
+        if (!watchers.length) {
+          statusEl.textContent = "";
+        } else {
+          statusEl.textContent = watchers
+            .map((w) => `Step ${w.step_id}: ${w.outcome}${w.outcome === "completed" ? " — awaiting gate review" : ""}`)
+            .join(" · ");
+        }
+      }
+      const changed = watchers.some((w) => w.outcome === "completed" || w.outcome === "stalled" || w.outcome === "error");
+      if (changed && result.plan) {
+        setActiveCaptainPlan(result.plan);
+      }
+    } catch (e) {
+      // non-fatal — the modal already shows plan/step status independent of watcher polling
+    } finally {
+      _captainWatcherPollInFlight = false;
+    }
+  }
+
+  function startCaptainWatcherPolling() {
+    stopCaptainWatcherPolling();
+    _captainWatcherPollTimer = setInterval(() => { pollCaptainWatchers().catch(() => {}); }, 10000);
+    pollCaptainWatchers().catch(() => {});
+  }
+
+  function stopCaptainWatcherPolling() {
+    if (_captainWatcherPollTimer) {
+      clearInterval(_captainWatcherPollTimer);
+      _captainWatcherPollTimer = null;
     }
   }
 

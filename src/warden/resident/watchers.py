@@ -20,12 +20,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-WATCHER_KINDS = ("dns", "website", "email", "agent", "reminder", "generic")
+WATCHER_KINDS = ("dns", "website", "email", "agent", "reminder", "generic", "captain_dispatch")
 WATCHER_STATUSES = ("active", "paused", "done", "error")
 
 MAX_BACKOFF_MULTIPLIER = 8
 DNS_LOOKUP_TIMEOUT = 5.0
 HTTP_CHECK_TIMEOUT = 8.0
+CAPTAIN_DISPATCH_STALL_SECONDS = 20 * 60
+TMUX_CHECK_TIMEOUT = 2.0
 
 
 def _now() -> str:
@@ -148,11 +150,63 @@ def check_website(url: str, *, timeout: float = HTTP_CHECK_TIMEOUT) -> dict:
     return result
 
 
+def check_captain_dispatch(watcher: "Watcher") -> dict:
+    """Poll a Captain-dispatched CLI run: tmux session gone => the process exited on its
+    own (outcome=completed); still running past CAPTAIN_DISPATCH_STALL_SECONDS =>
+    outcome=stalled. Never raises — the caller (Captain dispatch endpoint) decides what
+    to do with the outcome (mark step passed/needs_review, auto-dispatch next step).
+    """
+    result: dict[str, Any] = {"outcome": "running"}
+    try:
+        payload = json.loads(watcher.query)
+    except Exception:
+        return {"outcome": "error", "error": "invalid watcher query payload"}
+    result.update({
+        "plan_id": payload.get("plan_id"),
+        "step_id": payload.get("step_id"),
+        "run_id": payload.get("run_id"),
+        "lane_id": payload.get("lane_id"),
+        "tmux_session_name": payload.get("tmux_session_name"),
+    })
+    tmux_name = str(payload.get("tmux_session_name") or "")
+    if not tmux_name:
+        result["outcome"] = "error"
+        result["error"] = "watcher payload missing tmux_session_name"
+        return result
+    try:
+        proc = subprocess.run(
+            ["tmux", "has-session", "-t", tmux_name],
+            capture_output=True, text=True, timeout=TMUX_CHECK_TIMEOUT,
+        )
+        has_session = proc.returncode == 0
+    except Exception as exc:
+        result["outcome"] = "error"
+        result["error"] = str(exc)
+        return result
+
+    if not has_session:
+        result["outcome"] = "completed"
+        return result
+
+    started_at = payload.get("started_at")
+    if started_at:
+        try:
+            started = datetime.fromisoformat(started_at)
+            elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+            result["elapsed_seconds"] = elapsed
+            if elapsed > CAPTAIN_DISPATCH_STALL_SECONDS:
+                result["outcome"] = "stalled"
+        except Exception:
+            pass
+    return result
+
+
 CheckFn = Callable[[Watcher], dict]
 
 _CHECKERS: dict[str, CheckFn] = {
     "dns": lambda w: check_dns(w.query),
     "website": lambda w: check_website(w.query),
+    "captain_dispatch": check_captain_dispatch,
 }
 
 

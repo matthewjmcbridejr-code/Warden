@@ -1588,6 +1588,20 @@ def _enable_private_captain_loop(monkeypatch, tmp_path):
 
     monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
 
+    # Captain dispatch now launches CLI agents non-interactively (unattended/YOLO mode,
+    # e.g. `codex exec ...`), which can take much longer to exit than the old bare
+    # interactive `codex` tmux launch these tests were written against. Stub the
+    # launcher so dispatch tests exercise the state machine without spawning a real
+    # subprocess (matches the existing `_start_codex_runner` stubbing pattern used
+    # elsewhere in this file for the interactive path).
+    def fake_start_cli_runner_for_dispatch(state, cwd):
+        state["status"] = "running"
+        state["notes"].append("stubbed for test: no real CLI process launched")
+        state["attach_command"] = f"tmux attach -t {state.get('tmux_session_name')}"
+        return state
+
+    monkeypatch.setattr(api_mod, "_start_cli_runner_for_dispatch", fake_start_cli_runner_for_dispatch)
+
 
 def _sample_persisted_plan(client):
     response = client.post(
@@ -1634,6 +1648,152 @@ def test_captain_plan_dispatch_links_run(monkeypatch, tmp_path):
     assert payload["plan"]["steps"][0]["run_id"] == payload["dispatch"]["runner_id"]
     recent_runs = client.get("/api/mcharness/runs/recent")
     assert len(recent_runs.json()["runs"]) == 1
+
+
+def test_captain_dispatch_uses_step_agent_id_for_multi_cli_lane(monkeypatch, tmp_path):
+    # A step whose agent_id names Claude Code (not Codex) should dispatch to that lane.
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/mcharness/captain/plans",
+        json={
+            "goal": "Multi-agent test",
+            "repo_id": "mcharness-public-export",
+            "plan_id": "plan_multi01",
+            "title": "Multi-agent plan",
+            "summary": "Dispatch to Claude Code.",
+            "steps": [
+                {"id": "step_1", "title": "Do it", "prompt": "Do it.", "agent": "claude_code_cli", "status": "queued"},
+            ],
+        },
+    )
+    dispatch = client.post("/api/mcharness/captain/plans/plan_multi01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+    payload = dispatch.json()
+    assert payload["dispatch"]["runner_state"]["lane_id"] == "claude_code_cli"
+    assert payload["watcher_id"]
+    assert payload["decision_note"]
+
+
+def test_captain_dispatch_creates_watcher(monkeypatch, tmp_path):
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    _sample_persisted_plan(client)
+    dispatch = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+    payload = dispatch.json()
+    assert payload["watcher_id"]
+
+    import src.warden.api as api_mod
+    from src.warden.resident.state import get_state
+    from src.warden.resident.watchers import WatcherService
+
+    watchers = WatcherService(get_state(tmp_path / "resident" / "resident.sqlite"))
+    watcher = watchers.get(payload["watcher_id"])
+    assert watcher is not None
+    assert watcher.kind == "captain_dispatch"
+
+
+def test_captain_watcher_poll_opens_gate_on_clean_completion_without_auto_completing(monkeypatch, tmp_path):
+    # A clean CLI exit must NOT complete the step by itself — it opens a pending
+    # proof gate and waits for a human decision (see test below for what happens
+    # after approval).
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    _sample_persisted_plan(client)
+    dispatch = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+
+    # The stubbed launcher doesn't create a real tmux session, so the watcher's tmux
+    # check reports "completed" immediately (no session to find).
+    poll = client.post("/api/mcharness/captain/plans/plan_loop01/watchers/poll")
+    assert poll.status_code == 200, poll.text
+    poll_data = poll.json()
+    assert poll_data["watchers"][0]["outcome"] == "completed"
+
+    plan = client.get("/api/mcharness/captain/plans/plan_loop01").json()["plan"]
+    assert plan["steps"][0]["status"] == "dispatched"  # not auto-completed
+    assert plan["current_step_id"] == "step_1"  # not auto-advanced
+
+    recent_gates = client.get("/api/mcharness/gates/recent")
+    assert recent_gates.status_code == 200
+    gate_titles = [g["title"] for g in recent_gates.json().get("gates", [])]
+    assert any("review before continuing" in title for title in gate_titles)
+
+
+def test_captain_gate_approval_completes_step_and_auto_advances(monkeypatch, tmp_path):
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/mcharness/captain/plans",
+        json={
+            "goal": "Auto advance test",
+            "repo_id": "mcharness-public-export",
+            "plan_id": "plan_auto01",
+            "title": "Auto advance plan",
+            "summary": "Two steps.",
+            "auto_advance": True,
+            "steps": [
+                {"id": "step_1", "title": "Step one", "prompt": "One.", "agent": "codex_cli", "status": "queued"},
+                {"id": "step_2", "title": "Step two", "prompt": "Two.", "agent": "codex_cli", "status": "queued"},
+            ],
+        },
+    )
+    dispatch = client.post("/api/mcharness/captain/plans/plan_auto01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+
+    poll = client.post("/api/mcharness/captain/plans/plan_auto01/watchers/poll")
+    assert poll.status_code == 200, poll.text
+
+    plan_before = client.get("/api/mcharness/captain/plans/plan_auto01").json()["plan"]
+    assert plan_before["steps"][0]["status"] == "dispatched"
+    assert plan_before["current_step_id"] == "step_1"
+
+    recent_gates = client.get("/api/mcharness/gates/recent").json()["gates"]
+    gate = next(g for g in recent_gates if g.get("plan_id") == "plan_auto01" and g.get("step_id") == "step_1")
+
+    decision = client.post(f"/api/mcharness/gates/{gate['gate_id']}/decision", json={"decision": "approve"})
+    assert decision.status_code == 200, decision.text
+
+    plan_after = client.get("/api/mcharness/captain/plans/plan_auto01").json()["plan"]
+    assert plan_after["steps"][0]["status"] == "passed"
+    assert plan_after["current_step_id"] == "step_2"
+    assert plan_after["steps"][1]["status"] == "dispatched"  # auto-dispatched on approval
+    assert plan_after["steps"][1]["run_id"]
+
+
+def test_captain_watcher_poll_marks_needs_review_on_stall_and_does_not_auto_advance(monkeypatch, tmp_path):
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/mcharness/captain/plans",
+        json={
+            "goal": "Stall test",
+            "repo_id": "mcharness-public-export",
+            "plan_id": "plan_stall01",
+            "title": "Stall plan",
+            "summary": "One step.",
+            "auto_advance": True,
+            "steps": [
+                {"id": "step_1", "title": "Step one", "prompt": "One.", "agent": "codex_cli", "status": "queued"},
+            ],
+        },
+    )
+    dispatch = client.post("/api/mcharness/captain/plans/plan_stall01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+
+    def fake_check_stalled(watcher):
+        return {"outcome": "stalled", "elapsed_seconds": 99999}
+
+    from src.warden.resident import watchers as watchers_mod
+    monkeypatch.setitem(watchers_mod._CHECKERS, "captain_dispatch", fake_check_stalled)
+
+    poll = client.post("/api/mcharness/captain/plans/plan_stall01/watchers/poll")
+    assert poll.status_code == 200, poll.text
+    assert poll.json()["watchers"][0]["outcome"] == "stalled"
+
+    plan = client.get("/api/mcharness/captain/plans/plan_stall01").json()["plan"]
+    assert plan["steps"][0]["status"] == "needs_review"
 
 
 def test_captain_plan_complete_advances_without_auto_dispatch(monkeypatch, tmp_path):

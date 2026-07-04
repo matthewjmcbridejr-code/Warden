@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shlex
 import hashlib
 import subprocess
 import uuid
@@ -58,6 +59,8 @@ from .captain_plans import (
     get_plan_record,
     list_recent_plans,
     mark_step_dispatched,
+    mark_step_needs_review,
+    note_step_awaiting_gate_review,
     persist_plan,
     revise_step as revise_captain_plan_step,
     sanitize_plan_public,
@@ -99,6 +102,7 @@ from .proof_gates import (
 )
 from .run_reports import build_run_report_payload
 from .agent_registry import (
+    BUILTIN_CLI_AGENTS,
     BUILTIN_CODEX_ID,
     McHarnessAgentConfigPatchRequest,
     McHarnessAgentCreateRequest,
@@ -168,6 +172,18 @@ AGENT_LANES = [
         "manual_only": True,
     },
     {
+        "lane_id": "claude_code_cli",
+        "title": "Claude Code CLI",
+        "implemented": True,
+        "manual_only": True,
+    },
+    {
+        "lane_id": "grok_build_cli",
+        "title": "Grok Build CLI",
+        "implemented": True,
+        "manual_only": True,
+    },
+    {
         "lane_id": "agy_cli",
         "title": "AGY / Antigravity CLI",
         "implemented": True,
@@ -205,6 +221,31 @@ AGENT_LANES = [
         "test_only": True,
     },
 ]
+
+# CLI-subscription agents dispatchable non-interactively (Captain Deck auto-dispatch,
+# YOLO/unattended mode). Gated by the same _codex_runner_ready() master switch as the
+# existing interactive Codex flow — no separate per-agent gate.
+CLI_RUNNER_LANE_IDS = frozenset(BUILTIN_CLI_AGENTS.keys())
+
+# Hard ceiling on a single unattended CLI dispatch run (see _start_cli_runner_for_dispatch).
+CLI_DISPATCH_TIMEOUT_SECONDS = int(os.getenv("MCHARNESS_CLI_DISPATCH_TIMEOUT_SECONDS", "1800"))
+
+# Launch config for non-interactive dispatch: each CLI's own "don't ask, just do it"
+# flag, so it runs a step to completion and exits on its own (no per-action approval).
+# Flags verified against the actual installed CLI at time of writing — re-verify with
+# `<binary> --help`/`<binary> exec --help` if a CLI's flags change across releases.
+CLI_EXEC_ARGV: dict[str, Any] = {
+    "codex_cli": lambda prompt, cwd, out_path: [
+        "codex", "exec", "-s", "workspace-write", "--skip-git-repo-check",
+        "-C", cwd, "--output-last-message", out_path, prompt,
+    ],
+    "claude_code_cli": lambda prompt, cwd, out_path: [
+        "claude", "-p", prompt, "--permission-mode", "acceptEdits", "--output-format", "json",
+    ],
+    "grok_build_cli": lambda prompt, cwd, out_path: [
+        "grok", "-p", prompt, "--always-approve",
+    ],
+}
 
 
 def _env_flag(*names: str, default: str = "false") -> bool:
@@ -408,6 +449,10 @@ class McHarnessRunnerStartRequest(BaseModel):
     plan_id: Optional[str] = None
     agent_id: Optional[str] = None
     created_by: Optional[str] = "operator"
+    # "interactive" (default): existing Codex TUI + human quick-reply flow, unchanged.
+    # "unattended": non-interactive exec-style launch with the CLI's own auto-approve
+    # flag (YOLO mode) — used only by Captain's auto-dispatch path, for any CLI lane.
+    execution_mode: Literal["interactive", "unattended"] = "interactive"
 
 
 class WardenMemoryRecallRequest(BaseModel):
@@ -464,6 +509,10 @@ class McHarnessCaptainPlanRequest(BaseModel):
     goal: str = Field(min_length=1)
     repo_id: str = Field(min_length=1)
     lane_id: str = Field(min_length=1)
+    # Opt-in: let the Captain Watcher auto-dispatch each next step on clean completion
+    # (YOLO/unattended execution). Off by default — manual, gate-approved flow stays
+    # the default experience.
+    auto_advance: bool = False
 
     @field_validator("goal")
     @classmethod
@@ -500,6 +549,7 @@ class McHarnessCaptainPlanResponse(BaseModel):
     current_step_id: Optional[str] = None
     decision_log: list[dict[str, Any]] = Field(default_factory=list)
     source: Optional[str] = None
+    auto_advance: bool = False
 
 
 class McHarnessCaptainPlanPersistRequest(BaseModel):
@@ -509,6 +559,7 @@ class McHarnessCaptainPlanPersistRequest(BaseModel):
     title: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     steps: list[dict[str, Any]] = Field(default_factory=list)
+    auto_advance: bool = False
 
 
 class McHarnessCaptainStepCompleteRequest(BaseModel):
@@ -745,8 +796,11 @@ def _resolve_captain_plan_agent(agent_id: str) -> dict[str, Any]:
     )
     if agent is None:
         raise HTTPException(status_code=400, detail=f"Unknown agent lane: {agent_id}")
-    if agent.get("adapter") != "codex_cli":
-        raise HTTPException(status_code=400, detail="Captain Deck currently deploys to the Codex CLI lane only.")
+    if agent.get("adapter") not in BUILTIN_CLI_AGENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Captain Deck can only deploy to a configured CLI agent lane: {', '.join(BUILTIN_CLI_AGENTS)}.",
+        )
     return agent
 
 
@@ -1100,22 +1154,56 @@ def _captain_plan_response(plan: dict[str, Any], *, notes: list[str] | None = No
         "current_step_id": current_step_id,
         "current_gate_status": current_gate_status,
         "current_gate_label": gate_ui_label(current_gate_status),
+        "auto_advance": bool(plan.get("auto_advance", False)),
         "steps": steps,
         "decision_log": list(plan.get("decision_log") or []),
         "notes": list(notes or []),
     }
 
 
-def _execute_codex_dispatch_for_step(
+async def _captain_dispatch_decision(*, step_title: str, prompt: str, lane_id: str, available_lanes: list[str]) -> str:
+    """Thin, best-effort Marius-gateway confirmation step before dispatching a Captain
+    plan step to a CLI agent. This is a logging/confirmation layer only — it never
+    blocks or changes which agent gets dispatched; on any failure it falls back to a
+    plain note. The result is recorded in Warden Memory alongside the dispatch so "why
+    this agent" is inspectable, matching how plan generation already surfaces its
+    gateway/fallback source.
+    """
+    try:
+        from src.marius.provider_gateway import ProviderGateway
+
+        prompt_text = (
+            f"Captain is about to dispatch a plan step to '{lane_id}'. "
+            f"Available CLI agents: {', '.join(available_lanes)}. "
+            f"Step: {step_title}. Confirm in one short sentence that this is a "
+            f"reasonable agent for this step, or note any concern."
+        )
+        gw = ProviderGateway()
+        result = await asyncio.wait_for(
+            gw.chat(prompt_text, history=[], brain_enabled=False),
+            timeout=3.0,
+        )
+        note = str(result.get("response") or "").strip()
+        return note[:280] if note else f"Dispatching to {lane_id} (no gateway note)."
+    except Exception:
+        return f"Dispatching to {lane_id} (Marius gateway confirmation unavailable)."
+
+
+def _execute_cli_dispatch_for_step(
     *,
     title: str,
     prompt: str,
     repo_id: str,
+    lane_id: str = "codex_cli",
     plan_id: str | None = None,
     step_id: str | None = None,
 ) -> dict[str, Any]:
+    """Dispatch a Captain plan step to any configured CLI agent (Codex, Claude Code,
+    Grok Build). Always non-interactive/unattended (YOLO mode) — see CLI_EXEC_ARGV."""
+    if lane_id not in CLI_RUNNER_LANE_IDS:
+        raise HTTPException(status_code=400, detail=f"Unsupported dispatch lane: {lane_id}")
     if not _codex_runner_ready():
-        raise HTTPException(status_code=403, detail="Codex dispatch requires the private runner service.")
+        raise HTTPException(status_code=403, detail="CLI dispatch requires the private runner service.")
     repo_path, _repo = _resolve_allowlisted_repo(repo_id)
     session = create_mcharness_session(
         McHarnessSessionCreateRequest(
@@ -1123,7 +1211,7 @@ def _execute_codex_dispatch_for_step(
             objective=title,
             plan_instruction=prompt,
             repo_path=str(repo_path),
-            agent_lane="codex_cli",
+            agent_lane=lane_id,
         )
     )
     session_id = session["session_id"]
@@ -1135,14 +1223,15 @@ def _execute_codex_dispatch_for_step(
     runner_state = post_mcharness_runner_start(
         session_id,
         McHarnessRunnerStartRequest(
-            lane_id="codex_cli",
+            lane_id=lane_id,
             repo_id=repo_id,
             queue_item_id=queue_item_id,
             title=title,
             prompt=prompt,
             plan_id=plan_id,
-            agent_id="codex_cli",
+            agent_id=lane_id,
             created_by="captain_loop",
+            execution_mode="unattended",
         ),
     )
     return {
@@ -1483,6 +1572,47 @@ def _start_codex_runner(state: dict[str, Any], cwd: str) -> dict[str, Any]:
     return state
 
 
+def _start_cli_runner_for_dispatch(state: dict[str, Any], cwd: str) -> dict[str, Any]:
+    """Launch a CLI agent non-interactively for a Captain-dispatched step: the prompt is
+    baked into the launch command with the CLI's own unattended/auto-approve flag, so it
+    runs to completion and exits on its own (YOLO mode — see CLI_EXEC_ARGV). This is
+    distinct from `_start_codex_runner`, which keeps Codex's interactive TUI alive for
+    manual, human-supervised dispatch; that path is untouched by this function.
+
+    Completion is detected generically by the absence of the tmux session (see
+    get_mcharness_runner_status / check_captain_dispatch watcher) — no lane-specific
+    completion signal is needed.
+    """
+    name = state["tmux_session_name"]
+    lane_id = str(state.get("lane_id") or "")
+    prompt = str(state.get("dispatch_prompt") or "")
+    trans_path = str(state.get("transcript_file_path") or "")
+    build_argv = CLI_EXEC_ARGV.get(lane_id)
+    if build_argv is None:
+        state["status"] = "failed"
+        state["notes"].append(f"No unattended launch config for lane: {lane_id}")
+        return state
+    argv = build_argv(prompt, cwd, trans_path)
+    # Redirect stdout/stderr to the transcript file (a shell is required for `>`
+    # redirection; each argv element is shlex-quoted so the prompt text — generated by
+    # Warden's own Captain planner, not raw external shell input — cannot break out).
+    # Wrapped in `timeout` as a hard ceiling: an unattended CLI that hangs (network,
+    # auth prompt, etc.) must not hold the tmux session — and the runner-session
+    # capacity limit — open indefinitely.
+    inner = " ".join(shlex.quote(a) for a in argv)
+    shell_cmd = f"timeout {CLI_DISPATCH_TIMEOUT_SECONDS} {inner} > {shlex.quote(trans_path)} 2>&1"
+    tmux_cmd = ["tmux", "new-session", "-d", "-s", name, "-c", cwd, "bash", "-lc", shell_cmd]
+    res = _safe_cmd(tmux_cmd, timeout=5.0)
+    if res is not None and res.returncode == 0:
+        state["status"] = "running"
+        state["notes"].append(f"{lane_id} launched non-interactively (unattended/YOLO mode); output redirected to transcript file")
+        state["attach_command"] = f"tmux attach -t {name}"
+    else:
+        state["status"] = "failed"
+        state["notes"].append(f"{lane_id} tmux start failed: {getattr(res, 'stderr', 'err') if res else 'subprocess err'}")
+    return state
+
+
 class McHarnessRunnerSendPrompt(BaseModel):
     prompt: str = Field(min_length=1)
 
@@ -1613,15 +1743,15 @@ def _create_warden_run_on_dispatch(
     status: str = "dispatched",
     original_prompt: Optional[str] = None,
 ) -> dict[str, Any] | None:
-    if payload.lane_id != "codex_cli" or not _run_history_write_enabled():
+    if payload.lane_id not in CLI_RUNNER_LANE_IDS or not _run_history_write_enabled():
         return None
     title, prompt = _resolve_dispatch_prompt(session_id, payload)
     return create_run_record(
         MCTABLE_ROOT,
         run_id=runner_id,
         title=title,
-        agent_id=payload.agent_id or "codex_cli",
-        agent_adapter="codex_cli",
+        agent_id=payload.agent_id or payload.lane_id,
+        agent_adapter=payload.lane_id,
         repo_id=payload.repo_id,
         branch=payload.branch,
         prompt=prompt,
@@ -2156,6 +2286,8 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
             notes = plan.get("notes", []) + [f"Gateway planning failed: {reason}"]
             plan["notes"] = notes
 
+    plan["auto_advance"] = payload.auto_advance
+
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None
     try:
@@ -2215,6 +2347,7 @@ def post_mcharness_captain_plan_persist(payload: McHarnessCaptainPlanPersistRequ
         "title": payload.title,
         "summary": payload.summary,
         "steps": payload.steps,
+        "auto_advance": payload.auto_advance,
     }
     persisted = persist_plan(MCTABLE_ROOT, goal=payload.goal, repo_id=payload.repo_id, plan_data=plan_data)
     return {
@@ -2225,7 +2358,8 @@ def post_mcharness_captain_plan_persist(payload: McHarnessCaptainPlanPersistRequ
 
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/dispatch")
 def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
-    """Dispatch a Captain plan step to the local runner.
+    """Dispatch a Captain plan step to the configured CLI agent (Codex, Claude Code, or
+    Grok Build — whichever the step's agent_id names).
 
     Always succeeds: when the runner is unavailable, saves a blocked_attempt
     memory and returns blocked=True instead of raising 403.
@@ -2245,7 +2379,9 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     step_title = str(step.get("title") or plan.get("title") or "Captain step")
     prompt = str(step.get("prompt") or "")
     goal = str(plan.get("goal") or plan.get("title") or "")
-    lane_id = "codex_cli"
+    lane_id = str(step.get("agent_id") or "codex_cli")
+    if lane_id not in CLI_RUNNER_LANE_IDS:
+        lane_id = "codex_cli"
 
     # Blocked path: runner not available — save honest blocked_attempt memory
     if not _codex_runner_ready():
@@ -2255,8 +2391,8 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             MCTABLE_ROOT,
             run_id=run_id,
             title=f"[blocked] {step_title}",
-            agent_id="codex_cli",
-            agent_adapter="codex_cli",
+            agent_id=lane_id,
+            agent_adapter=lane_id,
             repo_id=repo_id,
             branch=None,
             prompt=prompt,
@@ -2287,11 +2423,20 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             "dispatch": {},
         }
 
+    # Best-effort Marius gateway confirmation note before dispatch — never blocks.
+    decision_note = asyncio.run(
+        _captain_dispatch_decision(
+            step_title=step_title, prompt=prompt, lane_id=lane_id,
+            available_lanes=sorted(CLI_RUNNER_LANE_IDS),
+        )
+    )
+
     # Happy path: runner ready — dispatch and write agent_result memory
-    dispatch = _execute_codex_dispatch_for_step(
+    dispatch = _execute_cli_dispatch_for_step(
         title=step_title,
         prompt=prompt,
         repo_id=repo_id,
+        lane_id=lane_id,
         plan_id=plan_id,
         step_id=step_id,
     )
@@ -2312,17 +2457,142 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
         repo_id=repo_id,
         lane_id=lane_id,
         goal=goal,
+        reason=decision_note,
     )
+
+    # Captain Watcher: don't just fire-and-forget — watch this dispatched run to
+    # completion (or stall/error) so nothing gets assigned into silence.
+    watcher_id = None
+    runner_state = dispatch.get("runner_state") or {}
+    tmux_session_name = runner_state.get("tmux_session_name")
+    if tmux_session_name:
+        try:
+            from .resident.state import get_state
+            from .resident.watchers import WatcherService
+
+            watchers = WatcherService(get_state(MCTABLE_ROOT / "resident" / "resident.sqlite"))
+            watcher = watchers.create(
+                title=f"Captain step watcher: {step_title[:60]}",
+                kind="captain_dispatch",
+                query=json.dumps({
+                    "plan_id": plan_id,
+                    "step_id": step_id,
+                    "run_id": runner_id,
+                    "lane_id": lane_id,
+                    "tmux_session_name": tmux_session_name,
+                    "started_at": runner_state.get("started_at"),
+                }),
+                cadence_seconds=30,
+                notify_on="always",
+                created_by="captain_dispatch",
+            )
+            watcher_id = watcher.id
+        except Exception:
+            watcher_id = None
+
     resp = {
         "ok": True,
         "blocked": False,
         "service": "mcharness-control-plane",
         "run_id": runner_id,
         "memory_id": mem_id,
+        "watcher_id": watcher_id,
+        "decision_note": decision_note,
         "plan": _captain_plan_response(updated),
         "dispatch": dispatch,
     }
     return resp
+
+
+@mcharness_router.post("/captain/plans/{plan_id}/watchers/poll")
+def post_mcharness_captain_plan_watchers_poll(plan_id: str):
+    """Force-check every active Captain Watcher for this plan and act on the outcome:
+
+    completed -> open a pending proof gate for a human to review (does NOT mark the
+    step done — a human still has to approve the gate; see post_mcharness_gate_decision,
+    which auto-dispatches the next step on approval when the plan has auto_advance on).
+    stalled/errored -> mark needs_review and stop, never silently.
+
+    Safe to call repeatedly (e.g. frontend polling every ~10s while Captain Deck is open).
+    """
+    plan = get_plan_record(MCTABLE_ROOT, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
+
+    try:
+        from .resident.state import get_state
+        from .resident.watchers import WatcherService
+    except Exception as exc:
+        return {"ok": True, "plan": _captain_plan_response(plan), "watchers": [], "note": f"watcher service unavailable: {exc}"}
+
+    watchers_svc = WatcherService(get_state(MCTABLE_ROOT / "resident" / "resident.sqlite"))
+    observed: list[dict[str, Any]] = []
+    # sanitize_plan_public keeps this a plain-dict "plan detail" shape (same shape
+    # note_step_awaiting_gate_review/mark_step_needs_review return), so
+    # _captain_plan_response works on it whether or not any watcher fired this poll.
+    current_plan: dict[str, Any] = sanitize_plan_public(plan)
+
+    for watcher in watchers_svc.list(status="active"):
+        if watcher.kind != "captain_dispatch":
+            continue
+        try:
+            payload = json.loads(watcher.query)
+        except Exception:
+            continue
+        if payload.get("plan_id") != plan_id:
+            continue
+
+        watcher, _notified = watchers_svc.run(watcher.id, force=True)
+        result = (watcher.last_result if watcher else None) or {}
+        outcome = result.get("outcome")
+        step_id = str(payload.get("step_id") or "")
+        run_id = str(payload.get("run_id") or "")
+        lane_id = str(payload.get("lane_id") or "")
+
+        entry = {
+            "watcher_id": watcher.id if watcher else None,
+            "step_id": step_id,
+            "lane_id": lane_id,
+            "outcome": outcome,
+        }
+
+        if outcome == "completed":
+            create_proof_gate(
+                MCTABLE_ROOT,
+                run_id=run_id,
+                plan_id=plan_id,
+                step_id=step_id,
+                gate_type="captain_watcher_completion",
+                title=f"{lane_id} finished — review before continuing",
+                summary=f"Captain Watcher observed a clean exit for step {step_id}. "
+                        f"Approve to mark it done{' and auto-dispatch the next step' if plan.get('auto_advance') else ''}.",
+            )
+            current_plan = note_step_awaiting_gate_review(
+                MCTABLE_ROOT, plan_id, step_id,
+                note=f"{lane_id} session exited cleanly. Awaiting human gate review before completion.",
+            )
+            watchers_svc.pause(watcher.id)
+            entry["gate_created"] = True
+        elif outcome == "stalled":
+            current_plan = mark_step_needs_review(
+                MCTABLE_ROOT, plan_id, step_id,
+                note=f"Captain Watcher: {lane_id} run exceeded the stall threshold without completing. Stopped auto-advance.",
+            )
+            watchers_svc.pause(watcher.id)
+        elif outcome == "error":
+            current_plan = mark_step_needs_review(
+                MCTABLE_ROOT, plan_id, step_id,
+                note=f"Captain Watcher: could not check {lane_id} run ({result.get('error', 'unknown error')}).",
+            )
+            watchers_svc.pause(watcher.id)
+
+        observed.append(entry)
+
+    return {
+        "ok": True,
+        "plan": _captain_plan_response(current_plan),
+        "watchers": observed,
+    }
 
 
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/complete", dependencies=[Depends(_require_run_history_write)])
@@ -3094,11 +3364,11 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
     if lane is None:
         raise HTTPException(status_code=400, detail=f"Unknown agent lane: {payload.lane_id}")
 
-    if payload.lane_id == "codex_cli":
+    if payload.lane_id in CLI_RUNNER_LANE_IDS:
         if not (_tmux_runner_enabled() and _codex_runner_enabled()):
             raise HTTPException(
                 status_code=403,
-                detail="Controlled Codex runner disabled (requires BOTH MCHARNESS_TMUX_RUNNER_ENABLED=true AND MCHARNESS_CODEX_RUNNER_ENABLED=true). For personal manual smoke only; no automated real Codex.",
+                detail="Controlled CLI runner disabled (requires BOTH MCHARNESS_TMUX_RUNNER_ENABLED=true AND MCHARNESS_CODEX_RUNNER_ENABLED=true). For personal manual smoke only; no automated real Codex.",
             )
         assert_runner_session_capacity(MCTABLE_ROOT, safe_cmd=_safe_cmd, runner_state_root=RUNNER_STATE_ROOT)
     elif payload.lane_id != "fake_test_lane" and not _tmux_runner_enabled():
@@ -3106,8 +3376,8 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
             status_code=403,
             detail="Controlled runner disabled (MCHARNESS_TMUX_RUNNER_ENABLED=false). Only fake_test_lane supported for tests/proof.",
         )
-    if payload.lane_id != "fake_test_lane" and payload.lane_id != "codex_cli":
-        raise HTTPException(status_code=400, detail="Controlled run for this lane not implemented yet (only codex_cli + fake_test_lane).")
+    if payload.lane_id != "fake_test_lane" and payload.lane_id not in CLI_RUNNER_LANE_IDS:
+        raise HTTPException(status_code=400, detail=f"Controlled run for this lane not implemented yet (only {', '.join(CLI_RUNNER_LANE_IDS)} + fake_test_lane).")
 
     # map repo_id to allowlisted path (id or full)
     repo_path: Optional[Path] = None
@@ -3156,8 +3426,8 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
             "allowlisted_lane": True,
             "allowlisted_repo": True,
             "tmux_runner_enabled": _tmux_runner_enabled(),
-            "codex_runner_enabled": _codex_runner_enabled() if payload.lane_id == "codex_cli" else False,
-            "real_provider": payload.lane_id == "codex_cli",
+            "codex_runner_enabled": _codex_runner_enabled() if payload.lane_id in CLI_RUNNER_LANE_IDS else False,
+            "real_provider": payload.lane_id in CLI_RUNNER_LANE_IDS,
             "arbitrary_shell_disabled": True,
             "public_real_agent_launch_disabled": True,
         },
@@ -3165,8 +3435,11 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
     }
     _save_runner_state(state)
 
-    if payload.lane_id == "codex_cli":
-        state = _start_codex_runner(state, str(repo_path))
+    if payload.lane_id in CLI_RUNNER_LANE_IDS:
+        if payload.lane_id == "codex_cli" and payload.execution_mode != "unattended":
+            state = _start_codex_runner(state, str(repo_path))
+        else:
+            state = _start_cli_runner_for_dispatch(state, str(repo_path))
     else:
         # fake
         state = _start_fake_runner(state)
@@ -3180,7 +3453,7 @@ def post_mcharness_runner_start(session_id: str, payload: McHarnessRunnerStartRe
         status="dispatched",
         original_prompt=original_prompt,
     )
-    if payload.lane_id == "codex_cli":
+    if payload.lane_id in CLI_RUNNER_LANE_IDS:
         prompt_memory_id = _remember_run_memory(
             scope=payload.repo_id,
             content=original_prompt,
@@ -3715,10 +3988,36 @@ def post_mcharness_gate_decision(gate_id: str, payload: McHarnessProofGateDecisi
         decided_by=payload.decided_by,
         decision_reason=payload.decision_reason,
     )
+
+    # Captain auto-advance hook: a human just approved this gate, which is the one
+    # checkpoint auto_advance still requires between steps (see
+    # post_mcharness_captain_plan_watchers_poll — watcher completion only opens a gate,
+    # it never completes a step by itself). Only fires for gates the Captain Watcher
+    # created, only on "approve", and only completes/advances the SAME step this gate
+    # was for — never bypasses review for any other step.
+    auto_advanced_plan = None
+    plan_id = updated.get("plan_id")
+    step_id = updated.get("step_id")
+    if payload.decision == "approve" and plan_id and step_id:
+        try:
+            completed_plan = complete_captain_plan_step(
+                MCTABLE_ROOT, str(plan_id), str(step_id), evidence_ids=[],
+            )
+            if completed_plan.get("auto_advance") and completed_plan.get("status") == "active":
+                next_step_id = completed_plan.get("current_step_id")
+                if next_step_id and next_step_id != step_id:
+                    post_mcharness_captain_plan_step_dispatch(str(plan_id), str(next_step_id))
+            auto_advanced_plan = get_plan_record(MCTABLE_ROOT, str(plan_id))
+        except HTTPException:
+            # Step already completed some other way, plan not active, etc. — the gate
+            # decision itself still succeeded; nothing further to do here.
+            pass
+
     return {
         "ok": True,
         "service": "mcharness-control-plane",
         "gate": updated,
+        "plan": _captain_plan_response(auto_advanced_plan) if auto_advanced_plan else None,
     }
 
 
