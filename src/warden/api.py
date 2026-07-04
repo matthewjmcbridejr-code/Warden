@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import hashlib
@@ -541,7 +542,7 @@ class McHarnessRunnerSessionCleanupRequest(BaseModel):
 class McHarnessCaptainStatusResponse(BaseModel):
     ok: bool = True
     configured: bool
-    provider: Literal["openrouter"] = "openrouter"
+    provider: Literal["openrouter", "marius-gateway"] = "openrouter"
     model: str
     planning_enabled: bool
     key_source: Literal["env", "saved", "missing"]
@@ -552,7 +553,7 @@ class McHarnessCaptainStatusResponse(BaseModel):
 class McHarnessCaptainKeyResponse(BaseModel):
     ok: bool = True
     configured: bool
-    provider: Literal["openrouter"] = "openrouter"
+    provider: Literal["openrouter", "marius-gateway"] = "openrouter"
     model: str
     key_source: Literal["env", "saved", "missing"]
     private_key_setup_enabled: bool
@@ -750,21 +751,24 @@ def _resolve_captain_plan_agent(agent_id: str) -> dict[str, Any]:
 
 
 def _captain_status_payload() -> dict[str, Any]:
+    # Captain is always usable: with an OpenRouter key it calls OpenRouter directly,
+    # otherwise it routes through the local Marius gateway, and falls back to the
+    # deterministic local planner if no model is reachable. No key is required.
     key_source = _captain_key_source()
-    configured = key_source in {"env", "saved"}
+    has_key = key_source in {"env", "saved"}
     notes = []
-    if not configured:
-        notes.append("Captain is not configured. Set OPENROUTER_API_KEY on the private service.")
-    elif key_source == "env":
-        notes.append("Captain is configured via environment.")
+    if key_source == "env":
+        notes.append("Captain is configured via environment OpenRouter key.")
+    elif key_source == "saved":
+        notes.append("Captain is configured via saved private OpenRouter key.")
     else:
-        notes.append("Captain is configured via saved private key.")
+        notes.append("Captain routes through the local Marius gateway (no OpenRouter key required).")
     return {
         "ok": True,
-        "configured": configured,
-        "provider": "openrouter",
+        "configured": True,
+        "provider": "openrouter" if has_key else "marius-gateway",
         "model": _captain_effective_model_name(),
-        "planning_enabled": configured,
+        "planning_enabled": True,
         "key_source": key_source,
         "private_key_setup_enabled": _captain_private_key_setup_enabled(),
         "notes": notes,
@@ -906,46 +910,34 @@ def _openrouter_chat_completion(*, messages: list[dict[str, str]], model: str, t
         raise HTTPException(status_code=502, detail="OpenRouter returned invalid JSON.") from exc
 
 
-def _build_captain_plan(*, goal: str, repo: dict[str, Any], lane_id: str) -> tuple[dict[str, Any], list[str]]:
-    model = _captain_effective_model_name()
-    system_prompt = "\n".join([
-        "You are Captain Deck for McHarness.",
-        "Output strict JSON only.",
-        "Create a bounded plan with 3 to 7 ordered steps.",
-        "Each step must be suitable as a Codex dispatch prompt.",
-        "The JSON object must contain: title, summary, steps.",
-        "Each step object must contain: title and prompt.",
-        "Keep each step short, specific, and safe.",
-        "Each step prompt must mention the exact goal, files or areas to inspect if known, allowed files or areas if known, forbidden actions, acceptance checks, and a final proof format.",
-        "Do not include markdown fences, commentary, or extra keys unless needed for notes.",
-        "Do not propose deploy commands unless explicitly requested later.",
-        "Default to inspect before edit.",
-        "Default to no push, merge, reset, or rebase.",
-        "Default to no secrets and no public runner changes.",
-    ])
-    user_prompt = "\n".join([
+_CAPTAIN_SYSTEM_PROMPT = "\n".join([
+    "You are Captain Deck for McHarness.",
+    "Output strict JSON only.",
+    "Create a bounded plan with 3 to 7 ordered steps.",
+    "Each step must be suitable as a Codex dispatch prompt.",
+    "The JSON object must contain: title, summary, steps.",
+    "Each step object must contain: title and prompt.",
+    "Keep each step short, specific, and safe.",
+    "Each step prompt must mention the exact goal, files or areas to inspect if known, allowed files or areas if known, forbidden actions, acceptance checks, and a final proof format.",
+    "Do not include markdown fences, commentary, or extra keys unless needed for notes.",
+    "Do not propose deploy commands unless explicitly requested later.",
+    "Default to inspect before edit.",
+    "Default to no push, merge, reset, or rebase.",
+    "Default to no secrets and no public runner changes.",
+])
+
+
+def _captain_user_prompt(*, goal: str, repo: dict[str, Any], lane_id: str) -> str:
+    return "\n".join([
         f"Goal: {goal}",
         f"Repo: {repo['repo_id']} ({repo['path']})",
         f"Lane: {lane_id}",
         "Return only JSON with title, summary, and 3-7 ordered steps.",
     ])
-    payload = _openrouter_chat_completion(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        model=model,
-        timeout=30.0,
-    )
-    choices = payload.get("choices") if isinstance(payload, dict) else None
-    if not choices:
-        raise HTTPException(status_code=502, detail="OpenRouter response did not include any choices.")
-    first_choice = choices[0] if isinstance(choices, list) and choices else {}
-    message = first_choice.get("message") if isinstance(first_choice, dict) else {}
-    content = ""
-    if isinstance(message, dict):
-        content = str(message.get("content") or "").strip()
 
+
+def _plan_from_json_content(content: str, *, goal: str, repo: dict[str, Any], lane_id: str) -> dict[str, Any]:
+    """Parse a model's JSON plan output into the persisted plan shape. Raises HTTPException on bad shape."""
     try:
         parsed = _extract_json_object(content)
     except ValueError as exc:
@@ -958,7 +950,6 @@ def _build_captain_plan(*, goal: str, repo: dict[str, Any], lane_id: str) -> tup
         raise HTTPException(status_code=502, detail="Captain plan must contain 3 to 7 ordered steps.")
 
     steps: list[dict[str, Any]] = []
-    notes: list[str] = []
     for index, raw_step in enumerate(raw_steps, start=1):
         if not isinstance(raw_step, dict):
             raise HTTPException(status_code=502, detail="Captain plan steps must be JSON objects.")
@@ -986,15 +977,75 @@ def _build_captain_plan(*, goal: str, repo: dict[str, Any], lane_id: str) -> tup
             }
         )
 
-    notes.append(f"OpenRouter model: {model}")
     return {
         "ok": True,
         "plan_id": f"plan_{uuid.uuid4().hex[:8]}",
         "title": title,
         "summary": summary,
         "steps": steps,
-        "notes": notes,
-    }, notes
+    }
+
+
+def _build_captain_plan(*, goal: str, repo: dict[str, Any], lane_id: str) -> tuple[dict[str, Any], list[str]]:
+    """Real Captain plan generation via a direct OpenRouter call (used when a key is configured)."""
+    model = _captain_effective_model_name()
+    payload = _openrouter_chat_completion(
+        messages=[
+            {"role": "system", "content": _CAPTAIN_SYSTEM_PROMPT},
+            {"role": "user", "content": _captain_user_prompt(goal=goal, repo=repo, lane_id=lane_id)},
+        ],
+        model=model,
+        timeout=30.0,
+    )
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not choices:
+        raise HTTPException(status_code=502, detail="OpenRouter response did not include any choices.")
+    first_choice = choices[0] if isinstance(choices, list) and choices else {}
+    message = first_choice.get("message") if isinstance(first_choice, dict) else {}
+    content = ""
+    if isinstance(message, dict):
+        content = str(message.get("content") or "").strip()
+
+    plan = _plan_from_json_content(content, goal=goal, repo=repo, lane_id=lane_id)
+    notes = [f"OpenRouter model: {model}"]
+    plan["notes"] = notes
+    return plan, notes
+
+
+async def _build_captain_plan_via_gateway(*, goal: str, repo: dict[str, Any], lane_id: str) -> tuple[dict[str, Any], list[str]]:
+    """Real Captain plan generation via the local Marius model gateway (no OpenRouter key required).
+
+    The Marius gateway routes across whatever local/hosted models are actually reachable
+    (Ollama, Groq, Gemini, etc. depending on what's configured) and reports which one it used.
+    """
+    from src.marius.provider_gateway import ProviderGateway
+
+    # Note: do not pass a system-role message in `history` here — ProviderGateway.chat()
+    # only builds its own context block (which defines `brain_pack`) when no system
+    # message is already present, but then references `brain_pack` unconditionally
+    # later, raising UnboundLocalError if that branch is short-circuited.
+    prompt = f"{_CAPTAIN_SYSTEM_PROMPT}\n\n{_captain_user_prompt(goal=goal, repo=repo, lane_id=lane_id)}"
+    gw = ProviderGateway()
+    # brain_enabled=False: plan generation doesn't need memory/brain search, and skipping
+    # it avoids the slow network-bound context-gathering path. A hard timeout is a
+    # safety net so a slow/unreachable model backend can't stall plan creation —
+    # any failure here falls back to the deterministic local planner.
+    result = await asyncio.wait_for(
+        gw.chat(
+            prompt,
+            history=[],
+            workspace={"repo_path": repo["path"], "project": repo["repo_id"], "runner_enabled": False},
+            brain_enabled=False,
+        ),
+        timeout=3.0,
+    )
+    content = str(result.get("response") or "").strip()
+    plan = _plan_from_json_content(content, goal=goal, repo=repo, lane_id=lane_id)
+    provider = result.get("provider") or "marius-gateway"
+    actual_model = result.get("actual") or result.get("requested") or "auto"
+    notes = [f"Marius gateway: {provider}/{actual_model}"]
+    plan["notes"] = notes
+    return plan, notes
 
 
 def _save_captain_plan_artifact(plan: dict[str, Any], *, goal: str, repo: dict[str, Any], lane_id: str) -> Optional[Path]:
@@ -2083,8 +2134,27 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
             notes = plan.get("notes", []) + [f"Cloud planning failed: {exc}"]
             plan["notes"] = notes
     else:
-        plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
-        notes = plan.get("notes", [])
+        # No OpenRouter key: route through the Marius gateway (local models) instead of
+        # requiring cloud config. Any failure (no reachable model, bad JSON, etc.) falls
+        # back to the deterministic local planner so Create Plan always produces a plan.
+        try:
+            agent = _resolve_captain_plan_agent(lane_id)
+            resolved_lane = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
+            _validate_agent_lane(resolved_lane)
+            plan, notes = asyncio.run(
+                _build_captain_plan_via_gateway(goal=payload.goal, repo=repo, lane_id=resolved_lane)
+            )
+            plan["source"] = "gateway"
+        except Exception as exc:
+            if isinstance(exc, HTTPException):
+                reason = exc.detail
+            elif isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                reason = "no local model backend responded in time"
+            else:
+                reason = str(exc) or type(exc).__name__
+            plan = _local_preview_plan(goal=payload.goal, repo_id=repo["repo_id"], lane_id=lane_id)
+            notes = plan.get("notes", []) + [f"Gateway planning failed: {reason}"]
+            plan["notes"] = notes
 
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None

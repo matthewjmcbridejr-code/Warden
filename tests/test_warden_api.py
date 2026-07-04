@@ -55,7 +55,9 @@ def test_mcharness_health_endpoint_reports_public_manual_mode():
     assert data["repo_count"] >= 1
 
 
-def test_mcharness_captain_status_reports_disabled_when_key_missing(monkeypatch):
+def test_mcharness_captain_status_reports_gateway_configured_when_key_missing(monkeypatch):
+    # Without a cloud key, Captain is still "configured" — it routes through the local
+    # Marius gateway (with a deterministic fallback planner) instead of requiring a key.
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("MCHARNESS_CAPTAIN_MODEL", raising=False)
     client = TestClient(app)
@@ -63,13 +65,13 @@ def test_mcharness_captain_status_reports_disabled_when_key_missing(monkeypatch)
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["configured"] is False
-    assert data["provider"] == "openrouter"
+    assert data["configured"] is True
+    assert data["provider"] == "marius-gateway"
     assert data["model"] == "openrouter/auto"
-    assert data["planning_enabled"] is False
+    assert data["planning_enabled"] is True
     assert data["key_source"] == "missing"
     assert data["private_key_setup_enabled"] is False
-    assert "OPENROUTER_API_KEY" in data["notes"][0]
+    assert "gateway" in data["notes"][0].lower()
     assert "test-openrouter-key" not in response.text
 
 
@@ -136,13 +138,14 @@ def test_mcharness_captain_key_save_delete_and_status_round_trip(monkeypatch, tm
     removed = client.delete("/api/mcharness/captain/key")
     assert removed.status_code == 200, removed.text
     removed_data = removed.json()
-    assert removed_data["configured"] is False
+    # Still "configured" — falls back to the Marius gateway, not disabled.
+    assert removed_data["configured"] is True
     assert removed_data["key_source"] == "missing"
     assert "sk-or-private-test-key" not in removed.text
 
     status_after = client.get("/api/mcharness/captain/status")
     assert status_after.status_code == 200
-    assert status_after.json()["configured"] is False
+    assert status_after.json()["configured"] is True
 
 
 def test_mcharness_captain_key_env_precedence_over_saved_key(monkeypatch, tmp_path):
