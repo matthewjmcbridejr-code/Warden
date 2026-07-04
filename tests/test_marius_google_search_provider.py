@@ -3,6 +3,7 @@ import os
 from unittest.mock import MagicMock, patch
 from src.marius.google_search_provider import GoogleAgentSearchProvider
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_status_detailed(mock_getenv):
     # Setup mock environment
@@ -24,6 +25,7 @@ def test_google_provider_status_detailed(mock_getenv):
         assert "custom_config" in status["serving_config_path"]
         assert status["ready"] is True
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_search_success_label(mock_getenv):
     env = {
@@ -52,6 +54,7 @@ def test_google_provider_search_success_label(mock_getenv):
         assert results[0]["provider"] == "google"
         assert "Google Doc" in results[0]["title"]
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_filters_disabled_by_default(mock_getenv):
     env = {
@@ -74,6 +77,7 @@ def test_google_provider_filters_disabled_by_default(mock_getenv):
         request = args[0]
         assert request.filter == ""
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_filters_enabled_via_env(mock_getenv):
     env = {
@@ -97,6 +101,7 @@ def test_google_provider_filters_enabled_via_env(mock_getenv):
         request = args[0]
         assert 'project: ANY("grademy")' in request.filter
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_error_reporting(mock_getenv):
     env = {
@@ -118,6 +123,7 @@ def test_google_provider_error_reporting(mock_getenv):
         assert "Deadline Exceeded" in results[0]["snippet"]
         assert results[0]["provider"] == "local fallback"
 
+@pytest.mark.requires_google_search
 @patch("src.marius.google_search_provider.os.getenv")
 def test_google_provider_fallback_reason_visible(mock_getenv):
     mock_getenv.return_value = None
@@ -127,6 +133,7 @@ def test_google_provider_fallback_reason_visible(mock_getenv):
         assert status["ready"] is False
         assert "package not installed" in status["fallback_reason"]
 
+@pytest.mark.requires_google_search
 def test_mctable_search_config_accepted():
     with patch.dict(os.environ, {
         "GOOGLE_AGENT_SEARCH_ENGINE_ID": "mctable-search",

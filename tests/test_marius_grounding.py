@@ -4,6 +4,7 @@ from src.marius.grounding import GroundingPack
 from src.marius.provider_gateway import ProviderGateway
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_grounding_injection():
     gateway = ProviderGateway()
     
@@ -23,6 +24,7 @@ async def test_grounding_injection():
         assert "Warden is Matt’s terminal-agent control plane" in system_msg
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_anti_hallucination_rule_injection():
     gateway = ProviderGateway()
     
@@ -47,6 +49,7 @@ def test_grounding_pack_file_loading():
     assert "AGENTS.md" in gp.facts or "mcharness-public-export" in gp.facts
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_uncertainty_behavior_with_mock():
     # This test verifies that the prompt contains the instruction to be uncertain.
     # We don't necessarily need to test the model's response here, but rather the harness logic.

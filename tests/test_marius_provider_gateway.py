@@ -113,6 +113,7 @@ async def test_embedding_model_auto_switch():
             assert result["actual"] == "llama3.2:1b"
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_gateway_chat_with_history():
     gateway = ProviderGateway()
     with patch("src.marius.providers.ollama.OllamaProvider.complete", new_callable=AsyncMock) as mock_complete:
