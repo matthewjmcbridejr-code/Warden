@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as URLRequest, urlopen
 
@@ -463,6 +463,14 @@ class McHarnessCaptainPlanRequest(BaseModel):
     goal: str = Field(min_length=1)
     repo_id: str = Field(min_length=1)
     lane_id: str = Field(min_length=1)
+
+    @field_validator("goal")
+    @classmethod
+    def goal_must_not_be_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("goal must not be blank")
+        return stripped
 
 
 class McHarnessCaptainKeyRequest(BaseModel):

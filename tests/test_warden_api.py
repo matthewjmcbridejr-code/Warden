@@ -250,6 +250,34 @@ def test_mcharness_captain_plan_rejects_unknown_lane(monkeypatch):
     assert "Unknown agent lane" in response.json()["detail"]
 
 
+def test_mcharness_captain_plan_rejects_blank_goal(monkeypatch, tmp_path):
+    # Whitespace-only goal must be rejected server-side, not just trimmed client-side
+    import src.warden.api as api_mod
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    client = TestClient(app)
+    response = client.post(
+        "/api/mcharness/captain/plan",
+        json={
+            "goal": "   ",
+            "repo_id": "hybrid-agent-os",
+            "lane_id": "codex_cli",
+        },
+    )
+    assert response.status_code == 422
+
+    response_empty = client.post(
+        "/api/mcharness/captain/plan",
+        json={
+            "goal": "",
+            "repo_id": "hybrid-agent-os",
+            "lane_id": "codex_cli",
+        },
+    )
+    assert response_empty.status_code == 422
+
+
 def test_mcharness_captain_plan_parses_mocked_openrouter_json(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("MCHARNESS_CAPTAIN_MODEL", "openrouter/auto")
