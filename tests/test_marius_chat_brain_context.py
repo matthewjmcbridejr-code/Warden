@@ -4,6 +4,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from src.marius.provider_gateway import ProviderGateway
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_chat_injects_brain_context():
     gateway = ProviderGateway()
     gateway.brain_context_enabled = True
@@ -27,6 +28,7 @@ async def test_chat_injects_brain_context():
             assert "rec1" in system_msg
 
 @pytest.mark.anyio
+@pytest.mark.requires_ollama
 async def test_chat_respects_brain_disabled_toggle():
     gateway = ProviderGateway()
     gateway.brain_context_enabled = False

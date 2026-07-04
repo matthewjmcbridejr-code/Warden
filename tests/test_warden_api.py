@@ -2413,6 +2413,7 @@ def test_agent_refresh_status_public_codex_not_runnable(monkeypatch):
     assert "test-jules-key" not in refreshed.text
 
 
+@pytest.mark.requires_codex_cli
 def test_agent_refresh_status_private_codex_runnable(monkeypatch, tmp_path):
     monkeypatch.setenv("MCHARNESS_TMUX_RUNNER_ENABLED", "true")
     monkeypatch.setenv("MCHARNESS_CODEX_RUNNER_ENABLED", "true")
