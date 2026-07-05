@@ -697,12 +697,6 @@
         </div>
 
         <aside id="operator-inspector" class="operator-inspector right-rail" data-testid="operator-inspector">
-          <div class="inspector-card rail-card" data-testid="rail-proof-gates-card">
-            <h3 class="inspector-title">Proof Gates</h3>
-            <div id="rail-proof-gates" data-testid="rail-proof-gates"></div>
-            <button type="button" id="rail-review-gates" class="btn" data-testid="rail-review-gates">Review gates</button>
-            <div id="inspector-gates-summary" data-testid="inspector-gates-summary" style="display:none;"></div>
-          </div>
           <div class="inspector-card rail-card" data-testid="rail-connected-agents-card">
             <h3 class="inspector-title">Connected Agents</h3>
             <div id="rail-connected-agents" data-testid="rail-connected-agents"></div>
@@ -713,24 +707,6 @@
             </ul>
             <button type="button" id="inspector-refresh-agents" data-testid="inspector-refresh-agents" class="btn">Refresh</button>
           </div>
-          <div class="inspector-card rail-card" data-testid="rail-runner-sessions-card">
-            <h3 class="inspector-title">Runner Sessions</h3>
-            <div id="rail-runner-sessions" data-testid="rail-runner-sessions"></div>
-            <div class="rail-card-actions">
-              <button type="button" id="rail-runner-dry-run" class="btn" data-testid="rail-runner-dry-run">Dry-run cleanup</button>
-              <button type="button" id="rail-runner-confirm" class="btn bad" data-testid="rail-runner-confirm" disabled>Confirm cleanup</button>
-            </div>
-          </div>
-          <div class="inspector-card rail-card" data-testid="rail-safety-card">
-            <h3 class="inspector-title">Safety</h3>
-            <div id="rail-safety-status" data-testid="rail-safety-status"></div>
-            <ul class="control-room-list" style="display:none;" data-testid="control-room-status">
-              <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
-              <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
-              <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
-              <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
-            </ul>
-          </div>
           <div class="inspector-card rail-card" data-testid="inspector-next-move">
             <h3 class="inspector-title">Next Move</h3>
             <div id="rail-next-move" data-testid="rail-next-move"></div>
@@ -740,6 +716,35 @@
               <button type="button" class="btn" id="inspector-view-codex" data-testid="inspector-view-codex">View Codex</button>
             </div>
           </div>
+          <details class="inspector-card rail-card" data-testid="rail-technical-details">
+            <summary class="inspector-title" style="cursor:pointer; list-style:none;">⚙ Technical details</summary>
+            <div style="margin-top:10px; display:grid; gap:14px;">
+              <div data-testid="rail-proof-gates-card">
+                <h4 class="inspector-title" style="font-size:0.85em;">Proof Gates</h4>
+                <div id="rail-proof-gates" data-testid="rail-proof-gates"></div>
+                <button type="button" id="rail-review-gates" class="btn" data-testid="rail-review-gates">Review gates</button>
+                <div id="inspector-gates-summary" data-testid="inspector-gates-summary" style="display:none;"></div>
+              </div>
+              <div data-testid="rail-runner-sessions-card">
+                <h4 class="inspector-title" style="font-size:0.85em;">Runner Sessions</h4>
+                <div id="rail-runner-sessions" data-testid="rail-runner-sessions"></div>
+                <div class="rail-card-actions">
+                  <button type="button" id="rail-runner-dry-run" class="btn" data-testid="rail-runner-dry-run">Dry-run cleanup</button>
+                  <button type="button" id="rail-runner-confirm" class="btn bad" data-testid="rail-runner-confirm" disabled>Confirm cleanup</button>
+                </div>
+              </div>
+              <div data-testid="rail-safety-card">
+                <h4 class="inspector-title" style="font-size:0.85em;">Safety</h4>
+                <div id="rail-safety-status" data-testid="rail-safety-status"></div>
+                <ul class="control-room-list" style="display:none;" data-testid="control-room-status">
+                  <li id="cr-public-runner" data-testid="cr-public-runner">Public runner: Disabled</li>
+                  <li id="cr-private-runner" data-testid="cr-private-runner">Private runner: Available on private service</li>
+                  <li id="cr-shell-input" data-testid="cr-shell-input">Arbitrary shell input: Disabled</li>
+                  <li id="cr-agent-registration" data-testid="cr-agent-registration">Agent registration: Private only</li>
+                </ul>
+              </div>
+            </div>
+          </details>
         </aside>
       </div>
     </main>
