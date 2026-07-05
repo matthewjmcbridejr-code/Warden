@@ -688,6 +688,14 @@
     }
   }
 
+  function captainAgentChipState(agent) {
+    // Same honest read of runnable/status/probe used by captainAgentOptionLabel —
+    // no agent gets a free "ready" label it hasn't earned.
+    if (agent.probe && agent.probe.installed === false) return { cls: "is-not-installed", label: "not installed" };
+    if (agent.runnable) return { cls: "is-ready", label: "ready" };
+    return { cls: "is-disabled", label: "not runnable" };
+  }
+
   function renderCaptainDispatchBanner() {
     const banner = document.getElementById("captain-dispatch-banner");
     if (!banner) return;
@@ -696,19 +704,24 @@
       banner.style.display = "none";
       return;
     }
-    const runnableNames = cliAgents.filter((agent) => agent.runnable).map((agent) => agent.name || agent.id);
-    banner.style.display = "block";
-    if (runnableNames.length) {
-      banner.style.background = "rgba(99,219,157,0.12)";
-      banner.style.border = "1px solid var(--good,#63db9d)";
-      banner.style.color = "var(--good,#63db9d)";
-      banner.textContent = `Real dispatch enabled: ${runnableNames.join(", ")}`;
-    } else {
-      banner.style.background = "rgba(240,198,106,0.12)";
-      banner.style.border = "1px solid var(--warn,#f0c66a)";
-      banner.style.color = "var(--warn,#f0c66a)";
-      banner.textContent = "Dispatch disabled — steps will be logged, nothing will run. Enable the private runner to run steps for real.";
-    }
+    banner.style.display = "flex";
+    const anyRunnable = cliAgents.some((agent) => agent.runnable);
+    banner.classList.toggle("is-enabled", anyRunnable);
+    banner.classList.toggle("is-disabled", !anyRunnable);
+    const chips = cliAgents.map((agent) => {
+      const { cls, label } = captainAgentChipState(agent);
+      const shortName = (agent.name || agent.id || "").replace(/\s*CLI\s*$/i, "") || agent.id;
+      return `<span class="captain-agent-chip ${cls}" title="${escapeHtml(agent.name || agent.id)} — ${escapeHtml(label)}"><span class="captain-chip-dot"></span>${escapeHtml(shortName)} ${escapeHtml(label)}</span>`;
+    }).join("");
+    const icon = anyRunnable ? "●" : "○";
+    const text = anyRunnable
+      ? "Real dispatch enabled"
+      : "Real dispatch is off — requests are logged, nothing runs";
+    banner.innerHTML = `
+      <span class="captain-banner-icon">${icon}</span>
+      <span class="captain-banner-text">${escapeHtml(text)}</span>
+      <span class="captain-agent-chip-row">${chips}</span>
+    `;
   }
 
   function captainAgentDisplayName(agentId) {
@@ -740,6 +753,15 @@
     return status;
   }
 
+  function captainStepVisualStatus(step, pendingGate) {
+    if (pendingGate) return "review";
+    const status = step.status || "queued";
+    if (status === "dispatched" || status === "running") return "running";
+    if (status === "passed") return "done";
+    if (status === "needs_review" || status === "stopped") return "stopped";
+    return "queued";
+  }
+
   function renderCaptainTimeline(plan, pendingGate) {
     const steps = plan.steps || [];
     const currentStep = steps.find((s) => (s.id || s.step_id) === plan.current_step_id);
@@ -754,13 +776,15 @@
       { label: "Your review", done: completed, active: !!pendingGate },
       { label: completed ? "Completed" : "Next step", done: completed, active: false },
     ];
-    const chips = stages.map((stage) => {
-      const icon = stage.done ? "✓" : (stage.active ? "●" : "○");
-      const color = stage.done ? "var(--good,#63db9d)" : (stage.active ? "var(--warn,#f0c66a)" : "var(--muted,#9cacbf)");
-      const weight = stage.active ? "font-weight:600;" : "";
-      return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:0.76em;padding:2px 8px;border-radius:10px;color:${color};${weight}">${icon} ${escapeHtml(stage.label)}</span>`;
-    }).join('<span class="muted" style="margin:0 2px;">→</span>');
-    return `<div class="captain-timeline" style="margin-bottom:8px;">${chips}</div>`;
+    const parts = stages.map((stage, i) => {
+      const stateCls = stage.done ? "is-done" : (stage.active ? "is-active" : "is-upcoming");
+      const icon = stage.done ? "✓" : (stage.active ? "●" : (i + 1));
+      const step = `<span class="captain-timeline-step ${stateCls}"><span class="captain-timeline-icon">${icon}</span>${escapeHtml(stage.label)}</span>`;
+      if (i === stages.length - 1) return step;
+      const connectorDone = stage.done ? "is-done" : "";
+      return `${step}<span class="captain-timeline-connector ${connectorDone}"></span>`;
+    }).join("");
+    return `<div class="captain-timeline">${parts}</div>`;
   }
 
   function renderCaptainDeck() {
@@ -927,31 +951,39 @@
           const dispatchableStatuses = ["queued", "revised", "needs_review", "dispatched"];
           const canDispatch = isCurrent && !pendingGate && dispatchableStatuses.includes(step.status || "queued");
           const statusLabel = captainStepStatusLabel(step, pendingGate);
+          const visualStatus = captainStepVisualStatus(step, pendingGate);
           const actionsHtml = pendingGate
             ? `
-              <div class="captain-step-gate-actions" style="margin-top:4px;">
-                <div class="muted" style="font-size:0.78em;margin-bottom:4px;">${escapeHtml(pendingGate.summary || "Review the result before continuing.")}</div>
-                <button type="button" class="btn good" data-gate-approve="${escapeHtml(pendingGate.gate_id)}">Approve</button>
-                <button type="button" class="btn bad" data-gate-block="${escapeHtml(pendingGate.gate_id)}">Block</button>
-                <button type="button" class="btn" data-gate-more-evidence="${escapeHtml(pendingGate.gate_id)}">Request More Evidence</button>
-                ${step.run_id ? `<button type="button" class="btn captain-view-run-btn" data-run-id="${escapeHtml(step.run_id)}">View transcript</button>` : ""}
+              <div class="captain-gate-card">
+                <div class="captain-gate-header">⚑ Review required</div>
+                <div class="captain-gate-summary">${escapeHtml(pendingGate.summary || "Review the result before continuing.")}</div>
+                <div class="captain-gate-actions">
+                  <button type="button" class="btn good" data-gate-approve="${escapeHtml(pendingGate.gate_id)}">Approve and continue</button>
+                  <button type="button" class="btn bad" data-gate-block="${escapeHtml(pendingGate.gate_id)}">Block step</button>
+                  <span class="captain-gate-secondary">
+                    ${step.run_id ? `<button type="button" class="btn ghost captain-view-run-btn" data-run-id="${escapeHtml(step.run_id)}">View evidence</button>` : ""}
+                    <button type="button" class="btn ghost" data-gate-more-evidence="${escapeHtml(pendingGate.gate_id)}">Request more evidence</button>
+                  </span>
+                </div>
               </div>
             `
-            : `<div style="margin-top:4px;">
+            : `<div class="captain-step-actions">
                 ${canDispatch
-                  ? `<button class="btn captain-dispatch-step-btn" style="font-size:0.75em;padding:3px 10px;" data-step-id="${escapeHtml(stepId)}">Run this step</button>`
-                  : `<button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Only the current step can be dispatched">Run this step</button>`}
+                  ? `<button class="btn primary captain-dispatch-step-btn" data-step-id="${escapeHtml(stepId)}">Run this step</button>`
+                  : `<button class="btn" disabled title="Only the current step can be dispatched">Run this step</button>`}
               </div>`;
           return `
-          <details class="captain-step" style="margin-bottom:6px;" ${isCurrent ? "open" : ""}>
-            <summary style="cursor:pointer;padding:6px 0;">
-              <strong style="margin-right:6px;">${i + 1}.</strong>
-              <strong>${escapeHtml(step.title || step.id || "Step")}</strong>
-              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(captainAgentDisplayName(step.agent || step.agent_id))}</span>
-              <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(statusLabel)}</span>
+          <details class="captain-step-card status-${visualStatus}${isCurrent ? " is-current" : ""}" ${isCurrent ? "open" : ""}>
+            <summary class="captain-step-summary">
+              <span class="captain-step-index">${i + 1}</span>
+              <span class="captain-step-title">${escapeHtml(step.title || step.id || "Step")}</span>
+              <span class="captain-step-agent-tag">${escapeHtml(captainAgentDisplayName(step.agent || step.agent_id))}</span>
+              <span class="captain-step-status-badge status-${visualStatus}"><span class="captain-status-dot"></span>${escapeHtml(statusLabel)}</span>
             </summary>
-            <pre class="captain-step-prompt" style="margin:6px 0 4px;font-size:0.78em;white-space:pre-wrap;word-break:break-word;">${escapeHtml(step.prompt || "")}</pre>
-            ${actionsHtml}
+            <div class="captain-step-body">
+              <pre class="captain-step-prompt">${escapeHtml(step.prompt || "")}</pre>
+              ${actionsHtml}
+            </div>
           </details>
         `;
         }).join("");
