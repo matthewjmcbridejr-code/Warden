@@ -688,8 +688,84 @@
     }
   }
 
+  function renderCaptainDispatchBanner() {
+    const banner = document.getElementById("captain-dispatch-banner");
+    if (!banner) return;
+    const cliAgents = (state.agents || []).filter((agent) => agent.kind === "cli");
+    if (!cliAgents.length) {
+      banner.style.display = "none";
+      return;
+    }
+    const runnableNames = cliAgents.filter((agent) => agent.runnable).map((agent) => agent.name || agent.id);
+    banner.style.display = "block";
+    if (runnableNames.length) {
+      banner.style.background = "rgba(99,219,157,0.12)";
+      banner.style.border = "1px solid var(--good,#63db9d)";
+      banner.style.color = "var(--good,#63db9d)";
+      banner.textContent = `Real dispatch enabled: ${runnableNames.join(", ")}`;
+    } else {
+      banner.style.background = "rgba(240,198,106,0.12)";
+      banner.style.border = "1px solid var(--warn,#f0c66a)";
+      banner.style.color = "var(--warn,#f0c66a)";
+      banner.textContent = "Dispatch disabled — steps will be logged, nothing will run. Enable the private runner to run steps for real.";
+    }
+  }
+
+  function captainAgentDisplayName(agentId) {
+    const agent = (state.agents || []).find((item) => item.id === agentId);
+    return (agent && agent.name) || agentId || "the configured agent";
+  }
+
+  function findPendingGateForStep(planId, step) {
+    const gates = state.recentGates || [];
+    const runId = step && step.run_id;
+    const stepId = step && (step.id || step.step_id);
+    return gates.find((gate) => (
+      gate.status === "pending"
+      && ((runId && gate.run_id === runId) || (gate.plan_id === planId && gate.step_id === stepId))
+    )) || null;
+  }
+
+  function captainStepStatusLabel(step, pendingGate) {
+    const status = step.status || "queued";
+    if (pendingGate) return "Needs your review";
+    if (status === "needs_review") return "Stopped — needs attention";
+    if (status === "dispatched" || status === "running") {
+      return `Running on ${captainAgentDisplayName(step.agent || step.agent_id)}…`;
+    }
+    if (status === "passed") return "Approved ✓";
+    if (status === "queued" || status === "revised") return "Ready to run";
+    if (status === "skipped") return "Skipped";
+    if (status === "stopped") return "Stopped";
+    return status;
+  }
+
+  function renderCaptainTimeline(plan, pendingGate) {
+    const steps = plan.steps || [];
+    const currentStep = steps.find((s) => (s.id || s.step_id) === plan.current_step_id);
+    const currentStatus = (currentStep && currentStep.status) || "queued";
+    const completed = plan.status === "completed";
+    const dispatchedOrLater = ["dispatched", "running", "needs_review", "passed", "skipped", "stopped"].includes(currentStatus);
+    const runFinished = ["passed", "skipped", "stopped"].includes(currentStatus);
+    const stages = [
+      { label: "Plan", done: true, active: false },
+      { label: "Dispatch", done: dispatchedOrLater || completed, active: false },
+      { label: "Running", done: runFinished || completed, active: currentStatus === "dispatched" || currentStatus === "running" },
+      { label: "Your review", done: completed, active: !!pendingGate },
+      { label: completed ? "Completed" : "Next step", done: completed, active: false },
+    ];
+    const chips = stages.map((stage) => {
+      const icon = stage.done ? "✓" : (stage.active ? "●" : "○");
+      const color = stage.done ? "var(--good,#63db9d)" : (stage.active ? "var(--warn,#f0c66a)" : "var(--muted,#9cacbf)");
+      const weight = stage.active ? "font-weight:600;" : "";
+      return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:0.76em;padding:2px 8px;border-radius:10px;color:${color};${weight}">${icon} ${escapeHtml(stage.label)}</span>`;
+    }).join('<span class="muted" style="margin:0 2px;">→</span>');
+    return `<div class="captain-timeline" style="margin-bottom:8px;">${chips}</div>`;
+  }
+
   function renderCaptainDeck() {
     const deck = state.captainDeck;
+    renderCaptainDispatchBanner();
     const noteEl = document.getElementById("captain-config-note");
     const settingsStatusEl = document.getElementById("captain-settings-status");
     const settingsNoteEl = document.getElementById("captain-settings-note");
@@ -842,40 +918,57 @@
           ? '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(240,198,106,0.15);color:var(--warn,#f0c66a);border:1px solid var(--warn,#f0c66a);">Local Preview</span>'
           : '<span style="display:inline-block;margin-left:8px;padding:1px 7px;border-radius:10px;font-size:0.72em;background:rgba(99,219,157,0.12);color:var(--good,#63db9d);border:1px solid var(--good,#63db9d);">AI Plan</span>';
         const currentStepId = deck.plan.current_step_id;
+        let currentPendingGate = null;
         const stepsHtml = steps.map((step, i) => {
           const stepId = step.id || step.step_id;
           const isCurrent = stepId === currentStepId;
+          const pendingGate = isCurrent ? findPendingGateForStep(deck.plan.plan_id, step) : null;
+          if (pendingGate) currentPendingGate = pendingGate;
           const dispatchableStatuses = ["queued", "revised", "needs_review", "dispatched"];
-          const canDispatch = isCurrent && dispatchableStatuses.includes(step.status || "queued");
-          const dispatchBtn = canDispatch
-            ? `<button class="btn captain-dispatch-step-btn" style="font-size:0.75em;padding:3px 10px;" data-step-id="${escapeHtml(stepId)}">Dispatch Step</button>`
-            : `<button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Only the current step can be dispatched">Dispatch Step</button>`;
+          const canDispatch = isCurrent && !pendingGate && dispatchableStatuses.includes(step.status || "queued");
+          const statusLabel = captainStepStatusLabel(step, pendingGate);
+          const actionsHtml = pendingGate
+            ? `
+              <div class="captain-step-gate-actions" style="margin-top:4px;">
+                <div class="muted" style="font-size:0.78em;margin-bottom:4px;">${escapeHtml(pendingGate.summary || "Review the result before continuing.")}</div>
+                <button type="button" class="btn good" data-gate-approve="${escapeHtml(pendingGate.gate_id)}">Approve</button>
+                <button type="button" class="btn bad" data-gate-block="${escapeHtml(pendingGate.gate_id)}">Block</button>
+                <button type="button" class="btn" data-gate-more-evidence="${escapeHtml(pendingGate.gate_id)}">Request More Evidence</button>
+                ${step.run_id ? `<button type="button" class="btn captain-view-run-btn" data-run-id="${escapeHtml(step.run_id)}">View transcript</button>` : ""}
+              </div>
+            `
+            : `<div style="margin-top:4px;">
+                ${canDispatch
+                  ? `<button class="btn captain-dispatch-step-btn" style="font-size:0.75em;padding:3px 10px;" data-step-id="${escapeHtml(stepId)}">Run this step</button>`
+                  : `<button class="btn" style="font-size:0.75em;padding:3px 10px;opacity:0.5;cursor:default;" disabled title="Only the current step can be dispatched">Run this step</button>`}
+              </div>`;
           return `
           <details class="captain-step" style="margin-bottom:6px;" ${isCurrent ? "open" : ""}>
             <summary style="cursor:pointer;padding:6px 0;">
               <strong style="margin-right:6px;">${i + 1}.</strong>
               <strong>${escapeHtml(step.title || step.id || "Step")}</strong>
-              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(step.agent || step.agent_id || "codex_cli")}</span>
-              <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(step.status || "queued")}</span>
+              <span class="muted" style="margin-left:8px;font-size:0.8em;">${escapeHtml(captainAgentDisplayName(step.agent || step.agent_id))}</span>
+              <span class="muted" style="margin-left:8px;font-size:0.78em;">${escapeHtml(statusLabel)}</span>
             </summary>
             <pre class="captain-step-prompt" style="margin:6px 0 4px;font-size:0.78em;white-space:pre-wrap;word-break:break-word;">${escapeHtml(step.prompt || "")}</pre>
-            <div style="margin-top:4px;">
-              ${dispatchBtn}
-            </div>
+            ${actionsHtml}
           </details>
         `;
         }).join("");
         const autoAdvanceNote = deck.plan.auto_advance
-          ? '<div class="muted" style="font-size:0.78em;margin-bottom:6px;">Auto-advance is ON for this plan — approving a step\'s proof gate dispatches the next step automatically.</div>'
+          ? '<div class="muted" style="font-size:0.78em;margin-bottom:6px;">Auto-continue is ON — approving a step starts the next one automatically.</div>'
           : "";
+        const timelineHtml = renderCaptainTimeline(deck.plan, currentPendingGate);
         planBody.innerHTML = `
           <div style="margin-bottom:6px;">${sourceBadge}<strong style="margin-left:6px;">${escapeHtml(deck.plan.title || "Captain Plan")}</strong></div>
           <div class="muted" style="font-size:0.82em;margin-bottom:6px;">${escapeHtml(deck.plan.summary || deck.plan.goal || "")}</div>
+          ${timelineHtml}
           ${autoAdvanceNote}
           <div id="captain-watcher-status" class="muted" style="font-size:0.78em;margin-bottom:8px;"></div>
           <div class="captain-plan-steps">${stepsHtml}</div>
         `;
         bindCaptainStepButtons();
+        bindProofGateActions(planBody, null);
       }
     }
     renderCaptainAgentCard();
@@ -1029,7 +1122,7 @@
     state.captainDeck.keyError = "";
     state.captainDeck.keyFormVisible = false;
     renderCaptainDeck();
-    await Promise.all([populateCaptainDeckRepos(), loadCaptainDeckStatus(), loadAgents()]);
+    await Promise.all([populateCaptainDeckRepos(), loadCaptainDeckStatus(), loadAgents(), loadRecentGates()]);
     populateCaptainAgents();
     await loadLatestCaptainPlan();
     renderCaptainDeck();
@@ -2126,6 +2219,12 @@
         if (stepId) dispatchCaptainStep(stepId).catch((e) => console.error(e));
       });
     });
+    document.querySelectorAll(".captain-view-run-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const runId = btn.dataset.runId;
+        if (runId) openRunDetailModal(runId).catch((e) => console.error(e));
+      });
+    });
   }
 
   let _captainWatcherPollTimer = null;
@@ -2147,12 +2246,19 @@
         if (!watchers.length) {
           statusEl.textContent = "";
         } else {
-          statusEl.textContent = watchers
-            .map((w) => `Step ${w.step_id}: ${w.outcome}${w.outcome === "completed" ? " — awaiting gate review" : ""}`)
-            .join(" · ");
+          statusEl.textContent = watchers.map((w) => {
+            const agentName = captainAgentDisplayName(w.lane_id);
+            if (w.outcome === "completed") return `${agentName} finished. Review the result to continue.`;
+            if (w.outcome === "stalled") return `${agentName} run stopped — needs attention.`;
+            if (w.outcome === "error") return `${agentName} run couldn't be checked — needs attention.`;
+            return `${agentName} is running…`;
+          }).join(" · ");
         }
       }
       const changed = watchers.some((w) => w.outcome === "completed" || w.outcome === "stalled" || w.outcome === "error");
+      if (changed) {
+        await loadRecentGates();
+      }
       if (changed && result.plan) {
         setActiveCaptainPlan(result.plan);
       }
@@ -2197,7 +2303,7 @@
           <div class="blocked-notice-body">
             <span class="blocked-notice-icon">⊗</span>
             <div>
-              <strong>Runner unavailable</strong> — blocked attempt saved to Memory.
+              <strong>Real dispatch is off</strong> — this request was logged, nothing ran. Enable the private runner to run steps for real.
               ${runId ? `<span class="blocked-id-pill" title="Copy run ID" onclick="navigator.clipboard.writeText('${escapeHtml(runId)}')">Run: ${escapeHtml(runId.slice(0,20))}</span>` : ""}
               ${memId ? `<span class="blocked-id-pill" title="Copy memory ID" onclick="navigator.clipboard.writeText('${escapeHtml(memId)}')">Mem: ${escapeHtml(memId.slice(0,24))}</span>` : ""}
             </div>
@@ -2213,28 +2319,16 @@
       return;
     }
 
-    // Happy path: runner started
+    // Happy path: the CLI is already running with the step's prompt baked into the
+    // launch command (unattended/YOLO dispatch) — there's nothing to send and no
+    // interactive session to attach to, so Captain Deck stays open as the operator's
+    // home base and keeps watching this plan until the run finishes and a proof gate
+    // opens for review (see pollCaptainWatchers/startCaptainWatcherPolling).
     const dispatch = result.dispatch || {};
     state.selectedThreadId = dispatch.session_id || state.selectedThreadId;
     state.activeWardenRunId = dispatch.runner_id || state.activeWardenRunId;
     await Promise.all([loadRecentRuns(), loadMissionWorklog()]);
-    closeCaptainDeckModal();
-    openLiveCLIMonitor();
-    const prompt = dispatch.prompt || step.prompt;
-    if (dispatch.session_id && prompt) {
-      setTimeout(async () => {
-        try {
-          await requestJson(`${MCH}/sessions/${encodeURIComponent(dispatch.session_id)}/runner/send-prompt`, {
-            method: "POST",
-            body: { prompt },
-          });
-          setQuickReplyStatus("Prompt sent to Codex.");
-          await refreshLiveMonitor();
-        } catch (e) {
-          await refreshLiveMonitor();
-        }
-      }, 10000);
-    }
+    pollCaptainWatchers().catch(() => {});
   }
 
   async function completeCaptainStep(stepId) {
@@ -3085,15 +3179,32 @@
   }
 
   function captainAgentOptionLabel(agent) {
+    // Honest per-agent readiness label. No special-casing any single agent id —
+    // every CLI agent (Codex, Claude Code, Grok Build, ...) is judged the same way
+    // from the fields the backend actually returns (runnable/status/probe), so a
+    // real "not installed" or "dispatch disabled" state is never reported as Ready.
     if (!agent) return "Unknown";
-    if (agent.runnable || agent.id === "codex_cli") {
-      return `${agent.name || agent.id} — Ready`;
-    }
+    const name = agent.name || agent.id;
     if (agent.adapter === "jules_remote") {
       const connected = agent.connection_status === "connected";
-      return `${agent.name || agent.id} — ${connected ? "Connected, execution coming next" : "Setup incomplete"}`;
+      return `${name} — ${connected ? "Connected, execution coming next" : "Setup incomplete"}`;
     }
-    return `${agent.name || agent.id} — Not runnable`;
+    if (agent.probe && agent.probe.installed === false) {
+      return `${name} — Not installed`;
+    }
+    if (agent.runnable) {
+      return `${name} — Ready`;
+    }
+    if (agent.status === "not_configured") {
+      return `${name} — Not configured`;
+    }
+    if (agent.status === "unsupported") {
+      return `${name} — Not supported`;
+    }
+    if (agent.status === "disabled") {
+      return `${name} — Dispatch disabled`;
+    }
+    return `${name} — Status unknown`;
   }
 
   function renderRemoteAgentCards() {
@@ -3154,6 +3265,12 @@
       opt.value = agent.id;
       opt.textContent = captainAgentOptionLabel(agent);
       opt.dataset.runnable = agent.runnable ? "1" : "0";
+      // Only disable CLI-kind agents the backend has told us are not runnable —
+      // jules_remote is intentionally selectable for planning even though it
+      // doesn't dispatch yet, so leave that adapter's options enabled.
+      if (agent.kind === "cli" && agent.runnable === false) {
+        opt.disabled = true;
+      }
       sel.appendChild(opt);
     });
     if (agents.length) {
