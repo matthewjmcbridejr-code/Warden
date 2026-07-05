@@ -2319,16 +2319,22 @@
     if (!plan || !plan.plan_id) return;
     const step = (plan.steps || []).find((item) => item.id === stepId || item.step_id === stepId);
     if (!step) return;
+    state.captainDeck.error = "";
     const result = await requestJson(`${MCH}/captain/plans/${encodeURIComponent(plan.plan_id)}/steps/${encodeURIComponent(stepId)}/dispatch`, {
       method: "POST",
     });
     if (result.plan) setActiveCaptainPlan(result.plan);
 
-    // Blocked path: runner unavailable — show message, don't open monitor
+    // Blocked path: runner unavailable — this is not a failure state to bounce the
+    // operator out of, so Captain Deck stays open (dispatchCaptainStep is also called
+    // from the separate Mission Plan Panel outside the modal, hence the external
+    // notice element below in addition to the in-modal status line).
     if (result.blocked) {
-      closeCaptainDeckModal();
       const memId = result.memory_id || "";
       const runId = result.run_id || "";
+      const blockedText = "Real dispatch is off — this request was logged, nothing ran. Enable the private runner to run steps for real.";
+      state.captainDeck.error = blockedText;
+      renderCaptainDeck();
       const noticeEl = document.getElementById("captain-blocked-notice");
       if (noticeEl) {
         noticeEl.innerHTML = `
