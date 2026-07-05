@@ -951,8 +951,9 @@
       <h3 class="captain-modal-title" style="margin-top:0;" data-testid="captain-deck-title"><span class="captain-modal-kicker">Captain</span> Deck</h3>
       <div id="captain-dispatch-banner" data-testid="captain-dispatch-banner" class="captain-dispatch-banner" style="margin-bottom:12px;"></div>
       <div id="captain-config-note" data-testid="captain-config-note" style="font-size:0.85em; color:var(--warn, #f0c66a); margin-bottom:6px;"></div>
-      <div id="captain-settings" data-testid="captain-settings" class="captain-settings" style="border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <details id="captain-settings" data-testid="captain-settings" class="captain-settings" style="border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:10px;">
+        <summary style="cursor:pointer; font-size:0.82em; color:var(--muted); list-style:none;">⚙ Advanced: OpenRouter key</summary>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px;">
           <div>
             <div id="captain-settings-status" data-testid="captain-settings-status" style="font-size:0.82em; color:var(--muted);"></div>
           </div>
@@ -979,34 +980,40 @@
             <button id="captain-cancel-key" data-testid="captain-cancel-key" class="btn" type="button">Cancel</button>
           </div>
         </div>
-      </div>
+      </details>
       <div id="captain-plan-status" data-testid="captain-plan-status" style="font-size:0.85em; margin-bottom:10px;"></div>
-      <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:10px;">
-        <div style="grid-column:1 / -1;">
-          <label for="captain-goal" style="display:block; font-size:0.85em; margin-bottom:4px;">Goal</label>
-          <textarea id="captain-goal" data-testid="captain-goal" placeholder="Describe what you want built or changed..." style="width:100%; min-height:118px; padding:8px;"></textarea>
+      <details id="captain-new-plan-form" data-testid="captain-new-plan-form" style="margin-bottom:10px;">
+        <summary id="captain-new-plan-summary" data-testid="captain-new-plan-summary" style="cursor:pointer; font-weight:600; font-size:0.9em; list-style:none; padding:4px 0;">+ New plan</summary>
+        <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:10px; margin-top:8px;">
+          <div style="grid-column:1 / -1;">
+            <label for="captain-goal" style="display:block; font-size:0.85em; margin-bottom:4px;">Goal</label>
+            <textarea id="captain-goal" data-testid="captain-goal" placeholder="Describe what you want built or changed..." style="width:100%; min-height:118px; padding:8px;"></textarea>
+          </div>
+          <div>
+            <label for="captain-repo-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Repo</label>
+            <select id="captain-repo-select" data-testid="captain-repo-select" style="width:100%; padding:6px;"></select>
+          </div>
+          <div>
+            <label for="captain-agent-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Agent</label>
+            <select id="captain-agent-select" data-testid="captain-agent-select" style="width:100%; padding:6px;"></select>
+            <div id="captain-agent-note" data-testid="captain-agent-note" style="display:none; font-size:0.78em; color:var(--warn, #f0c66a); margin-top:4px;"></div>
+          </div>
+          <div style="grid-column:1 / -1;">
+            <label style="display:block; font-size:0.82em; cursor:pointer;">
+              <input type="checkbox" id="captain-auto-advance-toggle" data-testid="captain-auto-advance-toggle" />
+              Auto-continue: after you approve each step, start the next one automatically
+            </label>
+          </div>
         </div>
-        <div>
-          <label for="captain-repo-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Repo</label>
-          <select id="captain-repo-select" data-testid="captain-repo-select" style="width:100%; padding:6px;"></select>
+        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+          <button id="captain-create-plan" data-testid="captain-create-plan" class="btn primary" type="button">Create Plan</button>
         </div>
-        <div>
-          <label for="captain-agent-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Agent</label>
-          <select id="captain-agent-select" data-testid="captain-agent-select" style="width:100%; padding:6px;"></select>
-          <div id="captain-agent-note" data-testid="captain-agent-note" style="display:none; font-size:0.78em; color:var(--warn, #f0c66a); margin-top:4px;"></div>
-        </div>
-        <div style="grid-column:1 / -1;">
-          <label style="display:block; font-size:0.82em; cursor:pointer;">
-            <input type="checkbox" id="captain-auto-advance-toggle" data-testid="captain-auto-advance-toggle" />
-            Auto-continue: after you approve each step, start the next one automatically
-          </label>
-        </div>
-      </div>
-      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-        <button id="captain-create-plan" data-testid="captain-create-plan" class="btn primary" type="button">Create Plan</button>
+      </details>
+      <div style="display:flex; gap:8px; margin-top:4px; flex-wrap:wrap; align-items:center;">
         <button id="captain-deploy-first" data-testid="captain-deploy-first" class="btn good" type="button">Deploy Current Step</button>
-        <button id="captain-copy-plan" data-testid="captain-copy-plan" class="btn" type="button">Copy Plan</button>
-        <button id="captain-close" data-testid="captain-close" class="btn" type="button">Close</button>
+        <button id="captain-copy-plan" data-testid="captain-copy-plan" class="btn ghost" type="button">Copy Plan</button>
+        <button id="captain-close" data-testid="captain-close" class="btn" type="button">Back to Control Room</button>
+        <span class="muted" style="font-size:0.76em;">The plan keeps running — reopen anytime from Develop Plan.</span>
       </div>
       <div id="captain-deploy-note" data-testid="captain-deploy-note" style="display:none; color:var(--bad); font-size:0.85em; margin-top:6px;"></div>
 

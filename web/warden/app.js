@@ -921,16 +921,28 @@
       } else if (deck.loading) {
         statusEl.textContent = deck.configured ? "Captain is building the plan…" : "Building local preview plan…";
         statusEl.style.color = "var(--muted, #9cacbf)";
-      } else if (deck.plan) {
-        const src = deck.plan.source === "local_preview" ? " · Local preview" : "";
-        statusEl.textContent = `Plan ready: ${deck.plan.title}${src}`;
-        statusEl.style.color = deck.plan.source === "local_preview" ? "var(--warn, #f0c66a)" : "var(--good, #63db9d)";
-      } else if (!deck.configured) {
+      } else if (!deck.plan && !deck.configured) {
+        // Once a plan exists its own title/timeline below already show this — only
+        // worth a status line before that, so this doesn't repeat the same info twice.
         statusEl.textContent = "No cloud key — will use local preview planner. Enter a goal and click Create Plan.";
         statusEl.style.color = "var(--muted, #9cacbf)";
       } else {
         statusEl.textContent = "";
       }
+    }
+    const newPlanForm = document.getElementById("captain-new-plan-form");
+    const newPlanSummary = document.getElementById("captain-new-plan-summary");
+    if (newPlanForm) {
+      const hasPlan = !!deck.plan;
+      // Collapsed by default once a plan exists — the goal/repo/agent form is only
+      // "in the way" noise at that point. Only force open/closed the moment this
+      // flips (plan created/cleared); otherwise leave it alone so a manual toggle
+      // by the operator survives the next re-render (e.g. from watcher polling).
+      if (deck._newPlanFormHasPlan !== hasPlan) {
+        newPlanForm.open = !hasPlan;
+        deck._newPlanFormHasPlan = hasPlan;
+      }
+      if (newPlanSummary) newPlanSummary.textContent = hasPlan ? "+ Start a new plan" : "New plan";
     }
     if (planBody) {
       if (!deck.plan) {
@@ -971,6 +983,7 @@
                 ${canDispatch
                   ? `<button class="btn primary captain-dispatch-step-btn" data-step-id="${escapeHtml(stepId)}">Run this step</button>`
                   : `<button class="btn" disabled title="Only the current step can be dispatched">Run this step</button>`}
+                ${visualStatus === "running" && step.run_id ? `<button type="button" class="btn ghost captain-view-run-btn" data-run-id="${escapeHtml(step.run_id)}">View session</button>` : ""}
               </div>`;
           return `
           <details class="captain-step-card status-${visualStatus}${isCurrent ? " is-current" : ""}" ${isCurrent ? "open" : ""}>
