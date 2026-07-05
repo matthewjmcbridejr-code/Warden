@@ -223,6 +223,30 @@ def test_mcharness_captain_plan_local_preview_when_no_key(monkeypatch, tmp_path)
     assert data.get("source") == "local_preview" or any("local preview" in n.lower() for n in (data.get("notes") or []))
 
 
+def test_mcharness_captain_plan_local_preview_right_sizes_trivial_goal(monkeypatch, tmp_path):
+    # A plainly trivial ask ("hello world") shouldn't get the same 4-step
+    # bug-investigation-shaped plan as a real fix/feature request.
+    import src.warden.api as api_mod
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(api_mod, "MCTABLE_ROOT", tmp_path)
+    monkeypatch.setattr(api_mod, "CAPTAIN_PLAN_ROOT", tmp_path / "captain" / "plans")
+    monkeypatch.setattr(api_mod, "_write_plan_memory", lambda **kwargs: None)
+    client = TestClient(app)
+    response = client.post(
+        "/api/mcharness/captain/plan",
+        json={
+            "goal": "a website that says hello world",
+            "repo_id": "hybrid-agent-os",
+            "lane_id": "codex_cli",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert len(data["steps"]) == 2
+    assert "reproduce" not in data["steps"][0]["title"].lower()
+
+
 def test_mcharness_captain_plan_rejects_unknown_repo(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     client = TestClient(app)
