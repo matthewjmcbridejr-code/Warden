@@ -2516,88 +2516,120 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     return resp
 
 
-@mcharness_router.post("/captain/plans/{plan_id}/watchers/poll")
-def post_mcharness_captain_plan_watchers_poll(plan_id: str):
-    """Force-check every active Captain Watcher for this plan and act on the outcome:
+def _get_captain_watcher_service():
+    from .resident.state import get_state
+    from .resident.watchers import WatcherService
+    return WatcherService(get_state(MCTABLE_ROOT / "resident" / "resident.sqlite"))
+
+
+def _process_captain_dispatch_watcher(watcher, watchers_svc) -> dict[str, Any] | None:
+    """Force-check one captain_dispatch watcher and act on the outcome:
 
     completed -> open a pending proof gate for a human to review (does NOT mark the
     step done — a human still has to approve the gate; see post_mcharness_gate_decision,
     which auto-dispatches the next step on approval when the plan has auto_advance on).
     stalled/errored -> mark needs_review and stop, never silently.
 
-    Safe to call repeatedly (e.g. frontend polling every ~10s while Captain Deck is open).
+    Returns an observation dict (with the resulting plan attached), or None if this
+    watcher isn't a valid captain_dispatch watcher. Shared by the per-plan poll
+    endpoint (frontend, while Captain Deck is open) and the always-on background
+    poll loop (so a finished run gets reviewed even with no browser tab open).
+    """
+    if watcher.kind != "captain_dispatch":
+        return None
+    try:
+        payload = json.loads(watcher.query)
+    except Exception:
+        return None
+    plan_id = str(payload.get("plan_id") or "")
+    step_id = str(payload.get("step_id") or "")
+    run_id = str(payload.get("run_id") or "")
+    lane_id = str(payload.get("lane_id") or "")
+    if not plan_id or not step_id:
+        return None
+    plan = get_plan_record(MCTABLE_ROOT, plan_id)
+    if plan is None:
+        return None
+
+    watcher, _notified = watchers_svc.run(watcher.id, force=True)
+    result = (watcher.last_result if watcher else None) or {}
+    outcome = result.get("outcome")
+
+    entry: dict[str, Any] = {
+        "watcher_id": watcher.id if watcher else None,
+        "plan_id": plan_id,
+        "step_id": step_id,
+        "lane_id": lane_id,
+        "outcome": outcome,
+    }
+    current_plan: dict[str, Any] = sanitize_plan_public(plan)
+
+    if outcome == "completed":
+        create_proof_gate(
+            MCTABLE_ROOT,
+            run_id=run_id,
+            plan_id=plan_id,
+            step_id=step_id,
+            gate_type="captain_watcher_completion",
+            title=f"{lane_id} finished — review before continuing",
+            summary=f"Captain Watcher observed a clean exit for step {step_id}. "
+                    f"Approve to mark it done{' and auto-dispatch the next step' if plan.get('auto_advance') else ''}.",
+        )
+        current_plan = note_step_awaiting_gate_review(
+            MCTABLE_ROOT, plan_id, step_id,
+            note=f"{lane_id} session exited cleanly. Awaiting human gate review before completion.",
+        )
+        watchers_svc.pause(watcher.id)
+        entry["gate_created"] = True
+    elif outcome == "stalled":
+        current_plan = mark_step_needs_review(
+            MCTABLE_ROOT, plan_id, step_id,
+            note=f"Captain Watcher: {lane_id} run exceeded the stall threshold without completing. Stopped auto-advance.",
+        )
+        watchers_svc.pause(watcher.id)
+    elif outcome == "error":
+        current_plan = mark_step_needs_review(
+            MCTABLE_ROOT, plan_id, step_id,
+            note=f"Captain Watcher: could not check {lane_id} run ({result.get('error', 'unknown error')}).",
+        )
+        watchers_svc.pause(watcher.id)
+
+    entry["plan"] = current_plan
+    return entry
+
+
+@mcharness_router.post("/captain/plans/{plan_id}/watchers/poll")
+def post_mcharness_captain_plan_watchers_poll(plan_id: str):
+    """Force-check every active Captain Watcher for this plan (see
+    _process_captain_dispatch_watcher for what happens on each outcome).
+
+    Safe to call repeatedly (e.g. frontend polling every ~10s while Captain Deck is
+    open) — this is on top of, not instead of, the always-on background poll loop
+    (see captain_watcher_background_loop) that covers plans with no browser watching.
     """
     plan = get_plan_record(MCTABLE_ROOT, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
 
     try:
-        from .resident.state import get_state
-        from .resident.watchers import WatcherService
+        watchers_svc = _get_captain_watcher_service()
     except Exception as exc:
         return {"ok": True, "plan": _captain_plan_response(plan), "watchers": [], "note": f"watcher service unavailable: {exc}"}
 
-    watchers_svc = WatcherService(get_state(MCTABLE_ROOT / "resident" / "resident.sqlite"))
     observed: list[dict[str, Any]] = []
-    # sanitize_plan_public keeps this a plain-dict "plan detail" shape (same shape
-    # note_step_awaiting_gate_review/mark_step_needs_review return), so
-    # _captain_plan_response works on it whether or not any watcher fired this poll.
     current_plan: dict[str, Any] = sanitize_plan_public(plan)
 
     for watcher in watchers_svc.list(status="active"):
-        if watcher.kind != "captain_dispatch":
-            continue
         try:
             payload = json.loads(watcher.query)
         except Exception:
             continue
-        if payload.get("plan_id") != plan_id:
+        if watcher.kind != "captain_dispatch" or payload.get("plan_id") != plan_id:
             continue
-
-        watcher, _notified = watchers_svc.run(watcher.id, force=True)
-        result = (watcher.last_result if watcher else None) or {}
-        outcome = result.get("outcome")
-        step_id = str(payload.get("step_id") or "")
-        run_id = str(payload.get("run_id") or "")
-        lane_id = str(payload.get("lane_id") or "")
-
-        entry = {
-            "watcher_id": watcher.id if watcher else None,
-            "step_id": step_id,
-            "lane_id": lane_id,
-            "outcome": outcome,
-        }
-
-        if outcome == "completed":
-            create_proof_gate(
-                MCTABLE_ROOT,
-                run_id=run_id,
-                plan_id=plan_id,
-                step_id=step_id,
-                gate_type="captain_watcher_completion",
-                title=f"{lane_id} finished — review before continuing",
-                summary=f"Captain Watcher observed a clean exit for step {step_id}. "
-                        f"Approve to mark it done{' and auto-dispatch the next step' if plan.get('auto_advance') else ''}.",
-            )
-            current_plan = note_step_awaiting_gate_review(
-                MCTABLE_ROOT, plan_id, step_id,
-                note=f"{lane_id} session exited cleanly. Awaiting human gate review before completion.",
-            )
-            watchers_svc.pause(watcher.id)
-            entry["gate_created"] = True
-        elif outcome == "stalled":
-            current_plan = mark_step_needs_review(
-                MCTABLE_ROOT, plan_id, step_id,
-                note=f"Captain Watcher: {lane_id} run exceeded the stall threshold without completing. Stopped auto-advance.",
-            )
-            watchers_svc.pause(watcher.id)
-        elif outcome == "error":
-            current_plan = mark_step_needs_review(
-                MCTABLE_ROOT, plan_id, step_id,
-                note=f"Captain Watcher: could not check {lane_id} run ({result.get('error', 'unknown error')}).",
-            )
-            watchers_svc.pause(watcher.id)
-
+        entry = _process_captain_dispatch_watcher(watcher, watchers_svc)
+        if entry is None:
+            continue
+        current_plan = entry.pop("plan", current_plan)
         observed.append(entry)
 
     return {
@@ -5644,3 +5676,35 @@ def post_brain_google_verify():
     from .brain import google_provider
     result = google_provider.verify_config()
     return {"ok": result["ok"], **result}
+
+
+CAPTAIN_WATCHER_POLL_SECONDS = int(os.getenv("MCHARNESS_CAPTAIN_WATCHER_POLL_SECONDS", "30"))
+
+
+async def captain_watcher_background_loop() -> None:
+    """Always-on watcher poll — the earlier design only checked a plan's watchers
+    while the frontend had Captain Deck open (10s interval,
+    see post_mcharness_captain_plan_watchers_poll). If nobody had that tab open, a
+    finished CLI run just sat there indefinitely looking "stuck" with no gate ever
+    opened for review, since nothing ever checked it. This loop runs independently
+    of any browser tab so a completed/stalled run always gets caught in bounded
+    time, regardless of who's watching.
+
+    Runs forever until cancelled at app shutdown. Never lets one bad watcher/plan
+    stop the loop — each watcher is processed in its own try/except.
+    """
+    while True:
+        try:
+            watchers_svc = _get_captain_watcher_service()
+            for watcher in watchers_svc.list(status="active"):
+                if watcher.kind != "captain_dispatch":
+                    continue
+                try:
+                    _process_captain_dispatch_watcher(watcher, watchers_svc)
+                except Exception:
+                    # One misbehaving watcher/plan must not stop the whole loop —
+                    # it'll be retried on the next tick.
+                    continue
+        except Exception:
+            pass
+        await asyncio.sleep(CAPTAIN_WATCHER_POLL_SECONDS)
