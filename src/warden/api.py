@@ -2060,6 +2060,13 @@ def _local_preview_plan(*, goal: str, repo_id: str, lane_id: str) -> dict[str, A
     is_test   = any(w in goal_lower for w in ("test", "spec", "coverage", "pytest", "playwright"))
     is_docs   = any(w in goal_lower for w in ("doc", "readme", "comment", "explain"))
     is_ui     = any(w in goal_lower for w in ("ui", "style", "css", "html", "button", "modal", "page"))
+    # A short, plainly-worded ask ("a website that says hello world") doesn't need
+    # the same 4-step bug-investigation shape as a real fix/feature — it needs to
+    # just get built and checked. Trivial takes priority over add/ui/etc, but never
+    # over is_fix (a short bug report like "app crashes on load" still needs the
+    # reproduce/root-cause flow, not a build-it-and-check plan).
+    trivial_markers = ("hello world", "simple", "basic", "minimal", "one page", "single page", "just a", "small")
+    is_trivial = not is_fix and any(m in goal_lower for m in trivial_markers)
 
     g = goal[:80]
     r = repo_id
@@ -2070,6 +2077,11 @@ def _local_preview_plan(*, goal: str, repo_id: str, lane_id: str) -> dict[str, A
             {"id": "step_2", "title": "Identify root cause", "prompt": f"In {r}: trace the root cause of '{g}'. List the file(s) and line(s) involved. Confirm the fix scope before editing."},
             {"id": "step_3", "title": "Apply minimal fix", "prompt": f"In {r}: apply the smallest correct fix for '{g}'. Edit only the identified lines. Do not refactor surrounding code."},
             {"id": "step_4", "title": "Run tests and verify", "prompt": f"In {r}: run the relevant tests for the fix to '{g}'. Confirm passing. If tests fail, diagnose before retrying."},
+        ]
+    elif is_trivial:
+        steps = [
+            {"id": "step_1", "title": "Build it", "prompt": f"In {r}: implement '{g}' directly. This is a small, self-contained task — create or edit only the minimum file(s) needed. Keep it simple, no extra scaffolding or unrelated changes."},
+            {"id": "step_2", "title": "Verify it works", "prompt": f"In {r}: confirm '{g}' works as expected (opens/runs/renders correctly). Fix anything broken, then stop."},
         ]
     elif is_ui:
         steps = [
