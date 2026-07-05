@@ -1718,6 +1718,37 @@ def test_captain_dispatch_creates_watcher(monkeypatch, tmp_path):
     assert watcher.kind == "captain_dispatch"
 
 
+def test_captain_watcher_background_loop_processes_watchers_without_a_plan_id_filter(monkeypatch, tmp_path):
+    # The always-on background loop (captain_watcher_background_loop) must not be
+    # scoped to a single plan the way the frontend-driven poll endpoint is — it has
+    # to catch up ANY plan's finished run even if nobody ever opened Captain Deck
+    # for that specific plan.
+    _enable_private_captain_loop(monkeypatch, tmp_path)
+    client = TestClient(app)
+    _sample_persisted_plan(client)
+    dispatch = client.post("/api/mcharness/captain/plans/plan_loop01/steps/step_1/dispatch")
+    assert dispatch.status_code == 200, dispatch.text
+
+    import src.warden.api as api_mod
+    from src.warden.resident.state import get_state
+    from src.warden.resident.watchers import WatcherService
+
+    watchers_svc = WatcherService(get_state(tmp_path / "resident" / "resident.sqlite"))
+    active = [w for w in watchers_svc.list(status="active") if w.kind == "captain_dispatch"]
+    assert len(active) == 1
+
+    # Directly exercise the shared per-watcher processor the background loop calls —
+    # note it is NOT told which plan_id to look at, unlike the poll endpoint.
+    entry = api_mod._process_captain_dispatch_watcher(active[0], watchers_svc)
+    assert entry is not None
+    assert entry["outcome"] == "completed"
+    assert entry["plan_id"] == "plan_loop01"
+    assert entry["gate_created"] is True
+
+    plan = client.get("/api/mcharness/captain/plans/plan_loop01").json()["plan"]
+    assert plan["current_gate_status"] == "pending"
+
+
 def test_captain_watcher_poll_opens_gate_on_clean_completion_without_auto_completing(monkeypatch, tmp_path):
     # A clean CLI exit must NOT complete the step by itself — it opens a pending
     # proof gate and waits for a human decision (see test below for what happens
