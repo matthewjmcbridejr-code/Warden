@@ -603,8 +603,12 @@
     const host = document.getElementById("rail-safety-status");
     if (!host) return;
     const snap = crState.snapshot && crState.snapshot.safety;
+    // A safety indicator must default to the SAFE reading when its data hasn't
+    // loaded yet — previously "no snapshot" fell through to "enabled" for the
+    // public runner, which is backwards (looked like public dispatch was on when
+    // it was actually just unloaded).
     const defaults = [
-      { key: "public_runner", label: "Public runner", status: snap && !snap.public_runner_enabled ? "disabled" : "enabled" },
+      { key: "public_runner", label: "Public runner", status: snap && snap.public_runner_enabled ? "enabled" : "disabled" },
       { key: "private_runner", label: "Private runner", status: snap && snap.private_runner_enabled ? "controlled" : "disabled" },
       { key: "shell_input", label: "Shell access", status: snap && snap.arbitrary_shell_input ? "enabled" : "disabled" },
     ];
