@@ -45,15 +45,24 @@ SECRET_FILENAME_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Filenames commonly use spaces, underscores, or dashes as word separators
+# ("Cover_Letter.pdf", "cover-letter.pdf", "cover letter.pdf") — [\s_-]+
+# matches all three so classification doesn't depend on which one was used.
 PROJECT_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"warden|mcharness|marius", re.IGNORECASE), "warden"),
     (re.compile(r"grademy|shelf\.?report", re.IGNORECASE), "grademy"),
-    (re.compile(r"slosar|client work", re.IGNORECASE), "client-work"),
+    (re.compile(r"slosar|client[\s_-]+work", re.IGNORECASE), "client-work"),
     (re.compile(r"upwork", re.IGNORECASE), "upwork"),
-    (re.compile(r"vegas|sales lead", re.IGNORECASE), "sales-leads"),
+    (re.compile(r"vegas|sales[\s_-]+lead", re.IGNORECASE), "sales-leads"),
     (re.compile(r"hermes", re.IGNORECASE), "hermes"),
-    (re.compile(r"fable ?5", re.IGNORECASE), "fable5"),
-    (re.compile(r"resume|cover letter|job search|\bey\b", re.IGNORECASE), "job-search"),
+    (re.compile(r"fable[\s_-]?5", re.IGNORECASE), "fable5"),
+    (
+        re.compile(
+            r"resume|cover[\s_-]+letter|job[\s_-]+search|\bey\b|profile[\s_-]+copy",
+            re.IGNORECASE,
+        ),
+        "job-search",
+    ),
 ]
 
 DEFAULT_PROJECT = "personal"
@@ -72,9 +81,15 @@ def ensure_dropzone(path: Optional[Path] = None) -> Path:
 
 
 def _detect_project(name: str, text: str) -> str:
-    haystack = f"{name} {text[:500]}"
+    """Filename wins over content. A resume that happens to mention "Warden"
+    as work experience is job-search material, not a Warden project doc —
+    only fall back to scanning content when the filename itself is silent.
+    """
     for pattern, project in PROJECT_RULES:
-        if pattern.search(haystack):
+        if pattern.search(name):
+            return project
+    for pattern, project in PROJECT_RULES:
+        if pattern.search(text[:500]):
             return project
     return DEFAULT_PROJECT
 

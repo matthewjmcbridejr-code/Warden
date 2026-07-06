@@ -43,6 +43,25 @@ def test_sort_drop_folder_indexes_and_moves_file(tmp_path):
     assert any("warden research" in s.title.lower() for s in sources)
 
 
+def test_project_detection_prefers_filename_over_content_and_handles_underscores(tmp_path):
+    dz = _make_dropzone(tmp_path)
+    vault_path = tmp_path / "vault"
+    init_vault(vault_path)
+
+    # Underscore-separated filename should still match the "job-search" rule
+    # (regressed once: the pattern assumed a literal space).
+    (dz / "Matt_Cover_Letter.md").write_text(
+        "This role involved building Warden and Marius agent systems.",
+        encoding="utf-8",
+    )
+
+    result = dropzone.sort_drop_folder(dropzone_path=dz, vault_path=vault_path)
+
+    entry = result["processed"][0]
+    # Filename says job-search; content happens to mention "Warden" — filename wins.
+    assert entry["project"] == "job-search"
+
+
 def test_sort_drop_folder_marks_financial_file_private(tmp_path):
     dz = _make_dropzone(tmp_path)
     vault_path = tmp_path / "vault"
