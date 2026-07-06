@@ -365,16 +365,8 @@ def _pdf_title_from_url(url: str) -> str:
     return re.sub(r"[_-]+", " ", name.replace(".pdf", "")).strip() or "PDF Document"
 
 
-def _extract_pdf_text(url: str, max_chars: int = 8000) -> str:
-    """Download PDF and extract text. Returns empty string on failure."""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "WardenBrain/1.0"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            pdf_bytes = resp.read()
-    except Exception as exc:
-        log.warning("PDF download failed for %s: %s", url, exc)
-        return ""
-
+def _extract_pdf_text_from_bytes(pdf_bytes: bytes, max_chars: int = 8000) -> str:
+    """Extract text from raw PDF bytes. Returns empty string on failure."""
     # Try pypdf first
     try:
         import pypdf
@@ -408,6 +400,19 @@ def _extract_pdf_text(url: str, max_chars: int = 8000) -> str:
         log.warning("PyMuPDF extraction failed: %s", exc)
 
     return ""
+
+
+def _extract_pdf_text(url: str, max_chars: int = 8000) -> str:
+    """Download PDF and extract text. Returns empty string on failure."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "WardenBrain/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            pdf_bytes = resp.read()
+    except Exception as exc:
+        log.warning("PDF download failed for %s: %s", url, exc)
+        return ""
+
+    return _extract_pdf_text_from_bytes(pdf_bytes, max_chars=max_chars)
 
 
 # ---------------------------------------------------------------------------

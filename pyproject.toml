@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 semantic = ["sqlite-vec"]
+pdf = ["pypdf"]
 
 [tool.setuptools]
 include-package-data = true

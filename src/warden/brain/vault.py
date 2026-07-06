@@ -221,6 +221,7 @@ def write_note(
     tags: Optional[list[str]] = None,
     filename: Optional[str] = None,
     vault_path: Optional[Path] = None,
+    extra_frontmatter: Optional[dict[str, str]] = None,
 ) -> dict:
     """Write a new Markdown note to the vault inbox. Never overwrites existing files."""
     vp = vault_path or get_vault_path()
@@ -245,8 +246,15 @@ def write_note(
     # Build frontmatter
     tag_str = ", ".join(tags or ["warden", "auto"])
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    extra_lines = ""
+    if extra_frontmatter:
+        for key, value in extra_frontmatter.items():
+            safe_key = re.sub(r"[^\w-]", "", str(key))
+            safe_value = str(value).replace("\n", " ").strip()
+            if safe_key:
+                extra_lines += f"{safe_key}: {safe_value}\n"
     content = (
-        f"---\ntitle: {title}\ntags: {tag_str}\ncreated: {now}\nsource: warden\n---\n\n"
+        f"---\ntitle: {title}\ntags: {tag_str}\ncreated: {now}\nsource: warden\n{extra_lines}---\n\n"
         f"# {title}\n\n{body_safe}\n"
     )
 

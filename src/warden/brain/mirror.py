@@ -120,6 +120,12 @@ def mirror_sources(
     would_sync: list[dict] = []
 
     for src in all_sources:
+        # Notes tagged "private" or "local_only" (e.g. dropzone financial docs)
+        # never leave the local vault, regardless of mirror config.
+        if "private" in src.tags or "local_only" in src.tags:
+            skipped += 1
+            continue
+
         row = _get_mirror_row(conn, src.source_id)
         if row and row.get("local_checksum") == src.checksum and row.get("status") == "synced":
             skipped += 1

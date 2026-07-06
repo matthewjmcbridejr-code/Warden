@@ -902,6 +902,14 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     raise ValueError("OpenRouter response was not valid JSON.")
 
 
+CAPTAIN_ANTI_CLOBBER_GUARDRAIL = (
+    "Do not overwrite existing application entrypoints such as web/warden/index.html, "
+    "web/warden/app.js, or web/warden/app.css unless this step explicitly names those files. "
+    "For vague build/demo tasks, create a new file in an appropriate demo or scratch path and "
+    "report it. Inspect existing files before editing."
+)
+
+
 def _captain_prompt_wrapper(*, goal: str, repo: dict[str, Any], lane_id: str, plan_title: str, plan_summary: str, step_index: int, step_total: int, step_title: str, step_prompt: str) -> str:
     return "\n".join([
         f"Captain Deck step {step_index}/{step_total}: {step_title}",
@@ -915,6 +923,7 @@ def _captain_prompt_wrapper(*, goal: str, repo: dict[str, Any], lane_id: str, pl
         "Inspect before edit.",
         "Known files/areas to inspect: start with the repo surface, then narrow only to the files needed for this step.",
         "Allowed files/areas: only the selected repo and the files needed for this step.",
+        CAPTAIN_ANTI_CLOBBER_GUARDRAIL,
         "Forbidden actions: no push, merge, reset, rebase, no secrets, no public runner changes, no arbitrary shell input, no deploy commands unless the user explicitly asks later.",
         "Acceptance checks: finish with a concise proof of files inspected, edits made, and verification performed.",
         "Final proof format: branch, commit hash if any, files changed, tests run/output, and remaining unproven items.",
@@ -2119,6 +2128,7 @@ def _local_preview_plan(*, goal: str, repo_id: str, lane_id: str) -> dict[str, A
         step["agent"] = lane_id
         step["status"] = "queued"
         step["recommended_agent"] = lane_id
+        step["prompt"] = f"{step['prompt']} {CAPTAIN_ANTI_CLOBBER_GUARDRAIL}"
 
     return {
         "ok": True,
@@ -5708,3 +5718,25 @@ async def captain_watcher_background_loop() -> None:
         except Exception:
             pass
         await asyncio.sleep(CAPTAIN_WATCHER_POLL_SECONDS)
+
+
+DROPZONE_WATCHER_POLL_SECONDS = int(os.getenv("WARDEN_DROPZONE_POLL_SECONDS", "120"))
+
+
+async def dropzone_watcher_background_loop() -> None:
+    """Always-on poll of the Brain dropzone folder (see src/warden/brain/dropzone.py).
+
+    Files dropped by the user are sorted into vault projects, indexed, and
+    moved into dropzone/sorted/<project>/ on each tick. Runs independently of
+    any UI, same pattern as captain_watcher_background_loop. Never lets one
+    bad file stop the loop or crash the app — failures are swallowed and
+    retried on the next tick.
+    """
+    from .brain.dropzone import sort_drop_folder
+
+    while True:
+        try:
+            sort_drop_folder()
+        except Exception:
+            pass
+        await asyncio.sleep(DROPZONE_WATCHER_POLL_SECONDS)

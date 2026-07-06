@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .api import captain_watcher_background_loop, mcharness_router
+from .api import captain_watcher_background_loop, dropzone_watcher_background_loop, mcharness_router
 from .branding import CATEGORY, PRODUCT_NAME, PUBLIC_URL, REPO_NAME, TAGLINE
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -52,6 +52,16 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def stop_captain_watcher_loop():
         task = getattr(app.state, "captain_watcher_task", None)
+        if task is not None:
+            task.cancel()
+
+    @app.on_event("startup")
+    async def start_dropzone_watcher_loop():
+        app.state.dropzone_watcher_task = asyncio.create_task(dropzone_watcher_background_loop())
+
+    @app.on_event("shutdown")
+    async def stop_dropzone_watcher_loop():
+        task = getattr(app.state, "dropzone_watcher_task", None)
         if task is not None:
             task.cancel()
 
