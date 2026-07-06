@@ -25,10 +25,10 @@ cd /home/matt/workspaces/warden/mcharness-public-export
 ## 2. Open the UI
 
 ```
-http://127.0.0.1:6969/web/warden/app.html
+http://127.0.0.1:6969/web/warden/index.html
 ```
 
-Four tabs: **Command · Warden Chat · Memory Chat · Gateway Status**
+Left nav: **Control Room · Missions · Agents · Runs · Evidence · Memory · Assistant · Proof Gates · Runner Sessions · Projects · Model Gateway · Settings**
 
 ---
 
