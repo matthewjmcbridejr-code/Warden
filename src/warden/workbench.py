@@ -117,6 +117,15 @@ class WorkbenchSkill(BaseModel):
     path: Optional[str] = None
     enabled: bool = True
     notes: Optional[str] = None
+    # Playbook fields (v2.1) — optional with defaults so pre-v2 skill JSON loads unchanged.
+    when_to_use: Optional[str] = None
+    inspect_files: list[str] = Field(default_factory=list)
+    commands_allowed: list[str] = Field(default_factory=list)
+    commands_forbidden: list[str] = Field(default_factory=list)
+    proof_format: Optional[str] = None
+    acceptance_checks: list[str] = Field(default_factory=list)
+    rollback_notes: Optional[str] = None
+    report_template: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -235,6 +244,14 @@ class WorkbenchSkillCreateRequest(BaseModel):
     path: Optional[str] = None
     enabled: bool = True
     notes: Optional[str] = None
+    when_to_use: Optional[str] = None
+    inspect_files: list[str] = Field(default_factory=list)
+    commands_allowed: list[str] = Field(default_factory=list)
+    commands_forbidden: list[str] = Field(default_factory=list)
+    proof_format: Optional[str] = None
+    acceptance_checks: list[str] = Field(default_factory=list)
+    rollback_notes: Optional[str] = None
+    report_template: Optional[str] = None
 
 
 class WorkbenchMemoryCreateRequest(BaseModel):
@@ -1172,6 +1189,14 @@ class WorkbenchStore:
             path=payload.path,
             enabled=payload.enabled,
             notes=payload.notes,
+            when_to_use=payload.when_to_use,
+            inspect_files=payload.inspect_files,
+            commands_allowed=payload.commands_allowed,
+            commands_forbidden=payload.commands_forbidden,
+            proof_format=payload.proof_format,
+            acceptance_checks=payload.acceptance_checks,
+            rollback_notes=payload.rollback_notes,
+            report_template=payload.report_template,
             created_at=_now(),
             updated_at=_now(),
         )
