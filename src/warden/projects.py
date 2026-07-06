@@ -341,6 +341,51 @@ def create_worktree_endpoint(project_id: str, req: WorktreeCreateRequest) -> Dic
     return wt.model_dump(mode="json")
 
 
+@router.get("/{project_id}/context")
+def context_for_project(project_id: str, limit: int = 10) -> Dict[str, Any]:
+    """Unified project view (v2.2): one call aggregating what warden_bootstrap /
+    warden_context_pack already stitch for MCP agents — memories, runs, pending
+    proof gates, worktrees, assigned agents, and applicable skills."""
+    project = _load_project(project_id)
+    limit = max(1, min(int(limit), 50))
+    out: Dict[str, Any] = {
+        "ok": True,
+        "project": project.model_dump(mode="json"),
+        "memories": [],
+        "runs": [],
+        "pending_gates": [],
+        "worktrees": [],
+        "agents": list(project.agent_ids),
+        "skills": [],
+        "warnings": [],
+    }
+    try:
+        out["worktrees"] = list_worktrees(project_id)
+    except Exception as e:
+        out["warnings"].append(f"worktrees: {e}")
+    try:
+        from src.warden.workbench import WorkbenchStore
+        store = WorkbenchStore()
+        memories = store.search_memories("", scope=project_id, limit=limit)
+        out["memories"] = [m.model_dump(mode="json") for m in memories]
+        runs = store.list_runs()
+        # Runs are not project-scoped yet; surface the most recent ones plus every
+        # pending gate so nothing waiting on a human is hidden from the project view.
+        out["runs"] = runs[:limit]
+        out["pending_gates"] = [
+            {**gate, "run_id": run.get("run_id"), "run_title": run.get("title")}
+            for run in runs
+            for gate in (run.get("proof_gates") or [])
+            if gate.get("status") == "open"
+        ]
+        out["skills"] = [
+            s.model_dump(mode="json") for s in store.list_skills() if s.enabled
+        ][:limit]
+    except Exception as e:
+        out["warnings"].append(f"workbench: {e}")
+    return out
+
+
 @router.get("/{project_id}/recall")
 def recall_for_project(project_id: str, query: str = "", kind: str = "", limit: int = 8) -> Dict[str, Any]:
     """Brain recall scoped to a project — for the Projects UI (no auth since local-only)."""
