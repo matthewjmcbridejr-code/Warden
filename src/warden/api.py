@@ -5718,3 +5718,25 @@ async def captain_watcher_background_loop() -> None:
         except Exception:
             pass
         await asyncio.sleep(CAPTAIN_WATCHER_POLL_SECONDS)
+
+
+DROPZONE_WATCHER_POLL_SECONDS = int(os.getenv("WARDEN_DROPZONE_POLL_SECONDS", "120"))
+
+
+async def dropzone_watcher_background_loop() -> None:
+    """Always-on poll of the Brain dropzone folder (see src/warden/brain/dropzone.py).
+
+    Files dropped by the user are sorted into vault projects, indexed, and
+    moved into dropzone/sorted/<project>/ on each tick. Runs independently of
+    any UI, same pattern as captain_watcher_background_loop. Never lets one
+    bad file stop the loop or crash the app — failures are swallowed and
+    retried on the next tick.
+    """
+    from .brain.dropzone import sort_drop_folder
+
+    while True:
+        try:
+            sort_drop_folder()
+        except Exception:
+            pass
+        await asyncio.sleep(DROPZONE_WATCHER_POLL_SECONDS)
