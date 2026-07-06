@@ -53,6 +53,7 @@
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-test-panel" data-testid="nav-mail">Mail</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
+        <button type="button" class="nav-item" data-section="inbox" data-testid="nav-inbox">Brain Inbox</button>
         <button type="button" class="nav-item nav-item-muted" data-section="gateway" data-testid="nav-gateway">Model Gateway</button>
       </nav>
 
@@ -248,6 +249,17 @@
           <p>Saved Codex sessions and future Jules sessions will appear here.</p>
           <button type="button" id="runs-open-monitor" class="btn" data-testid="runs-open-monitor" style="display:none;">Open Live Monitor</button>
         </div>
+      </section>
+
+      <section id="warden-section-inbox" class="workspace-section" data-section="inbox" data-testid="warden-section-inbox" style="display:none;" aria-hidden="true">
+        <header class="workspace-header">
+          <h2 class="workspace-title">Brain Inbox</h2>
+          <p class="workspace-subhead">Raw captures for review — promote to the vault or discard. Nothing is promoted automatically.</p>
+        </header>
+        <div class="runner-sessions-actions">
+          <button type="button" id="brain-inbox-refresh" class="btn" data-testid="brain-inbox-refresh">Refresh</button>
+        </div>
+        <div id="brain-inbox-list" data-testid="brain-inbox-list"></div>
       </section>
 
       <section id="warden-section-runners" class="workspace-section" data-section="runners" data-testid="warden-section-runners" style="display:none;" aria-hidden="true">
@@ -1056,5 +1068,6 @@
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>
   <script src="./runners.js"></script>
+  <script src="./inbox.js"></script>
 </body>
 </html>

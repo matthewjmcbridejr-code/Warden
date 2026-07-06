@@ -149,6 +149,10 @@ class WorkbenchMemory(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     compacted: bool = False
     notes: Optional[str] = None
+    # Capture fidelity (v2.4 / personal_ai_os_plan PR 3): bounded raw source content,
+    # with an explicit flag so distillation can tell "nothing more" from "thrown away".
+    raw_content: Optional[str] = None
+    raw_content_truncated: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -273,6 +277,8 @@ class WorkbenchMemoryCreateRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     compacted: bool = False
     notes: Optional[str] = None
+    raw_content: Optional[str] = None
+    raw_content_truncated: bool = False
 
 
 class WorkbenchMemoryRememberRequest(BaseModel):
@@ -1346,6 +1352,9 @@ class WorkbenchStore:
             metadata=_safe_memory_metadata(payload.metadata),
             compacted=payload.compacted,
             notes=_bounded_memory_text(payload.notes, 2000),
+            raw_content=_bounded_memory_text(payload.raw_content),
+            raw_content_truncated=payload.raw_content_truncated
+            or bool(payload.raw_content and len(payload.raw_content) > MAX_MEMORY_CONTENT_CHARS),
             created_at=_now(),
             updated_at=_now(),
         )
@@ -1377,6 +1386,32 @@ class WorkbenchStore:
             notes=payload.notes,
         )
         return self.create_memory(create_payload)
+
+    def get_memory(self, memory_id: str) -> WorkbenchMemory:
+        self.ensure_layout()
+        path = self._path("memories", _safe_id(memory_id, "memory_id"))
+        if not path.exists():
+            raise WorkbenchError(f"memory not available: {memory_id}")
+        return _load_model(path, WorkbenchMemory)
+
+    def update_memory_promotion(
+        self,
+        memory_id: str,
+        *,
+        status: Optional[str] = None,
+        source_ref: Optional[str] = None,
+    ) -> WorkbenchMemory:
+        """v2.4 promotion/discard support: set a memory's status and/or vault source_ref."""
+        memory = self.get_memory(memory_id)
+        if status is not None:
+            if status not in ("active", "superseded", "stale", "forgotten"):
+                raise WorkbenchError(f"invalid memory status: {status}")
+            memory.status = status  # type: ignore[assignment]
+        if source_ref is not None:
+            memory.source_ref = _bounded_memory_text(source_ref, 500)
+        memory.updated_at = _now()
+        _atomic_write_json(self._path("memories", memory.memory_id), memory.model_dump(mode="json"))
+        return memory
 
     def build_memory_context_pack(
         self,
