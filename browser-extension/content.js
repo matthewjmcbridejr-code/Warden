@@ -36,6 +36,23 @@ window.addEventListener("blur", () => {
   focused = false;
 });
 
+// Optional full page body capture (v2.4 capture fidelity) — off by default,
+// enabled via chrome.storage.local.warden_capture_body. Size-capped at 12k chars.
+let captureBody = false;
+chrome.storage.local.get("warden_capture_body").then((v) => {
+  captureBody = !!v.warden_capture_body;
+}).catch(() => {});
+
+function pageBodyText() {
+  if (!captureBody) return undefined;
+  try {
+    const text = (document.body && document.body.innerText) || "";
+    return text.replace(/\s+/g, " ").trim().slice(0, 12000) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Send page summary on unload
 window.addEventListener("beforeunload", () => {
   if (focused) focusedMs += Date.now() - lastFocusTime;
@@ -50,6 +67,7 @@ window.addEventListener("beforeunload", () => {
     focused_sec: focusSec,
     scroll_pct: maxScrollPct,
     kind: "browse",
+    body_text: pageBodyText(),
   });
 });
 

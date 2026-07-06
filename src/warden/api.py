@@ -60,7 +60,9 @@ from .captain_plans import (
     complete_step as complete_captain_plan_step,
     get_plan_detail,
     get_plan_record,
+    increment_dispatch_count,
     list_recent_plans,
+    record_loop_blocker,
     mark_step_dispatched,
     mark_step_needs_review,
     note_step_awaiting_gate_review,
@@ -516,6 +518,15 @@ class McHarnessCaptainPlanRequest(BaseModel):
     # (YOLO/unattended execution). Off by default — manual, gate-approved flow stays
     # the default experience.
     auto_advance: bool = False
+    # Opt-in (v2.4 / personal_ai_os_plan PR 6): enrich the planning prompt with
+    # relevant Warden memory context. Captures only inform planning, never trigger it.
+    include_memory_context: bool = False
+    # Measurable loop conditions (v2.6): shell check that must pass on step
+    # completion, a hard dispatch budget (0 = unlimited), and file-scope constraints
+    # embedded into every dispatch prompt.
+    check_command: Optional[str] = None
+    max_dispatches: int = Field(default=0, ge=0, le=50)
+    scope_paths: list[str] = Field(default_factory=list)
 
     @field_validator("goal")
     @classmethod
@@ -2274,13 +2285,27 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
 
     lane_id = payload.lane_id or "codex_cli"
 
+    # v2.4 (PR 6): optionally enrich the planning prompt with memory context.
+    # The original goal is what gets persisted; only the LLM prompt sees the pack.
+    planning_goal = payload.goal
+    if payload.include_memory_context:
+        try:
+            pack = WORKBENCH_STORE.build_memory_context_pack(
+                project_id=repo["repo_id"], user_prompt=payload.goal, max_memories=8,
+            )
+            context_text = str(pack.get("context") or "").strip()
+            if context_text:
+                planning_goal = f"{payload.goal}\n\nRelevant Warden memory context:\n{context_text[:4000]}"
+        except Exception:
+            planning_goal = payload.goal
+
     # Try cloud captain first; fall back to local preview
     if _captain_api_key():
         try:
             agent = _resolve_captain_plan_agent(lane_id)
             resolved_lane = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
             _validate_agent_lane(resolved_lane)
-            plan, notes = _build_captain_plan(goal=payload.goal, repo=repo, lane_id=resolved_lane)
+            plan, notes = _build_captain_plan(goal=planning_goal, repo=repo, lane_id=resolved_lane)
             plan["source"] = "real_captain"
         except HTTPException:
             raise
@@ -2297,7 +2322,7 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
             resolved_lane = str(agent.get("lane_id") or BUILTIN_CODEX_ID)
             _validate_agent_lane(resolved_lane)
             plan, notes = asyncio.run(
-                _build_captain_plan_via_gateway(goal=payload.goal, repo=repo, lane_id=resolved_lane)
+                _build_captain_plan_via_gateway(goal=planning_goal, repo=repo, lane_id=resolved_lane)
             )
             plan["source"] = "gateway"
         except Exception as exc:
@@ -2312,6 +2337,9 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
             plan["notes"] = notes
 
     plan["auto_advance"] = payload.auto_advance
+    plan["check_command"] = payload.check_command
+    plan["max_dispatches"] = payload.max_dispatches
+    plan["scope_paths"] = list(payload.scope_paths)
 
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None
@@ -2407,6 +2435,36 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     lane_id = str(step.get("agent_id") or "codex_cli")
     if lane_id not in CLI_RUNNER_LANE_IDS:
         lane_id = "codex_cli"
+
+    # v2.6 measurable loops: enforce the dispatch budget before anything runs.
+    # Every attempt (including blocked ones) counts; exhaustion halts the plan
+    # with a blocker report instead of retrying into silence.
+    max_dispatches = int(plan.get("max_dispatches") or 0)
+    if max_dispatches and int(plan.get("dispatch_count") or 0) >= max_dispatches:
+        halted = record_loop_blocker(
+            MCTABLE_ROOT,
+            plan_id,
+            reason=f"Dispatch budget exhausted ({max_dispatches} attempts) without completion. Human review required.",
+            kind="budget_exceeded",
+        )
+        return {
+            "ok": True,
+            "blocked": True,
+            "budget_exceeded": True,
+            "service": "mcharness-control-plane",
+            "message": f"Plan halted: dispatch budget of {max_dispatches} exhausted.",
+            "plan": halted,
+            "dispatch": {},
+        }
+    increment_dispatch_count(MCTABLE_ROOT, plan_id)
+
+    # v2.6: file-scope constraints ride on every dispatch prompt.
+    scope_paths = [str(p) for p in (plan.get("scope_paths") or [])]
+    if scope_paths:
+        prompt = prompt + "\nAllowed files/areas for this plan (do not touch anything else): " + ", ".join(scope_paths)
+    check_command = str(plan.get("check_command") or "")
+    if check_command:
+        prompt = prompt + f"\nCompletion is measured by this check passing: `{check_command}`"
 
     # Blocked path: runner not available — save honest blocked_attempt memory
     if not _codex_runner_ready():
@@ -2533,6 +2591,8 @@ class McHarnessSkillDispatchRequest(BaseModel):
     repo_id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     agent_id: str = "codex_cli"
+    # v2.5 bounded roles: the safety-profile envelope this dispatch runs under.
+    role: str = "builder"
 
 
 def _skill_dispatch_prompt(skill, *, objective: str, repo_id: str) -> str:
@@ -2601,8 +2661,34 @@ def post_mcharness_skill_dispatch(skill_id: str, payload: McHarnessSkillDispatch
     if not skill.enabled:
         raise HTTPException(status_code=409, detail=f"Skill is disabled: {skill_id}")
 
+    # v2.5: enforce the role envelope before anything is created or dispatched.
+    from .workbench import role_allows
+    try:
+        profile = WORKBENCH_STORE.get_safety_profile(payload.role)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not profile.dispatch_allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{profile.profile_id}' is not allowed to dispatch work (read-only envelope).",
+        )
+    violations = [cmd for cmd in skill.commands_allowed if not role_allows(profile, cmd)]
+    if violations:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{profile.profile_id}' forbids skill commands: {', '.join(violations)}",
+        )
+
     lane_id = payload.agent_id if payload.agent_id in CLI_RUNNER_LANE_IDS else "codex_cli"
     prompt = _skill_dispatch_prompt(skill, objective=payload.objective, repo_id=payload.repo_id)
+    role_lines = [f"Role envelope: {profile.profile_id} — {profile.summary}"]
+    if profile.forbidden_actions:
+        role_lines.append("Role-forbidden actions: " + ", ".join(profile.forbidden_actions))
+    if profile.allowed_actions:
+        role_lines.append("Role-allowed actions only: " + ", ".join(profile.allowed_actions))
+    if not profile.write_allowed:
+        role_lines.append("This role is read-only: do not create, edit, or delete any files.")
+    prompt = prompt + "\n" + "\n".join(role_lines)
 
     thread = WORKBENCH_STORE.create_thread(
         WorkbenchThreadCreateRequest(
@@ -2803,6 +2889,31 @@ def post_mcharness_captain_plan_watchers_poll(plan_id: str):
     }
 
 
+def _run_plan_check_command(check_command: str, *, repo_id: str) -> dict[str, Any]:
+    """Run a plan's operator-defined check command (v2.6). Executed without a shell
+    (shlex-split argv), bounded by a timeout, cwd pinned to the allowlisted repo."""
+    import shlex
+    import subprocess
+    try:
+        repo_path, _repo = _resolve_allowlisted_repo(repo_id)
+    except HTTPException:
+        repo_path = Path.cwd()
+    try:
+        argv = shlex.split(check_command)
+        proc = subprocess.run(
+            argv, cwd=str(repo_path), capture_output=True, text=True, timeout=180,
+        )
+        return {
+            "passed": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "output": (proc.stdout or "") + (proc.stderr or ""),
+        }
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "returncode": -1, "output": "check command timed out after 180s"}
+    except Exception as exc:
+        return {"passed": False, "returncode": -1, "output": str(exc)}
+
+
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/complete", dependencies=[Depends(_require_run_history_write)])
 def post_mcharness_captain_plan_step_complete(plan_id: str, step_id: str, payload: McHarnessCaptainStepCompleteRequest):
     plan = get_plan_record(MCTABLE_ROOT, plan_id)
@@ -2813,6 +2924,27 @@ def post_mcharness_captain_plan_step_complete(plan_id: str, step_id: str, payloa
         raise HTTPException(status_code=404, detail=f"Captain plan step not found: {step_id}")
     if step.get("run_id"):
         assert_step_completion_allowed(MCTABLE_ROOT, str(step["run_id"]))
+
+    # v2.6 measurable loops: a plan-level check command must pass before any step
+    # can be marked complete. Failure halts with needs_review + blocker report.
+    check_command = str(plan.get("check_command") or "").strip()
+    if check_command:
+        check = _run_plan_check_command(check_command, repo_id=str(plan.get("repo_id") or ""))
+        if not check["passed"]:
+            mark_step_needs_review(
+                MCTABLE_ROOT, plan_id, step_id,
+                note=f"Check command failed (exit {check['returncode']}): {check_command}",
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Plan check command failed — step marked needs_review.",
+                    "check_command": check_command,
+                    "returncode": check["returncode"],
+                    "output": check["output"][:2000],
+                },
+            )
+
     updated = complete_captain_plan_step(
         MCTABLE_ROOT,
         plan_id,
@@ -5157,6 +5289,16 @@ def browser_ingest(req: BrowserIngestRequest):
                 summary = f"[{kind}] {title or url[:80]}"
                 content = f"Kind: {kind}\nURL: {url}\nTitle: {title}"
 
+            # Capture fidelity (v2.4): page body from browse events is stored as
+            # bounded raw_content with an explicit truncation flag.
+            raw_content = None
+            raw_truncated = False
+            if kind == "browse":
+                body_text = (ev.get("body_text") or "").strip()
+                if body_text:
+                    raw_truncated = len(body_text) > 12000
+                    raw_content = body_text[:12000]
+
             # Dedup by content hash
             dedup = hashlib.sha1(f"{summary}|{url}".encode()).hexdigest()[:12]
             memory_id = f"browser-{dedup}"
@@ -5174,6 +5316,8 @@ def browser_ingest(req: BrowserIngestRequest):
                     title=summary[:80],
                     kind="user_note",
                     tags=["auto", "browser", kind],
+                    raw_content=raw_content,
+                    raw_content_truncated=raw_truncated,
                     metadata={
                         "url": url,
                         "title": title,
@@ -5188,6 +5332,90 @@ def browser_ingest(req: BrowserIngestRequest):
                 skipped += 1
 
     return {"ok": True, "stored": stored, "skipped": skipped, "received": len(req.events)}
+
+
+# ── Brain Inbox + promotion (v2.4 / personal_ai_os_plan PRs 2 & 5) ───────────
+
+_CAPTURE_SOURCES = {"browser_extension", "brain_ingest", "warden-brain-mcp", "captain_dispatch"}
+
+
+@mcharness_router.get("/warden/brain/inbox")
+def get_brain_inbox(limit: int = 50):
+    """Read-only reviewable feed of raw captures (newest first). PR 2 of the
+    personal AI OS plan: make capture-fidelity gaps visible before automating."""
+    limit = max(1, min(int(limit), 200))
+    memories = WORKBENCH_STORE.list_memories()
+    items = [
+        m for m in memories
+        if m.status == "active" and (m.source in _CAPTURE_SOURCES or "auto" in m.tags)
+    ]
+    items.sort(key=lambda m: m.created_at, reverse=True)
+    return {
+        "ok": True,
+        "count": len(items[:limit]),
+        "items": [
+            {
+                "memory_id": m.memory_id,
+                "title": m.title,
+                "summary": m.summary[:300],
+                "kind": m.kind,
+                "source": m.source,
+                "tags": m.tags,
+                "url": (m.metadata or {}).get("url"),
+                "raw_content_truncated": m.raw_content_truncated,
+                "has_raw_content": bool(m.raw_content),
+                "promoted": bool(m.source_ref),
+                "source_ref": m.source_ref,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in items[:limit]
+        ],
+    }
+
+
+@mcharness_router.post("/warden/memory/{memory_id}/promote", dependencies=[Depends(_require_public_write_access)])
+def post_memory_promote(memory_id: str):
+    """Explicit, user-triggered promotion of a memory into a durable Brain vault
+    note (PR 5). Never automatic; sets source_ref to the created note path."""
+    try:
+        memory = WORKBENCH_STORE.get_memory(memory_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if memory.source_ref:
+        return {"ok": True, "already_promoted": True, "note_path": memory.source_ref}
+
+    from .brain.vault import write_note
+    body_parts = [memory.summary]
+    if memory.raw_content:
+        body_parts += ["", "## Raw content", "", memory.raw_content]
+        if memory.raw_content_truncated:
+            body_parts += ["", "> Raw content was truncated at capture time."]
+    frontmatter = {"memory_id": memory.memory_id, "promoted": "true"}
+    url = (memory.metadata or {}).get("url")
+    if url:
+        frontmatter["url"] = str(url)
+    try:
+        result = write_note(
+            title=memory.title or memory.summary[:80],
+            body="\n".join(body_parts),
+            tags=list(dict.fromkeys((memory.tags or []) + ["promoted"])),
+            extra_frontmatter=frontmatter,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"vault write failed: {exc}")
+    updated = WORKBENCH_STORE.update_memory_promotion(memory_id, source_ref=result.get("path"))
+    return {"ok": True, "already_promoted": False, "note_path": result.get("path"), "memory_id": updated.memory_id}
+
+
+@mcharness_router.post("/warden/memory/{memory_id}/discard", dependencies=[Depends(_require_public_write_access)])
+def post_memory_discard(memory_id: str):
+    """Explicit discard from the Brain Inbox: marks the memory forgotten (kept on
+    disk, excluded from search/feeds). Never deletes files."""
+    try:
+        updated = WORKBENCH_STORE.update_memory_promotion(memory_id, status="forgotten")
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True, "memory_id": updated.memory_id, "status": updated.status}
 
 
 # ---------------------------------------------------------------------------
