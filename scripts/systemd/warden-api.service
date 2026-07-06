@@ -5,6 +5,8 @@ Wants=litellm-warden.service
 
 [Service]
 Type=simple
+User=matt
+Group=matt
 WorkingDirectory=/home/matt/workspaces/warden/mcharness-public-export
 Environment=PYTHONPATH=/home/matt/workspaces/warden/mcharness-public-export:/home/matt/workspaces/warden/mcharness-public-export/src
 Environment=PYTHONUNBUFFERED=1
