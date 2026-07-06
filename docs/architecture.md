@@ -1,5 +1,7 @@
 # Warden architecture
 
+> Vision/gap analysis and roadmap sequencing: [warden_v2_vision_alignment.md](warden_v2_vision_alignment.md)
+
 Warden is a local-first control room for AI coding agents. One process owns the truth (SQLite under `MCHARNESS_DATA_ROOT`); agents reach it over MCP, humans reach it over the web UI and Notion.
 
 ```mermaid
