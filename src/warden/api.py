@@ -47,8 +47,11 @@ from .workbench import (
     WorkbenchEvidenceRecordCreateRequest,
     WorkbenchMemoryCreateRequest,
     WorkbenchMemoryRememberRequest,
+    WorkbenchRunCreateRequest,
     WorkbenchRunEventCreateRequest,
+    WorkbenchRunProofGateCreateRequest,
     WorkbenchRunProofGateDecisionRequest,
+    WorkbenchSkillCreateRequest,
     WorkbenchThreadCreateRequest,
     WorkbenchThreadUpdateRequest,
 )
@@ -2524,6 +2527,157 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
         "dispatch": dispatch,
     }
     return resp
+
+
+class McHarnessSkillDispatchRequest(BaseModel):
+    repo_id: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    agent_id: str = "codex_cli"
+
+
+def _skill_dispatch_prompt(skill, *, objective: str, repo_id: str) -> str:
+    lines = [
+        f"Skill playbook: {skill.title} ({skill.skill_id})",
+        f"Objective: {objective}",
+        f"Repo: {repo_id}",
+        "",
+        f"Skill description: {skill.description}",
+    ]
+    if skill.when_to_use:
+        lines.append(f"When to use: {skill.when_to_use}")
+    if skill.inspect_files:
+        lines.append("Inspect these files first: " + ", ".join(skill.inspect_files))
+    if skill.commands_allowed:
+        lines.append("Commands allowed: " + ", ".join(skill.commands_allowed))
+    if skill.commands_forbidden:
+        lines.append("Commands forbidden: " + ", ".join(skill.commands_forbidden))
+    if skill.acceptance_checks:
+        lines.append("Acceptance checks (all must pass before reporting done): " + "; ".join(skill.acceptance_checks))
+    if skill.proof_format:
+        lines.append(f"Final proof format: {skill.proof_format}")
+    if skill.rollback_notes:
+        lines.append(f"Rollback notes: {skill.rollback_notes}")
+    if skill.report_template:
+        lines.append(f"Report template: {skill.report_template}")
+    lines.append(CAPTAIN_ANTI_CLOBBER_GUARDRAIL)
+    lines.append(
+        "Forbidden actions: no push, merge, reset, rebase, no secrets, no public runner "
+        "changes, no arbitrary shell input, no deploy commands unless the user explicitly asks later."
+    )
+    return "\n".join(lines)
+
+
+@mcharness_router.get("/skills")
+def get_mcharness_skills():
+    return WORKBENCH_STORE.list_skills()
+
+
+@mcharness_router.post("/skills", dependencies=[Depends(_require_public_write_access)])
+def post_mcharness_skill(payload: WorkbenchSkillCreateRequest):
+    try:
+        return WORKBENCH_STORE.create_skill(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@mcharness_router.get("/skills/{skill_id}")
+def get_mcharness_skill(skill_id: str):
+    try:
+        return WORKBENCH_STORE.get_skill(skill_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@mcharness_router.post("/skills/{skill_id}/dispatch")
+def post_mcharness_skill_dispatch(skill_id: str, payload: McHarnessSkillDispatchRequest):
+    """Dispatch a skill playbook against a repo. Creates a workbench run with an open
+    proof gate and the skill's acceptance checks recorded as verifier evidence, then
+    hands the playbook prompt to the configured CLI agent — or records an honest
+    blocked run when the runner is unavailable. Never auto-approves anything."""
+    try:
+        skill = WORKBENCH_STORE.get_skill(skill_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not skill.enabled:
+        raise HTTPException(status_code=409, detail=f"Skill is disabled: {skill_id}")
+
+    lane_id = payload.agent_id if payload.agent_id in CLI_RUNNER_LANE_IDS else "codex_cli"
+    prompt = _skill_dispatch_prompt(skill, objective=payload.objective, repo_id=payload.repo_id)
+
+    thread = WORKBENCH_STORE.create_thread(
+        WorkbenchThreadCreateRequest(
+            title=f"Skill dispatch: {skill.title}",
+            objective=payload.objective,
+        )
+    )
+    thread_id = str(thread["thread_id"])
+    run = WORKBENCH_STORE.create_run(
+        thread_id,
+        WorkbenchRunCreateRequest(
+            title=f"Skill: {skill.title} — {payload.objective[:80]}",
+            current_step="dispatch",
+        ),
+    )
+    if skill.acceptance_checks:
+        WORKBENCH_STORE.add_run_evidence(
+            run.run_id,
+            WorkbenchEvidenceRecordCreateRequest(
+                title="Acceptance checks",
+                summary="; ".join(skill.acceptance_checks),
+                source_type="verifier",
+                verdict="unknown",
+            ),
+        )
+    gated = WORKBENCH_STORE.open_run_proof_gate(
+        run.run_id,
+        WorkbenchRunProofGateCreateRequest(
+            title=f"Skill dispatch review: {skill.title}",
+            reason=f"Human review required before skill '{skill.skill_id}' output ships. Objective: {payload.objective[:200]}",
+            requires_human=True,
+        ),
+    )
+
+    if not _codex_runner_ready():
+        _append_run_event(
+            run.run_id,
+            "Dispatch blocked",
+            f"Runner unavailable — skill '{skill.skill_id}' not dispatched to lane {lane_id}.",
+            severity="warning",
+            event_type="blocked",
+        )
+        return {
+            "ok": True,
+            "blocked": True,
+            "service": "mcharness-control-plane",
+            "run_id": run.run_id,
+            "thread_id": thread_id,
+            "gate_id": gated.gate_id,
+            "lane_id": lane_id,
+            "message": "Runner unavailable — blocked skill run recorded with open proof gate",
+        }
+
+    dispatch = _execute_cli_dispatch_for_step(
+        title=f"Skill: {skill.title}",
+        prompt=prompt,
+        repo_id=payload.repo_id,
+        lane_id=lane_id,
+    )
+    _append_run_event(
+        run.run_id,
+        "Skill dispatched",
+        f"Skill '{skill.skill_id}' dispatched to {lane_id}; runner_id={dispatch.get('runner_id')}",
+        event_type="note",
+    )
+    return {
+        "ok": True,
+        "blocked": False,
+        "service": "mcharness-control-plane",
+        "run_id": run.run_id,
+        "thread_id": thread_id,
+        "gate_id": gated.gate_id,
+        "lane_id": lane_id,
+        "dispatch": dispatch,
+    }
 
 
 def _get_captain_watcher_service():
