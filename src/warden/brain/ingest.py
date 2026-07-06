@@ -108,6 +108,11 @@ def _infer_tags(url: str, source_type: str, extra: Optional[list[str]] = None) -
 # Markdown note builder
 # ---------------------------------------------------------------------------
 
+# Bounded raw content stored in vault notes. Raised from the old 2,000-char excerpt
+# (personal_ai_os_plan PR 3): anything past this is flagged, never silently dropped.
+RAW_NOTE_CONTENT_MAX = 20000
+
+
 def _build_note_body(
     *,
     url: str,
@@ -117,7 +122,9 @@ def _build_note_body(
     channel: str = "",
     transcript: str = "",
     author: str = "",
-) -> str:
+) -> tuple[str, bool]:
+    """Build the note body. Returns (body, raw_content_truncated)."""
+    truncated = False
     lines = [f"**Source:** {url}", ""]
     if source_type == "youtube":
         if channel:
@@ -126,10 +133,14 @@ def _build_note_body(
         lines += [f"**Author:** {author}", ""]
     lines += ["## Summary", "", summary, ""]
     if transcript:
-        lines += ["## Transcript (excerpt)", "", transcript[:2000], ""]
+        truncated = len(transcript) > RAW_NOTE_CONTENT_MAX
+        lines += ["## Transcript", "", transcript[:RAW_NOTE_CONTENT_MAX], ""]
     elif content:
-        lines += ["## Content", "", content[:2000], ""]
-    return "\n".join(lines)
+        truncated = len(content) > RAW_NOTE_CONTENT_MAX
+        lines += ["## Content", "", content[:RAW_NOTE_CONTENT_MAX], ""]
+    if truncated:
+        lines += [f"> Source content truncated at {RAW_NOTE_CONTENT_MAX} characters.", ""]
+    return "\n".join(lines), truncated
 
 
 def _stable_filename(url: str, source_type: str) -> str:
@@ -138,6 +149,58 @@ def _stable_filename(url: str, source_type: str) -> str:
     slug = re.sub(r"[^\w]", "-", urllib.parse.urlparse(url).netloc + urllib.parse.urlparse(url).path)[:40]
     slug = re.sub(r"-+", "-", slug).strip("-")
     return f"{source_type}-{slug}-{h}-{ts}.md"
+
+
+# ---------------------------------------------------------------------------
+# Linking (personal_ai_os_plan PR 4): vault index + tag-based related notes
+# ---------------------------------------------------------------------------
+
+_GENERIC_TAGS = {"watcher", "auto", "warden", "webpage", "selection", "pdf", "youtube", "manual"}
+
+
+def _related_notes_section(vault_path, tags: list[str], limit: int = 5) -> str:
+    """Return a '## Related' markdown section linking existing notes that share a
+    non-generic tag with this capture. Empty string when nothing relates."""
+    specific = [t for t in tags if t not in _GENERIC_TAGS]
+    if not specific:
+        return ""
+    try:
+        related: list[str] = []
+        for path in sorted(vault_path.rglob("*.md"), reverse=True):
+            if len(related) >= limit:
+                break
+            if path.name == "00-index.md":
+                continue
+            try:
+                head = path.read_text(encoding="utf-8", errors="ignore")[:600]
+            except OSError:
+                continue
+            match = re.search(r"^tags:\s*(.+)$", head, re.MULTILINE)
+            if not match:
+                continue
+            note_tags = {t.strip() for t in match.group(1).split(",")}
+            if note_tags.intersection(specific):
+                related.append(f"- [[{path.stem}]]")
+        if not related:
+            return ""
+        return "\n## Related\n\n" + "\n".join(related) + "\n"
+    except Exception:
+        return ""
+
+
+def _append_vault_index(vault_path, *, title: str, note_path: str, tags: list[str]) -> None:
+    """Append this capture to the vault's 00-index.md (lightweight backlink index)."""
+    try:
+        index = vault_path / "00-index.md"
+        if not index.exists():
+            index.write_text("# Vault index\n\n", encoding="utf-8")
+        stem = Path(note_path).stem
+        tag_str = ", ".join(t for t in tags if t not in _GENERIC_TAGS) or "-"
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with index.open("a", encoding="utf-8") as f:
+            f.write(f"- {stamp} [[{stem}]] — {title} ({tag_str})\n")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -162,14 +225,20 @@ def _do_ingest(
 
     summary = _summarize(content_text, title)
     all_tags = _infer_tags(url, source_type, tags)
-    body = _build_note_body(
+    body, raw_truncated = _build_note_body(
         url=url,
         source_type=source_type,
         summary=summary,
         content=content_text if source_type not in ("youtube",) else "",
     )
+    body += _related_notes_section(vp, all_tags)
 
     filename = _stable_filename(url, source_type)
+    frontmatter = {
+        "url": url,
+        "raw_content_truncated": str(raw_truncated).lower(),
+        **(extra_frontmatter or {}),
+    }
     try:
         result = write_note(
             title=title,
@@ -177,9 +246,12 @@ def _do_ingest(
             tags=all_tags,
             filename=filename,
             vault_path=vp,
+            extra_frontmatter=frontmatter,
         )
     except FileExistsError:
         return {"ok": False, "error": "Already saved", "url": url}
+
+    _append_vault_index(vp, title=title, note_path=result.get("path", ""), tags=all_tags)
 
     # Reindex
     sources = scan_sources(vp)
@@ -215,6 +287,7 @@ def _do_ingest(
         "summary": summary,
         "tags": all_tags,
         "word_count": result.get("word_count", 0),
+        "raw_content_truncated": raw_truncated,
         "mirrored": mirror_result,
     }
 
@@ -289,7 +362,7 @@ def ingest_youtube(
     summary = _summarize(combined or title, title)
     all_tags = _infer_tags(url, "youtube", tags)
     filename = _stable_filename(url, "youtube")
-    body = _build_note_body(
+    body, yt_truncated = _build_note_body(
         url=url,
         source_type="youtube",
         summary=summary,
@@ -298,7 +371,10 @@ def ingest_youtube(
     )
 
     try:
-        result = write_note(title=f"[Video] {title}", body=body, tags=all_tags, filename=filename, vault_path=vp)
+        result = write_note(
+            title=f"[Video] {title}", body=body, tags=all_tags, filename=filename, vault_path=vp,
+            extra_frontmatter={"url": url, "raw_content_truncated": str(yt_truncated).lower()},
+        )
     except FileExistsError:
         return {"ok": False, "error": "Already saved", "url": url}
 

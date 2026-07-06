@@ -17,18 +17,24 @@
 
 ```bash
 cd /home/matt/workspaces/warden/mcharness-public-export
-.venv/bin/python -m uvicorn src.warden.app:app --host 0.0.0.0 --port 6969 --log-level warning
+bash scripts/warden-up
+# or manually:
+# .venv/bin/python -m uvicorn src.warden.app:app --host 0.0.0.0 --port 6969 --log-level warning
 ```
 
 ---
 
 ## 2. Open the UI
 
+Canonical UI (Command Center):
+
 ```
-http://127.0.0.1:6969/web/warden/index.html
+http://127.0.0.1:6969/web/warden/app.html
 ```
 
-Left nav: **Control Room · Missions · Agents · Runs · Evidence · Memory · Assistant · Proof Gates · Runner Sessions · Projects · Model Gateway · Settings**
+Left nav: **Command Center · Agents · Tasks · Proof · Runner Sessions · Runs · Memories · Brain · Mail · Model Gateway · Settings**
+
+The legacy Control Room (`index.html`) and Command Deck (`command-deck.html`) pages still work but are deprecated — they show a banner linking here.
 
 ---
 
