@@ -51,7 +51,7 @@ Full details: [docs/architecture.md](docs/architecture.md)
 ```bash
 pip install -e .
 python -m uvicorn src.warden.app:app --port 6969
-# UI: http://127.0.0.1:6969/web/warden/app.html
+# UI: http://127.0.0.1:6969/web/warden/index.html
 ```
 
 Smoke proof in one command:

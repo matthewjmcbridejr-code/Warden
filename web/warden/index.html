@@ -42,6 +42,7 @@
         <button type="button" class="nav-item" data-section="proof-gates" data-testid="nav-proof-gates">Proof Gates</button>
         <button type="button" class="nav-item" data-section="runner-sessions" data-testid="nav-runner-sessions">Runner Sessions</button>
         <button type="button" class="nav-item" data-section="projects" data-testid="nav-projects">Projects</button>
+        <button type="button" class="nav-item nav-item-muted" data-section="gateway" data-testid="nav-gateway">Model Gateway</button>
         <button type="button" class="nav-item" data-section="settings" data-testid="nav-settings">Settings</button>
       </nav>
 
@@ -662,6 +663,107 @@
       </section>
       <!-- ===== /PROJECTS SECTION ===== -->
 
+      <!-- ===== MODEL GATEWAY SECTION (ported from app.html) ===== -->
+      <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
+
+        <div class="gw-intro-banner">
+          <strong>Gateway Status</strong> — Warden routes AI requests locally through a privacy-preserving model proxy. This page shows which AI providers are reachable and how requests are routed. You don't need to configure anything here to use Captain or the Assistant.
+        </div>
+
+        <div class="gw-summary-strip">
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Gateway</div>
+            <div class="gw-stat-value" id="gw-stat-status-val">Checking…</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Active Route</div>
+            <div class="gw-stat-value" id="gw-stat-route-val">—</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Privacy Guard</div>
+            <div class="gw-stat-value">Private routing enforced</div>
+          </div>
+          <div class="gw-stat-card">
+            <div class="gw-stat-label">Context Savings</div>
+            <div class="gw-stat-value" id="gw-stat-savings-val">—</div>
+          </div>
+          <button type="button" id="gw-refresh-btn" class="gw-refresh-btn" title="Refresh status">↺</button>
+        </div>
+
+        <div class="gw-body">
+
+          <section class="gw-block">
+            <div class="gw-block-header">
+              <h3 class="gw-section-title">Route Preview</h3>
+              <span class="gw-quiet-badge">No tokens spent</span>
+            </div>
+            <div class="gw-route-layout">
+              <div class="gw-route-input-col">
+                <textarea id="gw-sim-input" class="gw-textarea" rows="4"
+                  placeholder="Describe a task — e.g. fix the login bug in auth.py"></textarea>
+                <button type="button" id="gw-sim-btn" class="gw-primary-btn">Preview Route</button>
+              </div>
+              <div class="gw-route-result-col">
+                <div id="gw-sim-result" class="gw-sim-result">
+                  <span class="gw-sim-hint">Enter a task to preview routing.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="gw-block">
+            <h3 class="gw-section-title">Provider Health</h3>
+            <div id="gw-providers"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <section class="gw-block">
+            <h3 class="gw-section-title">Model Aliases</h3>
+            <div id="gw-aliases"><div class="gw-loading">Loading…</div></div>
+          </section>
+
+          <section class="gw-block gw-diag-section">
+            <button type="button" class="gw-diag-toggle" id="gw-diag-toggle" aria-expanded="false">
+              <span>Diagnostics</span>
+              <span class="gw-toggle-caret" aria-hidden="true">›</span>
+            </button>
+            <div class="gw-diag-body" id="gw-diag-body" hidden>
+
+              <div class="gw-diag-block">
+                <h4 class="gw-diag-title">Context Budget</h4>
+                <p class="gw-diag-desc">See what Warden keeps, drops, or compresses for a given prompt.</p>
+                <textarea id="gw-ctx-input" class="gw-textarea" rows="2"
+                  placeholder="Describe what you'd send…"></textarea>
+                <div class="gw-ctx-controls">
+                  <select id="gw-ctx-alias" class="gw-select">
+                    <option value="">auto-route</option>
+                    <option value="warden-local">warden-local</option>
+                    <option value="warden-fast">warden-fast</option>
+                    <option value="warden-free">warden-free</option>
+                    <option value="warden-code">warden-code</option>
+                    <option value="warden-deep">warden-deep</option>
+                  </select>
+                  <button type="button" id="gw-ctx-btn" class="gw-secondary-btn">Inspect</button>
+                </div>
+                <div id="gw-ctx-result" class="gw-ctx-result" style="display:none;"></div>
+              </div>
+
+              <div class="gw-diag-block">
+                <div class="gw-diag-title-row">
+                  <h4 class="gw-diag-title">Recent Traces</h4>
+                  <button type="button" id="gw-traces-refresh" class="gw-link-btn">Refresh</button>
+                </div>
+                <div id="gw-trace-timeline" class="gw-trace-timeline">
+                  <div class="gw-loading">Loading…</div>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+        </div>
+      </section>
+      <!-- ===== /MODEL GATEWAY SECTION ===== -->
+
       <section id="warden-section-settings" class="workspace-section" data-section="settings" data-testid="warden-section-settings">
         <header class="workspace-header">
           <h2 class="workspace-title">Settings</h2>
@@ -1123,5 +1225,6 @@
   <script src="./app.js"></script>
   <script src="./projects.js"></script>
   <script src="./memory.js"></script>
+  <script src="./gateway.js"></script>
 </body>
 </html>

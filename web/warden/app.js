@@ -2544,6 +2544,7 @@
       "runner-sessions": "Runner Sessions",
       settings: "Settings",
       projects: "Projects",
+      gateway: "Model Gateway",
     };
     const topTitle = document.getElementById("topbar-page-title");
     if (topTitle) topTitle.textContent = titles[state.activeSection] || "Warden";
