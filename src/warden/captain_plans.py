@@ -151,6 +151,14 @@ def persist_plan(
         # current one completes cleanly (YOLO/unattended execution). Off by default —
         # the manual, gate-approved flow stays the default experience.
         "auto_advance": bool(plan_data.get("auto_advance", False)),
+        # Measurable loop conditions (v2.6): a plan can carry a check command,
+        # a dispatch budget, and file-scope constraints. Budget exhaustion or a
+        # failing check halts the loop with a recorded blocker — never a silent retry.
+        "check_command": str(plan_data.get("check_command") or "").strip() or None,
+        "max_dispatches": max(0, int(plan_data.get("max_dispatches") or 0)),
+        "dispatch_count": max(0, int(plan_data.get("dispatch_count") or 0)),
+        "scope_paths": [str(p).strip() for p in (plan_data.get("scope_paths") or []) if str(p).strip()],
+        "blocker": plan_data.get("blocker"),
     }
     if not record["decision_log"]:
         append_decision_log(record, action="plan_created", detail="Captain plan persisted.", step_id=current_step_id)
@@ -425,6 +433,34 @@ def request_plan_adjustment(
     return sanitize_plan_detail(saved)
 
 
+def increment_dispatch_count(root: Path, plan_id: str) -> int:
+    """Count every dispatch attempt (including blocked ones) against the plan's
+    budget (v2.6). Returns the new count."""
+    plan = get_plan_record(root, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
+    plan["dispatch_count"] = int(plan.get("dispatch_count") or 0) + 1
+    _save_plan(root, plan)
+    return int(plan["dispatch_count"])
+
+
+def record_loop_blocker(root: Path, plan_id: str, *, reason: str, kind: str = "loop_blocked") -> dict[str, Any]:
+    """Halt a plan with an explicit blocker report (v2.6). Stops the plan and all
+    pending steps so nothing keeps looping, and surfaces the reason."""
+    plan = get_plan_record(root, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Captain plan not found: {plan_id}")
+    plan["blocker"] = {"kind": kind, "reason": reason, "at": _now_iso()}
+    plan["status"] = "stopped"
+    for step in plan.get("steps") or []:
+        if step.get("status") in {"queued", "revised", "dispatched", "running", "needs_review"}:
+            step["status"] = "stopped"
+            step["updated_at"] = _now_iso()
+    append_decision_log(plan, action=kind, detail=reason, step_id=plan.get("current_step_id"))
+    saved = _save_plan(root, plan)
+    return sanitize_plan_detail(saved)
+
+
 def sanitize_plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
     steps = _sorted_steps(plan.get("steps") or [])
     return {
@@ -438,6 +474,11 @@ def sanitize_plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "status": plan.get("status"),
         "current_step_id": plan.get("current_step_id"),
         "auto_advance": bool(plan.get("auto_advance", False)),
+        "check_command": plan.get("check_command"),
+        "max_dispatches": int(plan.get("max_dispatches") or 0),
+        "dispatch_count": int(plan.get("dispatch_count") or 0),
+        "scope_paths": list(plan.get("scope_paths") or []),
+        "blocker": plan.get("blocker"),
         "step_count": len(steps),
         "steps": [
             {

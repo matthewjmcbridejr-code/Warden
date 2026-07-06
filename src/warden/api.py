@@ -60,7 +60,9 @@ from .captain_plans import (
     complete_step as complete_captain_plan_step,
     get_plan_detail,
     get_plan_record,
+    increment_dispatch_count,
     list_recent_plans,
+    record_loop_blocker,
     mark_step_dispatched,
     mark_step_needs_review,
     note_step_awaiting_gate_review,
@@ -519,6 +521,12 @@ class McHarnessCaptainPlanRequest(BaseModel):
     # Opt-in (v2.4 / personal_ai_os_plan PR 6): enrich the planning prompt with
     # relevant Warden memory context. Captures only inform planning, never trigger it.
     include_memory_context: bool = False
+    # Measurable loop conditions (v2.6): shell check that must pass on step
+    # completion, a hard dispatch budget (0 = unlimited), and file-scope constraints
+    # embedded into every dispatch prompt.
+    check_command: Optional[str] = None
+    max_dispatches: int = Field(default=0, ge=0, le=50)
+    scope_paths: list[str] = Field(default_factory=list)
 
     @field_validator("goal")
     @classmethod
@@ -2329,6 +2337,9 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
             plan["notes"] = notes
 
     plan["auto_advance"] = payload.auto_advance
+    plan["check_command"] = payload.check_command
+    plan["max_dispatches"] = payload.max_dispatches
+    plan["scope_paths"] = list(payload.scope_paths)
 
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None
@@ -2424,6 +2435,36 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     lane_id = str(step.get("agent_id") or "codex_cli")
     if lane_id not in CLI_RUNNER_LANE_IDS:
         lane_id = "codex_cli"
+
+    # v2.6 measurable loops: enforce the dispatch budget before anything runs.
+    # Every attempt (including blocked ones) counts; exhaustion halts the plan
+    # with a blocker report instead of retrying into silence.
+    max_dispatches = int(plan.get("max_dispatches") or 0)
+    if max_dispatches and int(plan.get("dispatch_count") or 0) >= max_dispatches:
+        halted = record_loop_blocker(
+            MCTABLE_ROOT,
+            plan_id,
+            reason=f"Dispatch budget exhausted ({max_dispatches} attempts) without completion. Human review required.",
+            kind="budget_exceeded",
+        )
+        return {
+            "ok": True,
+            "blocked": True,
+            "budget_exceeded": True,
+            "service": "mcharness-control-plane",
+            "message": f"Plan halted: dispatch budget of {max_dispatches} exhausted.",
+            "plan": halted,
+            "dispatch": {},
+        }
+    increment_dispatch_count(MCTABLE_ROOT, plan_id)
+
+    # v2.6: file-scope constraints ride on every dispatch prompt.
+    scope_paths = [str(p) for p in (plan.get("scope_paths") or [])]
+    if scope_paths:
+        prompt = prompt + "\nAllowed files/areas for this plan (do not touch anything else): " + ", ".join(scope_paths)
+    check_command = str(plan.get("check_command") or "")
+    if check_command:
+        prompt = prompt + f"\nCompletion is measured by this check passing: `{check_command}`"
 
     # Blocked path: runner not available — save honest blocked_attempt memory
     if not _codex_runner_ready():
@@ -2848,6 +2889,31 @@ def post_mcharness_captain_plan_watchers_poll(plan_id: str):
     }
 
 
+def _run_plan_check_command(check_command: str, *, repo_id: str) -> dict[str, Any]:
+    """Run a plan's operator-defined check command (v2.6). Executed without a shell
+    (shlex-split argv), bounded by a timeout, cwd pinned to the allowlisted repo."""
+    import shlex
+    import subprocess
+    try:
+        repo_path, _repo = _resolve_allowlisted_repo(repo_id)
+    except HTTPException:
+        repo_path = Path.cwd()
+    try:
+        argv = shlex.split(check_command)
+        proc = subprocess.run(
+            argv, cwd=str(repo_path), capture_output=True, text=True, timeout=180,
+        )
+        return {
+            "passed": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "output": (proc.stdout or "") + (proc.stderr or ""),
+        }
+    except subprocess.TimeoutExpired:
+        return {"passed": False, "returncode": -1, "output": "check command timed out after 180s"}
+    except Exception as exc:
+        return {"passed": False, "returncode": -1, "output": str(exc)}
+
+
 @mcharness_router.post("/captain/plans/{plan_id}/steps/{step_id}/complete", dependencies=[Depends(_require_run_history_write)])
 def post_mcharness_captain_plan_step_complete(plan_id: str, step_id: str, payload: McHarnessCaptainStepCompleteRequest):
     plan = get_plan_record(MCTABLE_ROOT, plan_id)
@@ -2858,6 +2924,27 @@ def post_mcharness_captain_plan_step_complete(plan_id: str, step_id: str, payloa
         raise HTTPException(status_code=404, detail=f"Captain plan step not found: {step_id}")
     if step.get("run_id"):
         assert_step_completion_allowed(MCTABLE_ROOT, str(step["run_id"]))
+
+    # v2.6 measurable loops: a plan-level check command must pass before any step
+    # can be marked complete. Failure halts with needs_review + blocker report.
+    check_command = str(plan.get("check_command") or "").strip()
+    if check_command:
+        check = _run_plan_check_command(check_command, repo_id=str(plan.get("repo_id") or ""))
+        if not check["passed"]:
+            mark_step_needs_review(
+                MCTABLE_ROOT, plan_id, step_id,
+                note=f"Check command failed (exit {check['returncode']}): {check_command}",
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Plan check command failed — step marked needs_review.",
+                    "check_command": check_command,
+                    "returncode": check["returncode"],
+                    "output": check["output"][:2000],
+                },
+            )
+
     updated = complete_captain_plan_step(
         MCTABLE_ROOT,
         plan_id,
