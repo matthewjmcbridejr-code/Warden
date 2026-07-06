@@ -47,6 +47,7 @@
         <button type="button" class="nav-item nav-item-agent" data-section="evidence" data-testid="nav-proof">
           <span class="nav-item-dot" id="nav-dot-proof"></span>Proof <span class="nav-item-tag" id="nav-proof-count"></span>
         </button>
+        <button type="button" class="nav-item nav-item-agent" data-section="runners" data-testid="nav-runners">Runner Sessions</button>
 
         <div class="sidebar-group-label">Resources</div>
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
@@ -247,6 +248,18 @@
           <p>Saved Codex sessions and future Jules sessions will appear here.</p>
           <button type="button" id="runs-open-monitor" class="btn" data-testid="runs-open-monitor" style="display:none;">Open Live Monitor</button>
         </div>
+      </section>
+
+      <section id="warden-section-runners" class="workspace-section" data-section="runners" data-testid="warden-section-runners" style="display:none;" aria-hidden="true">
+        <header class="workspace-header">
+          <h2 class="workspace-title">Runner Sessions</h2>
+          <p class="workspace-subhead">Active tmux runner sessions (read-only; cleanup runs on the private service).</p>
+        </header>
+        <div id="runners-summary" class="runner-sessions-summary" data-testid="runners-summary"></div>
+        <div class="runner-sessions-actions">
+          <button type="button" id="runners-refresh" class="btn" data-testid="runners-refresh">Refresh</button>
+        </div>
+        <div id="runners-table" data-testid="runners-table"></div>
       </section>
 
       <section id="warden-section-evidence" class="workspace-section" data-section="evidence" data-testid="warden-section-evidence" style="display:none;" aria-hidden="true">
@@ -1042,5 +1055,6 @@
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>
+  <script src="./runners.js"></script>
 </body>
 </html>
