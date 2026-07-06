@@ -192,6 +192,12 @@ class SafetyProfile(BaseModel):
     mcp_local_only: bool = True
     shell_enabled: bool = False
     notes: Optional[str] = None
+    # Bounded role fields (v2.5): a role is a tool/action envelope, not a personality.
+    role: Optional[str] = None
+    write_allowed: bool = True
+    dispatch_allowed: bool = True
+    allowed_actions: list[str] = Field(default_factory=list)
+    forbidden_actions: list[str] = Field(default_factory=list)
 
 
 class WorkbenchAgentCreateRequest(BaseModel):
@@ -502,6 +508,70 @@ DEFAULT_SAFETY_PROFILES: list[SafetyProfile] = [
         notes="Sample UI data is not executed.",
     ),
 ]
+
+# v2.5 bounded agent roles: each role is a constrained envelope. `forbidden_actions`
+# are keyword matches checked at dispatch time (see role_allows); prompts embed the
+# same constraints so the worker sees them too. Roles never widen operator defaults.
+ROLE_SAFETY_PROFILES: list[SafetyProfile] = [
+    SafetyProfile(
+        profile_id="explorer", role="explorer", title="Explorer",
+        summary="Read-only repo/search agent. No writes, no dispatch.",
+        write_allowed=False, dispatch_allowed=False,
+        forbidden_actions=["write", "edit", "deploy", "push", "merge", "delete", "network"],
+    ),
+    SafetyProfile(
+        profile_id="planner", role="planner", title="Planner",
+        summary="Turns an objective into a scoped implementation plan. Read-only.",
+        write_allowed=False, dispatch_allowed=False,
+        forbidden_actions=["write", "edit", "deploy", "push", "merge", "delete"],
+    ),
+    SafetyProfile(
+        profile_id="builder", role="builder", title="Builder",
+        summary="Modifies code in a branch/worktree only. No deploys, no network side effects.",
+        write_allowed=True, dispatch_allowed=True,
+        forbidden_actions=["deploy", "push", "merge", "dns", "email", "secrets", "network"],
+    ),
+    SafetyProfile(
+        profile_id="verifier", role="verifier", title="Verifier",
+        summary="Runs tests/browser/service checks and records evidence. No source edits.",
+        write_allowed=False, dispatch_allowed=True,
+        allowed_actions=["test", "run", "check", "inspect", "screenshot"],
+        forbidden_actions=["deploy", "push", "merge", "edit", "write"],
+    ),
+    SafetyProfile(
+        profile_id="reviewer", role="reviewer", title="Reviewer",
+        summary="Checks diffs against the objective. Read-only.",
+        write_allowed=False, dispatch_allowed=False,
+        forbidden_actions=["write", "edit", "deploy", "push", "merge"],
+    ),
+    SafetyProfile(
+        profile_id="deployer", role="deployer", title="Deployer",
+        summary="Restarts services only after proof. Deploy actions allowed, secrets never.",
+        write_allowed=True, dispatch_allowed=True,
+        allowed_actions=["deploy", "restart", "service", "status", "rollback"],
+        forbidden_actions=["secrets", "delete"],
+    ),
+    SafetyProfile(
+        profile_id="archivist", role="archivist", title="Archivist",
+        summary="Writes durable memory and handoff docs. No code dispatch.",
+        write_allowed=True, dispatch_allowed=False,
+        forbidden_actions=["deploy", "push", "merge", "delete"],
+    ),
+]
+
+
+def role_allows(profile: SafetyProfile, action: str) -> bool:
+    """Check one action keyword/command against a role envelope. Deny wins;
+    a non-empty allowlist means everything outside it is denied."""
+    text = action.strip().lower()
+    if not text:
+        return False
+    for forbidden in profile.forbidden_actions:
+        if forbidden.lower() in text:
+            return False
+    if profile.allowed_actions:
+        return any(allowed.lower() in text for allowed in profile.allowed_actions)
+    return True
 
 
 def _now() -> datetime:
@@ -1571,7 +1641,17 @@ class WorkbenchStore:
 
     def list_safety_profiles(self) -> list[SafetyProfile]:
         self.ensure_layout()
-        return self._load_list_file(self.root / "safety_profiles.json", SafetyProfile)
+        stored = self._load_list_file(self.root / "safety_profiles.json", SafetyProfile)
+        # v2.5: built-in role envelopes are always available; a stored profile with
+        # the same profile_id overrides its built-in (operator customization wins).
+        stored_ids = {profile.profile_id for profile in stored}
+        return stored + [role for role in ROLE_SAFETY_PROFILES if role.profile_id not in stored_ids]
+
+    def get_safety_profile(self, profile_id: str) -> SafetyProfile:
+        for profile in self.list_safety_profiles():
+            if profile.profile_id == profile_id:
+                return profile
+        raise WorkbenchError(f"safety profile not available: {profile_id}")
 
     def status(self) -> dict[str, Any]:
         self.ensure_layout()

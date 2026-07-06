@@ -2550,6 +2550,8 @@ class McHarnessSkillDispatchRequest(BaseModel):
     repo_id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     agent_id: str = "codex_cli"
+    # v2.5 bounded roles: the safety-profile envelope this dispatch runs under.
+    role: str = "builder"
 
 
 def _skill_dispatch_prompt(skill, *, objective: str, repo_id: str) -> str:
@@ -2618,8 +2620,34 @@ def post_mcharness_skill_dispatch(skill_id: str, payload: McHarnessSkillDispatch
     if not skill.enabled:
         raise HTTPException(status_code=409, detail=f"Skill is disabled: {skill_id}")
 
+    # v2.5: enforce the role envelope before anything is created or dispatched.
+    from .workbench import role_allows
+    try:
+        profile = WORKBENCH_STORE.get_safety_profile(payload.role)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not profile.dispatch_allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{profile.profile_id}' is not allowed to dispatch work (read-only envelope).",
+        )
+    violations = [cmd for cmd in skill.commands_allowed if not role_allows(profile, cmd)]
+    if violations:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{profile.profile_id}' forbids skill commands: {', '.join(violations)}",
+        )
+
     lane_id = payload.agent_id if payload.agent_id in CLI_RUNNER_LANE_IDS else "codex_cli"
     prompt = _skill_dispatch_prompt(skill, objective=payload.objective, repo_id=payload.repo_id)
+    role_lines = [f"Role envelope: {profile.profile_id} — {profile.summary}"]
+    if profile.forbidden_actions:
+        role_lines.append("Role-forbidden actions: " + ", ".join(profile.forbidden_actions))
+    if profile.allowed_actions:
+        role_lines.append("Role-allowed actions only: " + ", ".join(profile.allowed_actions))
+    if not profile.write_allowed:
+        role_lines.append("This role is read-only: do not create, edit, or delete any files.")
+    prompt = prompt + "\n" + "\n".join(role_lines)
 
     thread = WORKBENCH_STORE.create_thread(
         WorkbenchThreadCreateRequest(
