@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# One-command Warden start (v2.3 UI consolidation).
+# Starts the API on the canonical port and prints the one URL to open.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PORT="${WARDEN_PORT:-6969}"
+HOST="${WARDEN_HOST:-127.0.0.1}"
+
+cd "$ROOT"
+if [ ! -x ".venv/bin/python" ]; then
+  echo "No .venv found — creating one and installing requirements…"
+  python3 -m venv .venv
+  .venv/bin/pip install -q -r requirements.txt
+fi
+
+echo "Warden starting on http://${HOST}:${PORT}"
+echo
+echo "  Open: http://${HOST}:${PORT}/web/warden/app.html"
+echo
+exec .venv/bin/python -m uvicorn src.warden.app:app --host "$HOST" --port "$PORT" --log-level warning
