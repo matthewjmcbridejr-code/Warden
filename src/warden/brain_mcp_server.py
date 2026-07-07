@@ -417,6 +417,28 @@ def warden_remember(
         return _err("warden_remember", str(exc))
 
 
+def _within_vault(p: Path) -> bool:
+    from src.warden.brain.vault import get_vault_path
+    try:
+        p.resolve().relative_to(get_vault_path().resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _obsidian_vault_root() -> Path:
+    raw = os.getenv("WARDEN_OBSIDIAN_VAULT_PATH", "~/Documents/Obsidian Vault")
+    return Path(raw).expanduser()
+
+
+def _obsidian_import_allowed(p: Path) -> bool:
+    try:
+        p.resolve().relative_to(_obsidian_vault_root().resolve())
+        return True
+    except ValueError:
+        return False
+
+
 @mcp.tool()
 def warden_ingest(
     content: str = "",
@@ -425,11 +447,18 @@ def warden_ingest(
     project: str = "",
     tags: str = "",
 ) -> str:
-    """Ingest content or a file path into the Warden brain.
+    """Ingest content or a file path into the Warden brain vault + search index.
+
+    Writes through the same vault and SQLite FTS index used by brain_search /
+    brain_reindex / brain_list_sources, so a successful response means the
+    content is actually searchable — not just recorded somewhere else.
+    Duplicate content (by normalized hash) is detected and reported instead
+    of creating another copy.
 
     Args:
         content: Raw text to ingest (use this OR path)
-        path: File path to ingest (must be in an allowed location)
+        path: File path to ingest — must be inside the Warden Brain vault, or
+            inside the configured Obsidian vault when source_type="obsidian"
         source_type: One of: obsidian, repo, manual, agent_proof, doc
         project: Project to associate with
         tags: Comma-separated tags
@@ -438,50 +467,113 @@ def warden_ingest(
         if not content and not path:
             return _err("warden_ingest", "Provide content or path")
 
+        from src.warden.brain.ingest import ingest_generic, GENERIC_SOURCE_TYPES
+
+        if source_type not in GENERIC_SOURCE_TYPES:
+            return _err(
+                "warden_ingest",
+                f"Unknown source_type {source_type!r}; must be one of {sorted(GENERIC_SOURCE_TYPES)}",
+            )
+
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        tag_list.append(f"source_{source_type}")
-        tag_list.append("agent_generated")
 
-        ingest = _brain_ingest()
-        results = []
-
-        if content:
-            if not project:
-                project = _detect_project(content, path) or "personal"
-            title = path.split("/")[-1] if path else f"ingest-{SESSION_ID}"
-            result = ingest.add_text(content, title=title, project=project, tags=tag_list)
-            if result.get("ok"):
-                record_id = result["record"].get("id", "")
-                embedding = brain_embed.get_embedding(content[:4000])
-                if embedding:
-                    brain_vector_store.upsert(record_id, embedding, {"project": project, "source_type": source_type})
-                results.append({"id": record_id, "embedded": embedding is not None})
-
-        elif path:
+        if path:
             p = Path(path).expanduser()
+            allowed = _within_vault(p) or (source_type == "obsidian" and _obsidian_import_allowed(p))
+            if not allowed:
+                return _err(
+                    "warden_ingest",
+                    f"Path not allowed: {path}. Must be inside the Warden Brain vault, "
+                    f"or inside the Obsidian vault with source_type='obsidian'.",
+                )
             if not p.exists():
                 return _err("warden_ingest", f"Path not found: {path}")
-            if not project:
-                project = _detect_project("", path) or "personal"
-            result = ingest.add_file(p, project=project, tags=tag_list)
-            if result.get("ok"):
-                record_id = result["record"].get("id", "")
-                text = result["record"].get("text", "")
-                embedding = brain_embed.get_embedding(text[:4000]) if text else None
-                if embedding:
-                    brain_vector_store.upsert(record_id, embedding, {"project": project, "source_type": source_type})
-                results.append({"id": record_id, "embedded": embedding is not None})
-            else:
-                return _err("warden_ingest", result.get("error", "ingest failed"))
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return _err("warden_ingest", f"Could not read {path}: {exc}")
+            title = p.stem
+        else:
+            text = content
+            title = f"ingest-{SESSION_ID}"
+
+        if not project:
+            project = _detect_project(text, path) or "personal"
+
+        result = ingest_generic(
+            text=text,
+            title=title,
+            source_type=source_type,
+            project=project,
+            tags=tag_list,
+        )
+        if not result.get("ok"):
+            return _err("warden_ingest", result.get("error", "ingest failed"))
+
+        if result.get("duplicate"):
+            return _ok("warden_ingest", {
+                "ingested": 0,
+                "duplicate": True,
+                "duplicate_of": result.get("duplicate_of"),
+                "project": project,
+                "source_type": source_type,
+            })
+
+        embedding = brain_embed.get_embedding(text[:4000])
+        if embedding:
+            brain_vector_store.upsert(result["source_id"], embedding, {"project": project, "source_type": source_type})
 
         return _ok("warden_ingest", {
-            "ingested": len(results),
-            "results": results,
+            "ingested": 1,
+            "results": [{"id": result["source_id"], "path": result["path"], "embedded": embedding is not None}],
             "project": project,
             "source_type": source_type,
         })
     except Exception as exc:
         return _err("warden_ingest", str(exc))
+
+
+@mcp.tool()
+def brain_import_obsidian(source_path: str = "") -> str:
+    """Import Markdown notes from an external Obsidian vault into Warden Brain.
+
+    Read-only against the source vault — never writes back to it. Each
+    imported note is tagged 'obsidian-vault', deduped by content hash, and
+    becomes searchable via brain_search after this call.
+
+    Args:
+        source_path: Obsidian vault root. Defaults to WARDEN_OBSIDIAN_VAULT_PATH
+            (or ~/Documents/Obsidian Vault if unset).
+    """
+    try:
+        from src.warden.brain.ingest import import_obsidian_vault
+        src = source_path.strip() or str(_obsidian_vault_root())
+        result = import_obsidian_vault(src)
+        if not result.get("ok"):
+            return _err("brain_import_obsidian", result.get("error", "import failed"))
+        return _ok("brain_import_obsidian", result)
+    except Exception as exc:
+        return _err("brain_import_obsidian", str(exc))
+
+
+@mcp.tool()
+def brain_promote_inbox(dry_run: bool = False) -> str:
+    """Dedupe and file 00-inbox notes into project/people/research/etc folders.
+
+    Deterministic, tag-based routing — no LLM. Duplicates (by content hash)
+    are archived under 90-archive/duplicates instead of left cluttering the
+    inbox. Notes with no matching tag stay in 00-inbox and are reported as
+    unclassified rather than guessed at.
+
+    Args:
+        dry_run: If true, report what would move without moving anything.
+    """
+    try:
+        from src.warden.brain.promote import promote_inbox
+        result = promote_inbox(dry_run=dry_run)
+        return _ok("brain_promote_inbox", result)
+    except Exception as exc:
+        return _err("brain_promote_inbox", str(exc))
 
 
 @mcp.tool()

@@ -530,3 +530,207 @@ def _extract_youtube_id(url: str) -> Optional[str]:
         if m:
             return m.group(1)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Generic ingest (warden_ingest MCP tool) — honest, deduped, always searchable
+# ---------------------------------------------------------------------------
+#
+# This is the path used by warden_ingest for arbitrary text/file ingestion
+# (Obsidian notes, repo docs, agent proofs, manual saves). Earlier this tool
+# delegated to src.marius.brain_ingest.BrainIngest, which writes to a
+# completely separate JSONL store (~/.local/share/marius/brain/records.jsonl)
+# that brain_search/brain_reindex/brain_list_sources never read — so ingest
+# returned ok:true for writes that were never actually searchable. This path
+# writes through the same vault + SQLite index that backs search, so a
+# successful response is provably true.
+
+GENERIC_SOURCE_TYPES = {"obsidian", "repo", "manual", "agent_proof", "doc"}
+
+
+def normalize_content_for_hash(text: str) -> str:
+    """Collapse whitespace so near-identical captures hash the same."""
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def compute_content_hash(text: str) -> str:
+    return hashlib.sha256(normalize_content_for_hash(text).encode()).hexdigest()
+
+
+def _frontmatter_field(text: str, key: str) -> str:
+    """Read a single frontmatter field without pulling in the full vault parser."""
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    if end == -1:
+        return ""
+    block = text[3:end]
+    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", block, re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+def find_duplicate_by_content_hash(vault_path: Path, content_hash: str) -> Optional[dict]:
+    """Scan the vault's Markdown files for one whose content_hash frontmatter matches.
+
+    O(n) over vault files by design — this is a personal vault (tens to low
+    hundreds of notes), not a search index, so no schema migration is needed
+    to get honest dedupe.
+    """
+    if not vault_path.exists():
+        return None
+    for p in sorted(vault_path.rglob("*.md")):
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if _frontmatter_field(text, "content_hash") == content_hash:
+            title = _frontmatter_field(text, "title") or p.stem
+            return {"path": p.relative_to(vault_path).as_posix(), "title": title}
+    return None
+
+
+def ingest_generic(
+    *,
+    text: str,
+    title: str,
+    source_type: str,
+    project: str = "",
+    tags: Optional[list[str]] = None,
+    vault_path=None,
+    index_path=None,
+) -> dict:
+    """Ingest arbitrary text/file content into the real Warden Brain vault + index.
+
+    Always honest: if this returns ok=True and duplicate=False, the note was
+    written to disk, scanned, and reindexed into the SQLite FTS index used by
+    brain_search — i.e. it is actually searchable, not just claimed to be.
+    """
+    if source_type not in GENERIC_SOURCE_TYPES:
+        return {
+            "ok": False,
+            "error": f"Unknown source_type {source_type!r}; must be one of {sorted(GENERIC_SOURCE_TYPES)}",
+        }
+    if not text or not text.strip():
+        return {"ok": False, "error": "No content to ingest"}
+
+    vp = vault_path or get_vault_path()
+    if not vp.exists():
+        init_vault(vp)
+
+    content_hash = compute_content_hash(text)
+    dup = find_duplicate_by_content_hash(vp, content_hash)
+    if dup:
+        return {
+            "ok": True,
+            "ingested": False,
+            "duplicate": True,
+            "duplicate_of": dup["path"],
+            "title": dup["title"],
+        }
+
+    all_tags = sorted(set((tags or []) + [f"source_{source_type}"]))
+    frontmatter = {"content_hash": content_hash, "source_type": source_type}
+    if project:
+        frontmatter["project"] = project
+
+    try:
+        result = write_note(
+            title=title,
+            body=text,
+            tags=all_tags,
+            vault_path=vp,
+            extra_frontmatter=frontmatter,
+        )
+    except FileExistsError as exc:
+        return {"ok": False, "error": str(exc)}
+    except ValueError as exc:
+        return {"ok": False, "error": f"Invalid note: {exc}"}
+
+    sources = scan_sources(vp)
+    reindex_result = reindex_sources(sources, index_path=index_path)
+    new_source = next((s for s in sources if s.path == result["path"]), None)
+    if new_source is None:
+        # Should be unreachable — write_note succeeded but scan_sources didn't
+        # pick it up. Surface as a real failure instead of a false ok:true.
+        return {"ok": False, "error": "Note written but not found by scan_sources; index inconsistent"}
+
+    return {
+        "ok": True,
+        "ingested": True,
+        "duplicate": False,
+        "source_id": new_source.source_id,
+        "path": result["path"],
+        "title": title,
+        "word_count": result.get("word_count", 0),
+        "reindex": reindex_result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Obsidian vault import — read-only against the source vault
+# ---------------------------------------------------------------------------
+
+def import_obsidian_vault(
+    obsidian_path,
+    *,
+    vault_path=None,
+    index_path=None,
+    limit: Optional[int] = None,
+) -> dict:
+    """Copy Markdown notes from an external Obsidian vault into Warden Brain.
+
+    Never writes to obsidian_path — read-only against the source. Each
+    imported note is deduped by content hash and tagged 'obsidian-vault' plus
+    'source_obsidian' so it's identifiable in search/list results.
+    """
+    src_vp = Path(obsidian_path).expanduser()
+    if not src_vp.exists():
+        return {"ok": False, "error": f"Obsidian vault not found: {src_vp}"}
+
+    vp = vault_path or get_vault_path()
+    if not vp.exists():
+        init_vault(vp)
+
+    imported: list[dict] = []
+    duplicates: list[dict] = []
+    errors: list[dict] = []
+
+    md_files = sorted(
+        p for p in src_vp.rglob("*.md")
+        if ".obsidian" not in p.parts and ".trash" not in p.parts
+    )
+    if limit:
+        md_files = md_files[:limit]
+
+    for p in md_files:
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            errors.append({"path": str(p), "error": str(exc)})
+            continue
+
+        result = ingest_generic(
+            text=text,
+            title=p.stem,
+            source_type="obsidian",
+            tags=["obsidian-vault"],
+            vault_path=vp,
+            index_path=index_path,
+        )
+        if not result.get("ok"):
+            errors.append({"path": str(p), "error": result.get("error", "unknown error")})
+        elif result.get("duplicate"):
+            duplicates.append({"path": str(p), "duplicate_of": result.get("duplicate_of")})
+        else:
+            imported.append({"path": str(p), "note_path": result.get("path"), "source_id": result.get("source_id")})
+
+    return {
+        "ok": True,
+        "scanned": len(md_files),
+        "imported": len(imported),
+        "duplicates": len(duplicates),
+        "errors": len(errors),
+        "imported_notes": imported,
+        "duplicate_notes": duplicates,
+        "error_notes": errors,
+    }
