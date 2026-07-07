@@ -48,12 +48,16 @@ def main():
     from .personal_memory import seed_if_missing
     seed_if_missing()
 
-    from src.marius.brain_ingest import BrainIngest
+    # NOTE: this used to go through src.marius.brain_ingest.BrainIngest, which
+    # writes to ~/.local/share/marius/brain/records.jsonl — a store that
+    # brain_search/brain_reindex/brain_list_sources never read. This daily
+    # timer (warden-brain-ingest-obsidian.timer) was reporting "N ingested"
+    # every night for content that was never actually searchable. Fixed to
+    # use the same vault + SQLite index that backs search, via ingest_generic.
+    from .brain.ingest import ingest_generic
     from . import brain_embed, brain_vector_store
 
-    ingest = BrainIngest()
     tag_list = [t.strip() for t in args.tags.split(",") if t.strip()]
-    tag_list.append(f"source_{args.source_type}")
 
     files = collect_files(root, args.max_files) if root.is_dir() else [root]
     total = len(files)
@@ -62,13 +66,28 @@ def main():
 
     for i, f in enumerate(files, 1):
         print(f"[{i}/{total}] {f.relative_to(root) if root.is_dir() else f.name}", end=" ", flush=True)
-        result = ingest.add_file(f, project=args.project, tags=tag_list)
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"— unreadable: {exc}")
+            skipped += 1
+            continue
+
+        result = ingest_generic(
+            text=text,
+            title=f.name,
+            source_type=args.source_type,
+            project=args.project,
+            tags=tag_list,
+        )
+        if result.get("ok") and result.get("duplicate"):
+            print(f"— duplicate of {result.get('duplicate_of')}")
+            skipped += 1
+            continue
         if result.get("ok"):
-            record_id = result["record"].get("id", "")
-            text = result["record"].get("text", "")
-            embedding = brain_embed.get_embedding(text[:4000]) if text else None
+            embedding = brain_embed.get_embedding(text[:4000])
             if embedding:
-                brain_vector_store.upsert(record_id, embedding, {"project": args.project, "source": str(f)})
+                brain_vector_store.upsert(result["source_id"], embedding, {"project": args.project, "source": str(f)})
                 print("✓ (embedded)")
             else:
                 print("✓")
