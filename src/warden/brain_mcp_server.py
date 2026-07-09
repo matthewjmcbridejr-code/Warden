@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,7 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from src.marius.tools import get_git_status, get_service_status
 from src.warden import brain_embed, brain_vector_store, personal_memory
 from src.warden.personal_memory import get_workstream, load_profile, update_profile, seed_if_missing
 
@@ -25,6 +28,16 @@ WARDEN_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:8125")
 MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
 BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
 SESSION_ID = str(uuid.uuid4())[:8]
+
+# Server-status tools: read-only, no arbitrary shell exec.
+WORKSPACES_ROOT = Path(os.getenv("WARDEN_WORKSPACES_ROOT", "/home/matt/workspaces"))
+DEFAULT_SERVICE_ALLOWLIST = [
+    "mcharness-cockpit",
+    "mcharness-cockpit-private",
+    "warden-brain-ingest-obsidian.timer",
+    "warden-brain-ingest-warden.service",
+]
+REPO_CATALOG_MAX_DEPTH = 4
 
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
@@ -180,6 +193,160 @@ def warden_health() -> str:
         })
     except Exception as exc:
         return _err("warden_health", str(exc))
+
+
+def _read_meminfo() -> dict[str, Any]:
+    """Parse /proc/meminfo (stdlib only, no psutil)."""
+    info: dict[str, int] = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                value = rest.strip().split()[0]
+                info[key] = int(value)  # kB
+    except Exception:
+        return {"available": False}
+    total = info.get("MemTotal", 0)
+    available = info.get("MemAvailable", 0)
+    used = total - available
+    return {
+        "available": True,
+        "total_kb": total,
+        "available_kb": available,
+        "used_kb": used,
+        "used_percent": round(used / total * 100, 1) if total else None,
+    }
+
+
+@mcp.tool()
+def warden_server_status() -> str:
+    """Read-only snapshot of the host: load average, disk usage, memory, and
+    status for an allowlisted set of Warden-related systemd services.
+    No arbitrary shell execution; secrets are never included in this output."""
+    try:
+        disk = shutil.disk_usage("/")
+        load = os.getloadavg() if hasattr(os, "getloadavg") else None
+        return _ok("warden_server_status", {
+            "load_average": {"1m": load[0], "5m": load[1], "15m": load[2]} if load else None,
+            "disk": {
+                "total_bytes": disk.total,
+                "used_bytes": disk.used,
+                "free_bytes": disk.free,
+                "used_percent": round(disk.used / disk.total * 100, 1) if disk.total else None,
+            },
+            "memory": _read_meminfo(),
+            "services": get_service_status(),
+            "git_status": get_git_status(),
+        })
+    except Exception as exc:
+        return _err("warden_server_status", str(exc))
+
+
+@mcp.tool()
+def warden_service_health(services: str = "") -> str:
+    """Check systemd --user service/timer status for an allowlisted set of
+    Warden-related units. No arbitrary service names are executed beyond the
+    allowlist.
+
+    Args:
+        services: Optional comma-separated subset of the allowlist to check.
+            Unknown names are ignored. Defaults to the full allowlist.
+    """
+    try:
+        requested = [s.strip() for s in services.split(",") if s.strip()] if services else None
+        names = [s for s in requested if s in DEFAULT_SERVICE_ALLOWLIST] if requested else DEFAULT_SERVICE_ALLOWLIST
+        results = []
+        for name in names:
+            proc = subprocess.run(
+                ["systemctl", "--user", "is-active", name],
+                capture_output=True, text=True, check=False,
+            )
+            results.append({"service": name, "status": proc.stdout.strip() or "unknown"})
+        return _ok("warden_service_health", {"services": results, "allowlist": DEFAULT_SERVICE_ALLOWLIST})
+    except Exception as exc:
+        return _err("warden_service_health", str(exc))
+
+
+@mcp.tool()
+def warden_repo_catalog(root: str = "") -> str:
+    """List git repositories under the Warden workspaces root, with current
+    branch and a dirty/clean flag for each. Read-only; runs git only against
+    discovered repo paths, never against arbitrary user input.
+
+    Args:
+        root: Optional override of the workspaces root to scan (must exist).
+            Defaults to WARDEN_WORKSPACES_ROOT / /home/matt/workspaces.
+    """
+    try:
+        base = Path(root).expanduser() if root else WORKSPACES_ROOT
+        if not base.is_dir():
+            return _err("warden_repo_catalog", f"root does not exist or is not a directory: {base}")
+
+        repos: list[dict[str, Any]] = []
+
+        def scan(dir_path: Path, depth: int) -> None:
+            if depth > REPO_CATALOG_MAX_DEPTH:
+                return
+            if (dir_path / ".git").exists():
+                branch_proc = subprocess.run(
+                    ["git", "-C", str(dir_path), "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, check=False,
+                )
+                status_proc = subprocess.run(
+                    ["git", "-C", str(dir_path), "status", "--short"],
+                    capture_output=True, text=True, check=False,
+                )
+                repos.append({
+                    "path": str(dir_path),
+                    "branch": branch_proc.stdout.strip() or "unknown",
+                    "dirty": bool(status_proc.stdout.strip()),
+                })
+                return  # don't descend into a repo's internals looking for nested repos
+            try:
+                children = [p for p in dir_path.iterdir() if p.is_dir() and not p.name.startswith(".")]
+            except (PermissionError, OSError):
+                return
+            for child in children:
+                scan(child, depth + 1)
+
+        scan(base, 0)
+        return _ok("warden_repo_catalog", {"root": str(base), "repos": repos, "count": len(repos)})
+    except Exception as exc:
+        return _err("warden_repo_catalog", str(exc))
+
+
+@mcp.tool()
+def warden_listening_ports() -> str:
+    """List listening TCP ports on the host via a fixed, non-interpolated
+    `ss -tln` command. No arbitrary shell execution; no user input reaches
+    the command line."""
+    try:
+        proc = subprocess.run(
+            ["ss", "-tln"],
+            capture_output=True, text=True, check=False,
+        )
+        if proc.returncode != 0:
+            return _err("warden_listening_ports", proc.stderr.strip() or "ss command failed")
+
+        rows = []
+        lines = proc.stdout.strip().splitlines()
+        for line in lines[1:]:  # skip header
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            local_addr = parts[3]
+            addr, _, port = local_addr.rpartition(":")
+            rows.append({
+                "proto": parts[0],
+                "state": parts[1],
+                "local_address": addr or local_addr,
+                "port": port or None,
+            })
+        return _ok("warden_listening_ports", {"ports": rows, "count": len(rows)})
+    except FileNotFoundError:
+        return _err("warden_listening_ports", "ss command not available on this host")
+    except Exception as exc:
+        return _err("warden_listening_ports", str(exc))
 
 
 @mcp.tool()
@@ -1839,7 +2006,7 @@ def main():
 
                 # Health check — no auth
                 if path == "/health":
-                    body = json.dumps({"ok": True, "server": "warden-brain", "tools": 18}).encode()
+                    body = json.dumps({"ok": True, "server": "warden-brain", "tools": 46}).encode()
                     await send({"type": "http.response.start", "status": 200,
                                 "headers": [[b"content-type", b"application/json"],
                                             [b"content-length", str(len(body)).encode()]]})
