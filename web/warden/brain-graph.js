@@ -32,6 +32,117 @@
   let _loaded = false;
 
   /* -------------------------------------------------------------- */
+  /* Pan / zoom / drag — Obsidian-style graph navigation.             */
+  /* -------------------------------------------------------------- */
+  let _viewBox = { x: 0, y: 0, w: W, h: H };
+
+  function clientToSvg(svg, clientX, clientY) {
+    const rect = svg.getBoundingClientRect();
+    return {
+      x: _viewBox.x + ((clientX - rect.left) / rect.width) * _viewBox.w,
+      y: _viewBox.y + ((clientY - rect.top) / rect.height) * _viewBox.h,
+    };
+  }
+
+  function applyViewBox(svg) {
+    svg.setAttribute("viewBox", `${_viewBox.x} ${_viewBox.y} ${_viewBox.w} ${_viewBox.h}`);
+  }
+
+  function edgePathD(a, b) {
+    const mx = (a.x + b.x) / 2 + (a.y - b.y) * 0.08;
+    const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.08;
+    return `M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`;
+  }
+
+  function updateNodePosition(svg, node) {
+    const g = svg.querySelector(`.bg-node[data-node-id="${CSS.escape(node.id)}"]`);
+    if (g) g.setAttribute("transform", `translate(${node.x},${node.y})`);
+    const byId = new Map(_nodes.map((n) => [n.id, n]));
+    svg.querySelectorAll(
+      `path.bg-edge[data-source="${CSS.escape(node.id)}"], path.bg-edge[data-target="${CSS.escape(node.id)}"]`
+    ).forEach((p) => {
+      const s = byId.get(p.dataset.source), t = byId.get(p.dataset.target);
+      if (s && t) p.setAttribute("d", edgePathD(s, t));
+    });
+  }
+
+  function onWheelZoom(ev) {
+    ev.preventDefault();
+    const svg = ev.currentTarget;
+    const before = clientToSvg(svg, ev.clientX, ev.clientY);
+    const factor = ev.deltaY > 0 ? 1.12 : 1 / 1.12;
+    let newW = Math.max(120, Math.min(W * 5, _viewBox.w * factor));
+    let newH = Math.max(80, Math.min(H * 5, _viewBox.h * factor));
+    _viewBox.x = before.x - ((before.x - _viewBox.x) * (newW / _viewBox.w));
+    _viewBox.y = before.y - ((before.y - _viewBox.y) * (newH / _viewBox.h));
+    _viewBox.w = newW;
+    _viewBox.h = newH;
+    applyViewBox(svg);
+  }
+
+  function bindCanvasPanZoom(svg) {
+    if (svg.dataset.bgNavBound) return;
+    svg.dataset.bgNavBound = "1";
+    svg.classList.add("bg-svg-interactive");
+    svg.addEventListener("wheel", onWheelZoom, { passive: false });
+    svg.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest && ev.target.closest(".bg-node")) return;
+      svg.setPointerCapture(ev.pointerId);
+      svg.classList.add("bg-panning");
+      const start = { x: ev.clientX, y: ev.clientY };
+      const startVB = { x: _viewBox.x, y: _viewBox.y };
+      const onMove = (mv) => {
+        const rect = svg.getBoundingClientRect();
+        const dx = ((mv.clientX - start.x) / rect.width) * _viewBox.w;
+        const dy = ((mv.clientY - start.y) / rect.height) * _viewBox.h;
+        _viewBox.x = startVB.x - dx;
+        _viewBox.y = startVB.y - dy;
+        applyViewBox(svg);
+      };
+      const onUp = (uv) => {
+        svg.releasePointerCapture(uv.pointerId);
+        svg.classList.remove("bg-panning");
+        svg.removeEventListener("pointermove", onMove);
+        svg.removeEventListener("pointerup", onUp);
+      };
+      svg.addEventListener("pointermove", onMove);
+      svg.addEventListener("pointerup", onUp);
+    });
+    svg.addEventListener("dblclick", (ev) => {
+      if (ev.target.closest && ev.target.closest(".bg-node")) return;
+      _viewBox = { x: 0, y: 0, w: W, h: H };
+      applyViewBox(svg);
+    });
+  }
+
+  function bindNodeDrag(svg, el, node) {
+    el.addEventListener("pointerdown", (ev) => {
+      ev.stopPropagation();
+      el.setPointerCapture(ev.pointerId);
+      hideTooltip();
+      const startClient = { x: ev.clientX, y: ev.clientY };
+      const startSvg = clientToSvg(svg, ev.clientX, ev.clientY);
+      const offX = node.x - startSvg.x, offY = node.y - startSvg.y;
+      let moved = false;
+      const onMove = (mv) => {
+        if (Math.abs(mv.clientX - startClient.x) > 2 || Math.abs(mv.clientY - startClient.y) > 2) moved = true;
+        const p = clientToSvg(svg, mv.clientX, mv.clientY);
+        node.x = p.x + offX;
+        node.y = p.y + offY;
+        updateNodePosition(svg, node);
+      };
+      const onUp = (uv) => {
+        el.releasePointerCapture(uv.pointerId);
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        if (!moved) selectNode(node.id);
+      };
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+    });
+  }
+
+  /* -------------------------------------------------------------- */
   /* Force-directed layout — simple, synchronous, good enough for a  */
   /* personal vault (tens to low hundreds of nodes).                 */
   /* -------------------------------------------------------------- */
@@ -147,10 +258,9 @@
       const a = byId.get(e.source), b = byId.get(e.target);
       if (!a || !b) return;
       if (!visibleIds.has(a.id) || !visibleIds.has(b.id)) return;
-      const mx = (a.x + b.x) / 2 + (a.y - b.y) * 0.08;
-      const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.08;
-      const opacity = e.type === "link" ? 0.45 : e.type === "project" ? 0.3 : 0.16;
-      svgContent += `<path d="M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}" fill="none" stroke="var(--line-glow)" stroke-width="${Math.min(e.weight || 1, 3)}" opacity="${opacity}" />`;
+      const active = _selectedId && (a.id === _selectedId || b.id === _selectedId);
+      const opacity = active ? 0.85 : e.type === "link" ? 0.45 : e.type === "project" ? 0.3 : 0.16;
+      svgContent += `<path class="bg-edge${active ? " bg-edge-active" : ""}" data-source="${escapeHtml(e.source)}" data-target="${escapeHtml(e.target)}" d="${edgePathD(a, b)}" fill="none" stroke="var(--line-glow)" stroke-width="${active ? Math.min((e.weight || 1) + 1, 4) : Math.min(e.weight || 1, 3)}" opacity="${opacity}" />`;
     });
     svgContent += `</g><g id="bg-nodes">`;
 
@@ -168,16 +278,18 @@
       </g>`;
     });
     svgContent += `</g>`;
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     svg.innerHTML = svgContent;
+    applyViewBox(svg);
 
     svg.querySelectorAll(".bg-node").forEach((el) => {
       const id = el.dataset.nodeId;
-      el.addEventListener("click", () => selectNode(id));
-      el.addEventListener("mouseenter", (ev) => showTooltip(byId.get(id), ev));
+      const node = byId.get(id);
+      el.addEventListener("mouseenter", (ev) => showTooltip(node, ev));
       el.addEventListener("mousemove", (ev) => moveTooltip(ev));
       el.addEventListener("mouseleave", hideTooltip);
+      bindNodeDrag(svg, el, node);
     });
+    bindCanvasPanZoom(svg);
   }
 
   /* -------------------------------------------------------------- */
@@ -310,6 +422,7 @@
       _nodes = data.nodes || [];
       _edges = data.edges || [];
       _activeTypes = new Set(TYPE_ORDER);
+      _viewBox = { x: 0, y: 0, w: W, h: H };
       layout(_nodes, _edges);
       buildTypeFilters();
       buildProjectFilter();
