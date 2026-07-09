@@ -33,6 +33,7 @@ VAULT_FOLDERS = [
     "50-research",
     "60-daily",
     "90-archive",
+    "wiki",
 ]
 
 EXCLUDE_DIRS = {

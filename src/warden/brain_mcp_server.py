@@ -577,6 +577,81 @@ def brain_promote_inbox(dry_run: bool = False) -> str:
 
 
 @mcp.tool()
+def brain_distill_wiki(
+    title: str,
+    definition: str,
+    principles: str = "",
+    examples: str = "",
+    tags: str = "",
+    links: str = "",
+    source_path: str = "",
+) -> str:
+    """Write (or update) a wiki page — the curated, human/agent-synthesized
+    layer of Warden Brain, distinct from raw ingested sources.
+
+    This is the Karpathy-style raw -> wiki -> schema pattern: read a source
+    fully, synthesize what it actually means, then call this tool with the
+    result. Re-calling with the same title updates that page in place
+    instead of creating a duplicate. Keep 'links' tight — only include a
+    title if understanding one page would meaningfully change how you see
+    the other (see brain_search or the Brain Graph for what already exists
+    to link against).
+
+    Args:
+        title: Short, specific concept title for the page.
+        definition: One to three sentences defining the concept.
+        principles: Newline- or comma-separated key takeaways.
+        examples: Newline- or comma-separated concrete examples (optional).
+        tags: Comma-separated lowercase kebab-case topic tags.
+        links: Comma-separated titles of existing wiki pages this relates to.
+        source_path: Vault-relative path of the raw source this was distilled from.
+    """
+    try:
+        from src.warden.brain.wiki import distill_note
+
+        def _split(raw: str) -> list[str]:
+            parts = re.split(r"[\n,]+", raw or "")
+            return [p.strip() for p in parts if p.strip()]
+
+        result = distill_note(
+            title=title,
+            definition=definition,
+            principles=_split(principles),
+            examples=_split(examples),
+            tags=_split(tags),
+            links=_split(links),
+            source_path=source_path.strip() or None,
+        )
+        return _ok("brain_distill_wiki", result)
+    except ValueError as exc:
+        return _err("brain_distill_wiki", str(exc))
+    except Exception as exc:
+        return _err("brain_distill_wiki", str(exc))
+
+
+@mcp.tool()
+async def brain_curate_wiki(limit: int = 5, dry_run: bool = False) -> str:
+    """Run automatic wiki curation via the Marius model gateway (Ollama-first,
+    OpenRouter fallback — same routing as every other agent call).
+
+    Finds promoted vault notes that don't have a wiki page yet, distills
+    each one (title, definition, principles, examples, tight links) through
+    the gateway, and writes the results — one source at a time, so later
+    sources in the same run can link to pages distilled earlier in it.
+
+    Args:
+        limit: Max sources to distill this call (default 5, keep small).
+        dry_run: If true, report what would be distilled without calling the model.
+    """
+    try:
+        from src.warden.brain.curator import curate_vault
+        result = await curate_vault(limit=limit, dry_run=dry_run)
+        return _ok("brain_curate_wiki", result)
+    except Exception as exc:
+        return _err("brain_curate_wiki", str(exc))
+
+
+@mcp.tool()
 def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
     """Search ingested Obsidian notes, repo files, and brain docs by keyword or semantic similarity.
 

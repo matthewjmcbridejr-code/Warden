@@ -23,6 +23,7 @@ FOLDER_TYPE = {
     "50-research": "research",
     "60-daily": "note",
     "90-archive": "inbox",
+    "wiki": "wiki",
 }
 
 MEMORY_KIND_TYPE = {
@@ -74,6 +75,8 @@ def _vault_nodes(vault_path) -> tuple[list[dict], list]:
     nodes = []
     for src in sources:
         if src.path in ("00-index.md",) or src.path.endswith("/README.md") or src.path == "README.md":
+            continue
+        if src.path in ("wiki/index.md", "wiki/log.md"):
             continue
         ntype = _folder_type(src.path)
         project = _infer_project(src.tags)
@@ -200,7 +203,7 @@ def build_graph(vault_path=None) -> dict:
 
     for n in nodes:
         n.pop("_abs_path", None)
-        base = 14 if n["type"] in ("project", "system") else 10
+        base = 18 if n["type"] == "wiki" else 14 if n["type"] in ("project", "system") else 10
         n["size"] = min(base + degree.get(n["id"], 0) * 2, 34)
 
     return {"nodes": nodes, "edges": edges}

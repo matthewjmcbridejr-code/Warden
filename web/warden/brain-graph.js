@@ -8,6 +8,7 @@
   const H = 600;
 
   const TYPE_META = {
+    wiki: { color: "#f5d76e", label: "Wiki (curated)" },
     project: { color: "#7db0ff", label: "Project" },
     person: { color: "#a78bfa", label: "Person" },
     client: { color: "#f472b6", label: "Client" },
@@ -20,12 +21,20 @@
     failure: { color: "#ff7e91", label: "Failure" },
     handoff: { color: "#fb923c", label: "Handoff" },
   };
-  const TYPE_ORDER = ["project", "system", "person", "client", "research", "note", "inbox", "proof", "decision", "failure", "handoff"];
+  const TYPE_ORDER = ["wiki", "project", "system", "person", "client", "research", "note", "inbox", "proof", "decision", "failure", "handoff"];
+  // Raw/unpromoted inbox nodes are ingredient material, not curated
+  // knowledge — start with them hidden so the wiki layer is what you see
+  // first. Still one click away via the type filter chips.
+  const TYPES_HIDDEN_BY_DEFAULT = new Set(["inbox"]);
+
+  function defaultActiveTypes() {
+    return new Set(TYPE_ORDER.filter((t) => !TYPES_HIDDEN_BY_DEFAULT.has(t)));
+  }
 
   let _nodes = [];
   let _edges = [];
   let _selectedId = null;
-  let _activeTypes = new Set(TYPE_ORDER);
+  let _activeTypes = defaultActiveTypes();
   let _statusFilter = "";
   let _projectFilter = "";
   let _searchTerm = "";
@@ -375,7 +384,7 @@
     host.innerHTML = TYPE_ORDER.filter((t) => present.has(t))
       .map((t) => {
         const meta = TYPE_META[t];
-        return `<button type="button" class="bg-type-chip active" data-type="${t}">
+        return `<button type="button" class="bg-type-chip${_activeTypes.has(t) ? " active" : ""}" data-type="${t}">
           <span class="bg-type-dot" style="background:${meta.color}"></span>${meta.label}
         </button>`;
       })
@@ -421,7 +430,7 @@
       const data = await res.json();
       _nodes = data.nodes || [];
       _edges = data.edges || [];
-      _activeTypes = new Set(TYPE_ORDER);
+      _activeTypes = defaultActiveTypes();
       _viewBox = { x: 0, y: 0, w: W, h: H };
       layout(_nodes, _edges);
       buildTypeFilters();
