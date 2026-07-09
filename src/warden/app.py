@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api import captain_watcher_background_loop, dropzone_watcher_background_loop, mcharness_router
 from .branding import CATEGORY, PRODUCT_NAME, PUBLIC_URL, REPO_NAME, TAGLINE
+from .brain.graph_api import router as brain_graph_router
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WEB_DIR = _ROOT / "web"
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
         "category": CATEGORY,
     }
     app.include_router(mcharness_router)
+    app.include_router(brain_graph_router)
     app.add_middleware(NoCacheWebAssetsMiddleware)
 
     @app.on_event("startup")

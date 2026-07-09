@@ -17,8 +17,9 @@
       <div class="sidebar-brand">
         <div class="warden-brand">
           <h1 class="warden-title">Warden</h1>
+          <span class="brand-chip" data-testid="brand-chip">Control plane</span>
         </div>
-        <p class="sidebar-tagline">Local-first AI command center</p>
+        <p class="sidebar-tagline">Agents work · Warden supervises · Proof gates decide</p>
       </div>
 
       <button id="develop-plan-primary" data-testid="develop-plan-primary" data-action="develop-plan" class="btn primary sidebar-primary" type="button">+ New Task</button>
@@ -54,6 +55,7 @@
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-test-panel" data-testid="nav-mail">Mail</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
         <button type="button" class="nav-item" data-section="inbox" data-testid="nav-inbox">Brain Inbox</button>
+        <button type="button" class="nav-item" data-section="brain-graph" data-testid="nav-brain-graph">Brain Graph</button>
         <button type="button" class="nav-item nav-item-muted" data-section="gateway" data-testid="nav-gateway">Model Gateway</button>
       </nav>
 
@@ -87,6 +89,11 @@
         <div class="thread-hero" data-testid="thread-hero">
           <h2 class="thread-hero-title">What should Warden work on?</h2>
           <p class="thread-hero-sub">Ask Marius to search your Brain, inspect mail, summarize a capture, or create an agent task.</p>
+          <div class="hero-badges" data-testid="hero-badges">
+            <span class="hero-badge hero-badge-local">Local-first</span>
+            <span class="hero-badge hero-badge-proof">Proof-gated</span>
+            <span class="hero-badge hero-badge-agents">Agent-supervised</span>
+          </div>
         </div>
 
         <!-- Command Center: Marius quick ask (dominant) -->
@@ -260,6 +267,41 @@
           <button type="button" id="brain-inbox-refresh" class="btn" data-testid="brain-inbox-refresh">Refresh</button>
         </div>
         <div id="brain-inbox-list" data-testid="brain-inbox-list"></div>
+      </section>
+
+      <section id="warden-section-brain-graph" class="workspace-section" data-section="brain-graph" data-testid="warden-section-brain-graph" style="display:none;" aria-hidden="true">
+        <header class="workspace-header">
+          <h2 class="workspace-title">Brain Graph</h2>
+          <p class="workspace-subhead">Your second brain as a living map — notes, projects, people, and agent memory, linked by project, tag, and source link.</p>
+        </header>
+        <div class="bg-toolbar" data-testid="bg-toolbar">
+          <input type="text" id="bg-search-input" class="bg-search-input" placeholder="Search nodes…" autocomplete="off" data-testid="bg-search-input" />
+          <select id="bg-status-filter" class="bg-select" data-testid="bg-status-filter">
+            <option value="">All statuses</option>
+            <option value="raw">Raw</option>
+            <option value="distilled">Distilled</option>
+            <option value="linked">Linked</option>
+            <option value="actioned">Actioned</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select id="bg-project-filter" class="bg-select" data-testid="bg-project-filter"><option value="">All projects</option></select>
+          <button type="button" id="bg-refresh" class="btn" data-testid="bg-refresh">Refresh</button>
+        </div>
+        <div id="bg-type-filters" class="bg-filter-group" data-testid="bg-type-filters"></div>
+        <div class="bg-stage" data-testid="bg-stage">
+          <div class="bg-canvas-wrap" id="bg-canvas-wrap">
+            <svg id="bg-svg" class="bg-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet"></svg>
+            <div id="bg-empty" class="bg-empty" style="display:none;">
+              <p>No brain data indexed yet.</p>
+              <p class="muted">Ingest notes into Warden Brain, then refresh.</p>
+            </div>
+            <div id="bg-tooltip" class="bg-tooltip" style="display:none;"></div>
+          </div>
+          <aside id="bg-detail-panel" class="bg-detail-panel" data-testid="bg-detail-panel">
+            <p class="muted">Click a node to see its details.</p>
+          </aside>
+        </div>
+        <div class="bg-legend" id="bg-legend" data-testid="bg-legend"></div>
       </section>
 
       <section id="warden-section-runners" class="workspace-section" data-section="runners" data-testid="warden-section-runners" style="display:none;" aria-hidden="true">
@@ -1069,5 +1111,6 @@
   <script src="./gateway.js"></script>
   <script src="./runners.js"></script>
   <script src="./inbox.js"></script>
+  <script src="./brain-graph.js"></script>
 </body>
 </html>

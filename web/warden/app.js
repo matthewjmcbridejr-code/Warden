@@ -2545,6 +2545,7 @@
       settings: "Settings",
       projects: "Projects",
       gateway: "Model Gateway",
+      "brain-graph": "Brain Graph",
     };
     const topTitle = document.getElementById("topbar-page-title");
     if (topTitle) topTitle.textContent = titles[state.activeSection] || "Warden";
@@ -2567,6 +2568,8 @@
     } else if (state.activeSection === "settings") {
       loadConnectorsProviders().catch((e) => console.error(e));
       loadMailTestAccountOptions().catch((e) => console.error(e));
+    } else if (state.activeSection === "brain-graph") {
+      if (window.WardenBrainGraph) window.WardenBrainGraph.load();
     }
   }
 

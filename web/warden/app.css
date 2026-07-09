@@ -6526,3 +6526,222 @@ body {
   font-size: 0.82em;
   padding: 7px 14px;
 }
+
+/* ============================================================== */
+/* Brain Graph — neural map view                                    */
+/* ============================================================== */
+.bg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 14px 0 10px;
+}
+.bg-search-input {
+  flex: 1 1 220px;
+  min-width: 180px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.86rem;
+}
+.bg-select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+.bg-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.bg-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+.bg-type-chip.active {
+  color: var(--text);
+  border-color: var(--line-glow);
+}
+.bg-type-chip:not(.active) {
+  opacity: 0.45;
+}
+.bg-type-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.bg-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+}
+.bg-canvas-wrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(700px 500px at 50% 45%, rgba(125, 176, 255, 0.06), transparent 65%),
+    linear-gradient(180deg, #050a13 0%, #070d18 100%);
+  overflow: hidden;
+  min-height: 420px;
+}
+.bg-canvas-wrap.bg-loading {
+  opacity: 0.55;
+}
+.bg-svg {
+  width: 100%;
+  height: 600px;
+  display: block;
+}
+.bg-node {
+  cursor: pointer;
+}
+.bg-node circle {
+  transition: opacity 0.2s ease;
+}
+.bg-node:hover circle {
+  opacity: 1 !important;
+}
+.bg-node-label {
+  fill: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--sans);
+  pointer-events: none;
+}
+.bg-node-dim .bg-node-label {
+  display: none;
+}
+.bg-node-selected .bg-node-label {
+  fill: var(--text);
+  font-weight: 600;
+}
+.bg-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+  gap: 4px;
+}
+.bg-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.76rem;
+  color: var(--text);
+  max-width: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.bg-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.bg-tooltip-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.bg-tooltip-time {
+  color: var(--muted);
+  margin-top: 2px;
+  font-size: 0.7rem;
+}
+.bg-detail-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(18, 30, 50, 0.96), rgba(14, 24, 40, 0.96));
+  padding: 16px;
+  min-height: 420px;
+  font-size: 0.84rem;
+}
+.bg-detail-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.bg-detail-title {
+  margin: 0 0 10px;
+  font-size: 1.02rem;
+  color: var(--text);
+}
+.bg-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-secondary);
+}
+.bg-detail-label {
+  color: var(--muted);
+}
+.bg-detail-path {
+  word-break: break-all;
+  text-align: right;
+}
+.bg-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.bg-detail-panel .btn {
+  margin-top: 10px;
+  width: 100%;
+}
+.bg-detail-search-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.bg-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@media (max-width: 900px) {
+  .bg-stage {
+    grid-template-columns: 1fr;
+  }
+}
