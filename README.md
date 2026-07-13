@@ -1,5 +1,8 @@
 # Warden
 
+[![CI](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/ci.yml/badge.svg)](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **A local-first control room for AI coding agents** — shared memory, task handoffs, proof gates, and a human-visible command center.
 
 Warden exists to answer one question reliably: *"What is going on across all my agents, projects, repos, proofs, failures, and next actions — and what should happen next?"*
@@ -24,7 +27,7 @@ flowchart LR
     GM[Gemini]
   end
   subgraph Warden["Warden (local-first)"]
-    MCP["Warden Brain MCP<br/>38 tools"]
+    MCP["Warden Brain MCP<br/>47 tools"]
     MEM["Shared memory<br/>SQLite + embeddings"]
     BOARD["Task board<br/>+ handoffs"]
     GATE["Proof gates<br/>(operator-approved)"]
@@ -71,7 +74,7 @@ bash scripts/warden_smoke.sh
 
 See [docs/quickstart.md](docs/quickstart.md) and [docs/mcp_client_connect.md](docs/mcp_client_connect.md).
 
-## MCP tool surface (38 tools)
+## MCP tool surface (47 tools)
 
 | Area | Tools |
 |------|-------|

@@ -11,7 +11,7 @@ flowchart LR
     CX[Codex CLI]
     GM[Gemini]
   end
-  MCP["Warden Brain MCP server<br/>(brain_mcp_server.py, 38 tools)"]
+  MCP["Warden Brain MCP server<br/>(brain_mcp_server.py, 47 tools)"]
   subgraph Engine["McHarness engine (src/warden)"]
     MEM["Shared memory<br/>SQLite + embeddings"]
     BOARD["Task board + handoffs"]
@@ -35,7 +35,7 @@ flowchart LR
 
 | Layer | Code | Role |
 |-------|------|------|
-| MCP server | `brain_mcp_server.py` | Agent-facing surface: identity, memory, board, captain, mail, vault (38 tools) |
+| MCP server | `brain_mcp_server.py` | Agent-facing surface: identity, memory, board, captain, mail, vault (47 tools) |
 | Memory | `brain_embed.py`, `brain_vector_store.py`, `brain/` | Embeddings via Ollama `mxbai-embed-large`; `sqlite-vec` when installed, pure-Python cosine fallback otherwise |
 | Second brain vault | `brain/` (vault, index, ingest, mirror, hybrid) | Markdown vault with local + Google-mirrored sources and hybrid answering |
 | Coordination | task board / handoff stores | Agents post, claim, and hand off tasks with context packs |
@@ -55,6 +55,6 @@ flowchart LR
 ## Naming
 
 - **Warden** — operator control room UI + safety layer
-- **McHarness** — engine namespace (`/api/mcharness`)
-- **Marius** — resident assistant persona
+- `/api/mcharness` — legacy internal API namespace (rename with aliases planned)
+- **Assistant** — resident assistant (internal modules keep the marius name)
 - **Marius Systems** — product studio

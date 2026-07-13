@@ -96,7 +96,7 @@ def test_dispatch_step_shows_blocked_notice(page: Page, api_alive):
 
     # Action buttons present
     expect(notice.locator("button:has-text('Ask Memory')")).to_be_visible()
-    expect(notice.locator("button:has-text('Ask Marius')")).to_be_visible()
+    expect(notice.locator("button:has-text('Ask Warden')")).to_be_visible()
 
 
 def test_memory_chat_recall_after_dispatch(page: Page, api_alive):

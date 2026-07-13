@@ -485,13 +485,20 @@ def warden_recall(query: str, project: str = "", limit: int = 10) -> str:
                 for m in memories
             ]
 
-        return _ok("warden_recall", {
+        payload = {
             "query": query,
             "project_filter": scope,
             "search_mode": search_mode,
             "count": len(results),
             "results": results,
-        })
+        }
+        if search_mode == "keyword" and not brain_embed.is_available():
+            payload["note"] = (
+                f"Semantic search is off — no embedding backend at {brain_embed.OLLAMA_URL}. "
+                f"Results are keyword-only. Start Ollama and pull '{brain_embed.EMBED_MODEL}' "
+                "to enable semantic recall."
+            )
+        return _ok("warden_recall", payload)
     except Exception as exc:
         return _err("warden_recall", str(exc))
 

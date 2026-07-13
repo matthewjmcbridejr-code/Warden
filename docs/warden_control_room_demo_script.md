@@ -8,7 +8,7 @@ For screenshot/demo visuals without a live mission: `?demo=1` (clearly labeled s
 
 Open Control Room. Point out:
 
-- Warden by Marius Systems
+- Warden 
 - Left nav: Control Room, Missions, Agents, Runs, Evidence, Proof Gates, Runner Sessions
 - Top bar: Live indicator, Refresh, Command palette
 

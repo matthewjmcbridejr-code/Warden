@@ -5165,13 +5165,16 @@
             resultsEl.innerHTML = `<p class="muted sidebar-search-empty">No matches in Brain yet.</p>`;
             return;
           }
+          const degradedNote = data.note
+            ? `<p class="muted sidebar-search-empty" title="${escapeHtml(data.note)}">Keyword search only — start Ollama for semantic recall.</p>`
+            : "";
           resultsEl.innerHTML = results.map((r) => {
             const title = escapeHtml(r.title || r.path || "Untitled");
             return `<div class="sidebar-search-result">
               <span class="sidebar-search-result-title" title="${title}">${title}</span>
               <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Warden</button>
             </div>`;
-          }).join("");
+          }).join("") + degradedNote;
           resultsEl.querySelectorAll("[data-cc-ask]").forEach((btn) => {
             btn.addEventListener("click", () => {
               setActiveSection("mission");

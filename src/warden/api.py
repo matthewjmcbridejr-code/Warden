@@ -5929,8 +5929,16 @@ def get_brain_search(q: str = "", limit: int = 10):
     if not q:
         raise HTTPException(status_code=400, detail="q is required")
     from .brain import hybrid
+    from src.warden import brain_embed
     results = hybrid.search(q, limit=limit)
-    return {"ok": True, "query": q, "results": results, "count": len(results)}
+    payload = {"ok": True, "query": q, "results": results, "count": len(results)}
+    if not brain_embed.is_available():
+        payload["search_mode"] = "keyword"
+        payload["note"] = (
+            f"Semantic search off — no embedding backend at {brain_embed.OLLAMA_URL}. "
+            f"Keyword results only. Start Ollama and pull '{brain_embed.EMBED_MODEL}' to enable."
+        )
+    return payload
 
 
 @mcharness_router.post("/warden/brain/ask")
