@@ -6,7 +6,7 @@
   <title>Warden — Local-first AI Command Center</title>
   <meta
     name="description"
-    content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets Marius answer or act with source-backed proof."
+    content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets the Warden assistant answer or act with source-backed proof."
   />
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./app.css?v=phase2-redesign" />
@@ -37,7 +37,7 @@
 
         <div class="sidebar-group-label">Agents</div>
         <button type="button" class="nav-item nav-item-agent" data-section="agent" data-testid="nav-agent">
-          <span class="nav-item-dot nav-item-dot-good"></span>Marius <span class="nav-item-tag">command</span>
+          <span class="nav-item-dot nav-item-dot-good"></span>Assistant <span class="nav-item-tag">command</span>
         </button>
         <button type="button" class="nav-item nav-item-agent" data-section="agents" data-testid="nav-agents">
           <span class="nav-item-dot" id="nav-dot-agents"></span>Agent Library <span class="nav-item-tag">Codex · Jules</span>
@@ -83,14 +83,14 @@
 
         <!-- Onboarding — slim, dismissable, shown once per session -->
         <div id="warden-onboarding-card" class="warden-onboarding-card" data-testid="warden-onboarding-card">
-          <p class="onboarding-copy">Warden is a local-first AI workspace. Marius coordinates agents, captures sources into <strong>Brain</strong>, tracks <strong>Tasks</strong>, and shows <strong>Proof</strong> for everything it does.</p>
+          <p class="onboarding-copy">Warden is a local-first AI workspace. Warden coordinates agents, captures sources into <strong>Brain</strong>, tracks <strong>Tasks</strong>, and shows <strong>Proof</strong> for everything it does.</p>
           <button type="button" id="onboarding-dismiss-btn" class="onboarding-dismiss-btn" title="Dismiss" aria-label="Dismiss welcome card">✕</button>
         </div>
 
         <!-- Hero + command thread -->
         <div class="thread-hero" data-testid="thread-hero">
           <h2 class="thread-hero-title">What should Warden work on?</h2>
-          <p class="thread-hero-sub">Ask Marius to search your Brain, inspect mail, summarize a capture, or create an agent task.</p>
+          <p class="thread-hero-sub">Ask Warden to search your Brain, inspect mail, summarize a capture, or create an agent task.</p>
           <div class="hero-badges" data-testid="hero-badges">
             <span class="hero-badge hero-badge-local">Local-first</span>
             <span class="hero-badge hero-badge-proof">Proof-gated</span>
@@ -98,11 +98,11 @@
           </div>
         </div>
 
-        <!-- Command Center: Marius quick ask (dominant) -->
+        <!-- Command Center: assistant quick ask (dominant) -->
         <div class="cc-ask-card" data-testid="cc-ask-card">
           <form id="cc-ask-form" class="cc-ask-form" data-testid="cc-ask-form">
             <span class="cc-ask-icon" aria-hidden="true">◈</span>
-            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Marius, create a task, or search your saved sources…" autocomplete="off" data-testid="cc-ask-input" />
+            <input type="text" id="cc-ask-input" class="cc-ask-input" placeholder="Ask Warden, create a task, or search your saved sources…" autocomplete="off" data-testid="cc-ask-input" />
             <button type="submit" class="btn primary cc-ask-submit" data-testid="cc-ask-submit">Ask</button>
           </form>
           <div id="cc-ask-reply" class="cc-ask-reply" style="display:none;" data-testid="cc-ask-reply"></div>
@@ -182,7 +182,7 @@
             <div class="agent-group-cards">
               <div id="marius-card" data-testid="marius-card" class="agent-card">
                 <div class="agent-card-top">
-                  <h3 class="agent-card-title">Marius Local Agent</h3>
+                  <h3 class="agent-card-title">Warden Assistant</h3>
                   <span id="marius-status-pill" data-testid="marius-status-pill" class="status-pill status-ready">READY</span>
                 </div>
                 <div class="agent-card-meta-row" style="display: flex; gap: 12px; margin-bottom: 8px; font-size: 13px; color: var(--fg-muted);">
@@ -374,7 +374,7 @@
         <!-- Trace Inspector (right side, hidden until first response) -->
         <div id="mem-trace-inspector-pane" class="mem-trace-inspector" style="display:none;">
           <div class="mem-trace-inspector-header">
-            <span>Marius Trace</span>
+            <span>Agent Trace</span>
             <button type="button" id="mem-trace-toggle" class="wa-icon-btn" title="Hide trace">◀</button>
           </div>
           <div id="mem-trace-inspector-list" class="wa-trace-list">
@@ -388,7 +388,7 @@
             <div class="mem-chat-header-left">
               <span class="mem-chat-title">Warden Memory Agent</span>
               <span id="mem-chat-model-label" class="mem-chat-model-label"></span>
-              <span class="mem-trace-note">Reports memory reads/writes into Marius Trace</span>
+              <span class="mem-trace-note">Reports memory reads/writes into Agent Trace</span>
             </div>
             <div class="mem-chat-header-right">
               <button id="mem-chat-context-btn" class="btn" type="button" data-testid="mem-chat-context-btn">Context</button>
@@ -438,7 +438,7 @@
       <section id="warden-section-agent" class="workspace-section wa-section" data-section="agent" data-testid="warden-section-agent">
         <header class="wa-topbar">
           <div class="wa-topbar-left">
-            <h2 class="wa-title">Marius Agent</h2>
+            <h2 class="wa-title">Assistant</h2>
             <span class="wa-subtitle">Ask anything — git, GitHub, memory, web</span>
           </div>
           <div class="wa-topbar-right">
@@ -451,7 +451,7 @@
           <!-- Tool trace sidebar -->
           <div class="wa-trace-pane" id="wa-trace-pane">
             <div class="wa-trace-header">
-              <span>Marius Trace</span>
+              <span>Agent Trace</span>
               <button type="button" id="wa-trace-toggle" class="wa-icon-btn" title="Hide">◀</button>
             </div>
             <div class="wa-trace-list" id="wa-trace-list">
@@ -465,7 +465,7 @@
             <div class="wa-welcome" id="wa-welcome">
               <div class="wa-welcome-icon">⬡</div>
               <h3 class="wa-welcome-title">What do you want to know?</h3>
-              <p class="wa-welcome-sub">Marius pulls from git, GitHub PRs &amp; issues, project memory, and the web.</p>
+              <p class="wa-welcome-sub">The assistant pulls from git, GitHub PRs &amp; issues, project memory, and the web.</p>
               <div class="wa-starters">
                 <button type="button" class="wa-starter-btn" data-prompt="Where we at with Warden?">Where we at with Warden?</button>
                 <button type="button" class="wa-starter-btn" data-prompt="What's blocking us right now?">What's blocking us right now?</button>
@@ -500,7 +500,7 @@
       <section id="warden-section-gateway" class="workspace-section gw-section" data-section="gateway" data-testid="warden-section-gateway">
 
         <div class="gw-intro-banner">
-          <strong>Gateway Status</strong> — Warden routes AI requests locally through a privacy-preserving model proxy. This page shows which AI providers are reachable and how requests are routed. You don't need to configure anything here to use Marius Agent or Memory Chat.
+          <strong>Gateway Status</strong> — Warden routes AI requests locally through a privacy-preserving model proxy. This page shows which AI providers are reachable and how requests are routed. You don't need to configure anything here to use the assistant or Memory Chat.
         </div>
 
         <!-- ── Summary strip ──────────────────────────────────────────────── -->
@@ -612,7 +612,7 @@
         <!-- Connectors -->
         <div class="settings-section-header">
           <h3 class="settings-section-title">Account Connectors</h3>
-          <p class="settings-section-sub">Connect mail accounts to let Marius search your inbox. Credentials are stored locally — never sent to agents or included in API responses.</p>
+          <p class="settings-section-sub">Connect mail accounts to let the assistant search your inbox. Credentials are stored locally — never sent to agents or included in API responses.</p>
         </div>
         <div id="connectors-provider-list" class="connectors-provider-list" data-testid="connectors-provider-list">
           <div class="connectors-loading">Loading providers…</div>
@@ -1034,11 +1034,11 @@
     </div>
   </div>
 
-  <!-- Marius Chat Modal -->
+  <!-- Assistant Chat Modal -->
   <div id="marius-chat-modal" data-testid="marius-chat-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10005;">
     <div style="background:var(--bg-2); border:1px solid var(--line); width:90%; max-width:800px; height:85vh; max-height:800px; border-radius:8px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5);">
       <div style="padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; background:var(--bg-1);">
-        <h3 style="margin:0; font-size:16px;">Marius Local Agent</h3>
+        <h3 style="margin:0; font-size:16px;">Warden Assistant</h3>
         <div style="display:flex; gap:8px; align-items:center;">
           <select id="marius-chat-profile-select" class="btn" style="padding:4px 8px; font-size:13px; height:auto; width:auto; border-radius:4px; appearance:auto;">
             <option value="fast">fast</option>
@@ -1067,7 +1067,7 @@
     </div>
   </div>
 
-  <!-- Marius Model/Test-Drive Modal -->
+  <!-- Assistant Model/Test-Drive Modal -->
   <div id="marius-model-modal" data-testid="marius-model-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10006;">
     <div style="background:var(--bg-2); border:1px solid var(--line); width:90%; max-width:600px; max-height:85vh; border-radius:8px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,0.5);">
       <div style="padding:16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; background:var(--bg-1);">

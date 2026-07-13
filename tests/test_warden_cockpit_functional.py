@@ -21,9 +21,9 @@ def test_functional_cockpit_page_is_served_with_control_plane_labels():
     assert response.status_code == 200
     for snippet in [
         "Warden",
-        "by Marius Systems",
+        "local-first agent ops",
         "Control Room",
-        "Powered by McHarness",
+        "Warden engine",
         "nav-mission",
         "Control Room",
         "mission-command",

@@ -2360,7 +2360,7 @@
           </div>
           <div class="blocked-notice-actions">
             <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'memory\\']').click()">Ask Memory what happened</button>
-            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'agent\\']').click()">Ask Marius Agent</button>
+            <button type="button" class="btn" onclick="document.querySelector('[data-section=\\'agent\\']').click()">Ask the Assistant</button>
             <button type="button" class="onboarding-dismiss-btn" onclick="this.closest('.captain-blocked-notice').style.display='none'" title="Dismiss">✕</button>
           </div>`;
         noticeEl.style.display = "";
@@ -2702,7 +2702,7 @@
                     data-msg-id="${escapeHtml(m.id)}" data-acc-id="${escapeHtml(m.account_id)}"
                     data-subject="${escapeHtml(m.subject || "")}" data-from="${escapeHtml(m.from_addr || "")}">Save to Brain</button>
                   <button type="button" class="btn mail-ask-marius-btn" style="font-size:0.75rem;"
-                    data-subject="${escapeHtml(m.subject || "")}">Ask Marius</button>
+                    data-subject="${escapeHtml(m.subject || "")}">Ask Warden</button>
                 </div>
                 <div class="mail-read-body" style="display:none;"></div>
               </div>`).join("");
@@ -4696,7 +4696,7 @@
         if (modal) {
           modal.style.display = "flex";
           const title = document.getElementById('marius-model-modal-title');
-          if (title) title.textContent = "Marius Grounding Context";
+          if (title) title.textContent = "Assistant Grounding Context";
         }
         const availList = document.getElementById('marius-model-available-list');
         if (availList) availList.innerHTML = `<pre style="white-space:pre-wrap; color:var(--fg);">${escapeHtml(res.data.facts)}</pre>`;
@@ -4844,7 +4844,7 @@
         </div>
         <div class="cc-row-meta">
           <span class="muted">${escapeHtml(timeAgo(s.indexed_at))}</span>
-          <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+          <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Warden</button>
         </div>
       </div>`;
     }).join("");
@@ -4973,7 +4973,7 @@
     } else if (!accountsUnknown && !mailConnected) {
       move = {
         title: "Connect Gmail or iCloud",
-        reason: "Marius can search your inbox once a read-only mail account is connected.",
+        reason: "The assistant can search your inbox once a read-only mail account is connected.",
         ctaLabel: "Open Mail Settings",
         ctaAction: "goto-mail",
       };
@@ -4986,7 +4986,7 @@
       };
     } else if (sourceCount > 0 && evidenceCount === 0) {
       move = {
-        title: "Ask Marius what you captured",
+        title: "Ask Warden what you captured",
         reason: "You have saved sources. Turn them into a summary, decision, or task.",
         ctaLabel: "Ask about recent captures",
         ctaAction: "ask-captures",
@@ -4996,21 +4996,21 @@
       move = {
         title: "Review latest capture",
         reason: `"${latest.title || latest.path}" is ready in Brain.`,
-        ctaLabel: "Ask Marius about it",
+        ctaLabel: "Ask Warden about it",
         ctaAction: "ask-latest",
       };
     } else if (runnerKnown && !runnerAvailable) {
       move = {
         title: "Agent running is not enabled yet",
-        reason: "You can still use Brain, Mail, Watcher, and Marius. Enable a private runner when you want code/task execution.",
+        reason: "You can still use Brain, Mail, Watcher, and the assistant. Enable a private runner when you want code/task execution.",
         ctaLabel: "Open Advanced System Status",
         ctaAction: "goto-advanced",
       };
     } else {
       move = {
-        title: "Ask Marius what changed today",
+        title: "Ask Warden what changed today",
         reason: "Warden has Brain sources, connected mail, and proof history available.",
-        ctaLabel: "Ask Marius",
+        ctaLabel: "Ask Warden",
         ctaAction: "ask-general",
       };
     }
@@ -5019,7 +5019,7 @@
       { label: "Search Brain", action: "goto-brain" },
       { label: "Open Mail", action: "goto-mail" },
       { label: "View Proof", action: "goto-tasks" },
-      { label: "Ask Marius", action: "ask-general" },
+      { label: "Ask Warden", action: "ask-general" },
     ].filter((s) => s.action !== move.ctaAction).slice(0, 3);
 
     return { ...move, pills, secondary };
@@ -5169,7 +5169,7 @@
             const title = escapeHtml(r.title || r.path || "Untitled");
             return `<div class="sidebar-search-result">
               <span class="sidebar-search-result-title" title="${title}">${title}</span>
-              <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Marius</button>
+              <button type="button" class="btn cc-mini-btn" data-cc-ask="${title}">Ask Warden</button>
             </div>`;
           }).join("");
           resultsEl.querySelectorAll("[data-cc-ask]").forEach((btn) => {
@@ -5224,7 +5224,7 @@
       }, 8000);
       if (res && res.ok && res.answer) {
         replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.answer)}</div>
-          <div class="cc-ask-footer muted">Answered from Brain search (Marius was unavailable)</div>`;
+          <div class="cc-ask-footer muted">Answered from Brain search (assistant was unavailable)</div>`;
         return true;
       }
     } catch (e) {
@@ -5235,7 +5235,7 @@
 
   function renderMariusTimeoutFallback(replyEl, msg) {
     replyEl.innerHTML = `
-      <p class="cc-ask-error">Marius is taking too long.</p>
+      <p class="cc-ask-error">The assistant is taking too long.</p>
       <div class="cc-ask-fallback-actions">
         <button type="button" class="btn" id="cc-ask-retry">Try again</button>
         <button type="button" class="btn" id="cc-ask-fallback-brain">Search Brain</button>
@@ -5322,7 +5322,7 @@
           handleMailIntent(msg, replyEl);
           return;
         }
-        replyEl.innerHTML = `<p class="muted">Marius is thinking…</p>`;
+        replyEl.innerHTML = `<p class="muted">Thinking…</p>`;
         const res = await requestJsonTimeout(`${MCH}/agents/marius/chat`, {
           method: "POST",
           body: { message: msg, workspace: null },
@@ -5331,7 +5331,7 @@
           replyEl.innerHTML = `<div class="cc-ask-answer">${escapeHtml(res.data.response)}</div>
             <div class="cc-ask-footer muted">${escapeHtml(res.data.model || "")}</div>`;
         } else {
-          replyEl.innerHTML = `<p class="cc-ask-error">Marius couldn't answer that: ${escapeHtml((res && res.error) || "unknown error")}</p>`;
+          replyEl.innerHTML = `<p class="cc-ask-error">The assistant couldn't answer that: ${escapeHtml((res && res.error) || "unknown error")}</p>`;
         }
       } catch (e) {
         const usedFallback = await tryBrainAskFallback(msg, replyEl);

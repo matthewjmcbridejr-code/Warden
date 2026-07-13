@@ -7,9 +7,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 _BRANDING_PATH = _ROOT / "branding.json"
 _DEFAULTS = {
     "product_name": "Warden",
-    "repo_name": "mcharness",
-    "public_url": "https://mctable.team",
-    "tagline": "Supervised agent ops control room by Marius Systems.",
+    "repo_name": "warden",
+    "public_url": "",
+    "tagline": "Local-first control room for supervised AI coding agents.",
     "category": "AI agent control room",
 }
 

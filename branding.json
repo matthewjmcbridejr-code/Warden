@@ -1,8 +1,8 @@
 {
   "product_name": "Warden",
-  "repo_name": "mcharness",
-  "public_url": "https://mctable.team",
-  "tagline": "Supervised agent ops control room by Marius Systems.",
+  "repo_name": "warden",
+  "public_url": "",
+  "tagline": "Local-first control room for supervised AI coding agents.",
   "category": "AI agent control room",
   "internal_module": "src.warden"
 }

@@ -1,6 +1,6 @@
 # Warden
 
-**A local-first control room for AI coding agents** — shared memory, task handoffs, proof gates, and a human-visible command center. **McHarness** is the engine and API namespace underneath.
+**A local-first control room for AI coding agents** — shared memory, task handoffs, proof gates, and a human-visible command center.
 
 Warden exists to answer one question reliably: *"What is going on across all my agents, projects, repos, proofs, failures, and next actions — and what should happen next?"*
 
@@ -28,7 +28,7 @@ flowchart LR
     MEM["Shared memory<br/>SQLite + embeddings"]
     BOARD["Task board<br/>+ handoffs"]
     GATE["Proof gates<br/>(operator-approved)"]
-    API["FastAPI<br/>/api/mcharness"]
+    API["FastAPI"]
   end
   UI["Web control room"]
   NOTION["Notion<br/>command center"]
@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 - **Warden** — the operator control room (UI + proof gates)
-- **McHarness** — the engine underneath (`/api/mcharness` namespace)
+- The HTTP API lives under the `/api/mcharness` namespace (legacy internal name; a rename with aliases is planned)
 - **Warden Brain MCP** — the agent-facing surface: any MCP client gets memory, board, and handoffs
 - Semantic recall uses **Ollama `mxbai-embed-large`** embeddings with a pure-SQLite cosine fallback — no cloud dependency required
 
@@ -78,7 +78,7 @@ See [docs/quickstart.md](docs/quickstart.md) and [docs/mcp_client_connect.md](do
 | Shared memory | `warden_recall`, `warden_remember`, `warden_context_pack`, `warden_memory_context`, `warden_ingest`, `warden_search_docs` |
 | Coordination | `warden_board`, `warden_post_task`, `warden_claim_task`, `warden_handoff`, `warden_who_is_working`, `warden_workstream`, `warden_agent` |
 | Planning & dispatch | `warden_captain_plan`, `warden_captain_recent_plans`, `warden_captain_dispatch_step`, `warden_run_get` |
-| Resident assistant | `warden_ask_marius` |
+| Resident assistant | `warden_ask_marius` (assistant Q&A) |
 | Connectors & mail | `warden_connectors_providers`, `warden_connectors_accounts`, `warden_mail_*` (4 tools) |
 | Second brain vault | `brain_status`, `brain_search`, `brain_ask`, `brain_write_note`, plus ingest/reindex/mirror tools |
 
@@ -87,7 +87,7 @@ See [docs/quickstart.md](docs/quickstart.md) and [docs/mcp_client_connect.md](do
 - **Codex CLI** — runnable only on the private service when the tmux/Codex runner flags are enabled
 - **Jules Remote** — connected for planning/status only; not executable yet
 - **Captain** — OpenRouter planning on the private service; supervised step loop is manual
-- **Marius** — resident terminal assistant with server context: `./scripts/marius` ([docs](docs/marius_cli.md))
+- **Assistant** — resident terminal assistant with server context: `./scripts/marius` ([docs](docs/marius_cli.md))
 
 ## Safety model
 
@@ -107,15 +107,15 @@ See [SECURITY.md](SECURITY.md).
 pytest tests --ignore=tests/e2e --ignore=tests/browser
 ```
 
-**737 passing tests** cover the memory store, MCP tools, ingest pipeline, mail connectors, brain vault, and the Marius resident agent. Playwright e2e specs live in `tests/e2e/`.
+**850+ passing tests** cover the memory store, MCP tools, ingest pipeline, mail connectors, brain vault, and the resident assistant. Playwright e2e specs live in `tests/e2e/`.
 
 ## Repo layout
 
 ```
 src/warden/         engine: FastAPI app, MCP server, memory, captain, gateway
 web/                control room UI
-scripts/            smoke tests, MCP launchers, Marius CLI
-tests/              737 unit/integration tests + Playwright e2e
+scripts/            smoke tests, MCP launchers, assistant CLI
+tests/              850+ unit/integration tests + Playwright e2e
 docs/               architecture, runbooks, demo scripts
 browser-extension/  Chrome extension for page capture into memory
 ```
@@ -133,4 +133,4 @@ More: [docs/warden_repo_layout.md](docs/warden_repo_layout.md)
 
 ## License
 
-See [LICENSE](LICENSE). Built by **Marius Systems**.
+See [LICENSE](LICENSE).
