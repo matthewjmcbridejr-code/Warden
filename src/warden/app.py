@@ -47,6 +47,11 @@ def create_app() -> FastAPI:
     app.include_router(brain_graph_router)
     app.add_middleware(NoCacheWebAssetsMiddleware)
 
+    @app.get("/", include_in_schema=False)
+    def root_redirect():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/web/warden/app.html")
+
     @app.on_event("startup")
     async def start_captain_watcher_loop():
         app.state.captain_watcher_task = asyncio.create_task(captain_watcher_background_loop())

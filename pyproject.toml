@@ -14,10 +14,15 @@ dependencies = [
   "pytest>=8.0",
   "uvicorn>=0.30",
   "langgraph>=1.2",
-  "mcp>=1.0",
+  # mcp_hub.py constructs fastmcp Tool/FuncMetadata internals directly —
+  # verified against 1.28.x; review src/warden/mcp_hub.py before widening.
+  "mcp>=1.28,<2",
   "httpx>=0.25",
   "pyyaml>=6.0",
 ]
+
+[project.scripts]
+warden = "warden.cli:main"
 
 [project.optional-dependencies]
 semantic = ["sqlite-vec"]

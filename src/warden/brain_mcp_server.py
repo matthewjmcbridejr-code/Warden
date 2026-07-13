@@ -158,7 +158,7 @@ def warden_health() -> str:
     try:
         import httpx
         try:
-            r = httpx.get(f"{WARDEN_URL}/api/mcharness/status", timeout=3.0)
+            r = httpx.get(f"{WARDEN_URL}/api/mcharness/health", timeout=3.0)
             api_ok = r.status_code < 500
         except Exception:
             api_ok = False

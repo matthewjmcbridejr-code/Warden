@@ -49,28 +49,23 @@ Full details: [docs/architecture.md](docs/architecture.md)
 ## Quick start
 
 ```bash
-bash scripts/warden-up
-# Canonical UI: http://127.0.0.1:6969/web/warden/app.html
+pip install -e .
+warden up
+# Opens http://127.0.0.1:6969 in your browser
 ```
 
-Or manually:
+(`bash scripts/warden-up` does the same thing and creates the virtualenv for you.)
+
+Connect an agent (Claude Code example):
 
 ```bash
-pip install -e .
-python -m uvicorn src.warden.app:app --port 6969
-# UI: http://127.0.0.1:6969/web/warden/app.html
+claude mcp add warden -- warden mcp
 ```
 
 Smoke proof in one command:
 
 ```bash
 bash scripts/warden_smoke.sh
-```
-
-Connect an agent (Claude Code example):
-
-```bash
-claude mcp add warden-brain -- ./scripts/warden-brain-mcp
 ```
 
 See [docs/quickstart.md](docs/quickstart.md) and [docs/mcp_client_connect.md](docs/mcp_client_connect.md).
