@@ -16,7 +16,7 @@
     const summary = document.getElementById("runners-summary");
     const table = document.getElementById("runners-table");
     if (!summary || !table) return;
-    summary.innerHTML = '<span class="muted">Loading…</span>';
+    summary.innerHTML = '<span class="loading-note">Loading runner sessions…</span>';
     let rs = {};
     try {
       const resp = await fetch(`${MCH}/runner/sessions`);
@@ -39,19 +39,21 @@
       return;
     }
     table.innerHTML = `
+      <div class="runner-table-wrap">
       <table class="runner-table">
-        <thead><tr><th>Session</th><th>Command</th><th>Title</th><th>Age</th><th>Stale</th><th>Linked run</th></tr></thead>
+        <thead><tr><th>Session</th><th>Command</th><th>Title</th><th>Age</th><th>Status</th><th>Linked run</th></tr></thead>
         <tbody>${items.map((row) => `
           <tr data-testid="runners-session-row">
             <td class="mono">${esc(row.session_name)}</td>
             <td>${esc(row.command || "—")}</td>
             <td>${esc(row.title || "—")}</td>
             <td>${row.age_seconds != null ? `${row.age_seconds}s` : "—"}</td>
-            <td>${row.stale ? "Yes" : "No"}</td>
-            <td>${esc(row.linked_run_id || "—")}</td>
+            <td>${row.stale ? '<span class="chip warn">Stale</span>' : '<span class="chip good">Active</span>'}</td>
+            <td class="mono">${esc(row.linked_run_id || "—")}</td>
           </tr>
         `).join("")}</tbody>
       </table>
+      </div>
     `;
   }
 

@@ -20,7 +20,7 @@
   async function loadInbox() {
     const host = document.getElementById("brain-inbox-list");
     if (!host) return;
-    host.innerHTML = '<span class="muted">Loading…</span>';
+    host.innerHTML = '<span class="loading-note">Loading captures…</span>';
     let data = {};
     try {
       const resp = await fetch(`${MCH}/warden/brain/inbox?limit=50`);
@@ -48,8 +48,8 @@
         </div>
         <div style="margin-top:6px;display:flex;gap:6px;">
           ${m.promoted
-            ? `<span class="muted" style="font-size:12px;">Promoted → ${esc(m.source_ref)}</span>`
-            : `<button type="button" class="btn" data-inbox-action="promote">Promote to vault</button>
+            ? `<span class="chip good">Promoted</span> <span class="muted mono" style="font-size:11px;">${esc(m.source_ref)}</span>`
+            : `<button type="button" class="btn primary" data-inbox-action="promote">Promote to vault</button>
                <button type="button" class="btn" data-inbox-action="discard">Discard</button>`}
         </div>
       </div>

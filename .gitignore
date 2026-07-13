@@ -36,3 +36,4 @@ src/mcharness.egg-info/
 tests/marius_test_data/
 ~/.local/share/warden/connectors/
 configs/warden_resident.env
+.claude/
