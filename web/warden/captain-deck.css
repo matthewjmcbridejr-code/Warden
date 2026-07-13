@@ -1,0 +1,196 @@
+/* Captain Deck — isolated styles. Uses the app's CSS variables (--bg-2, --line,
+   --muted, --warn, --bad, etc.) so it tracks the control-room theme. */
+
+.captain-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.captain-overlay.open {
+  display: flex;
+}
+
+.captain-panel {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: min(94vw, 980px);
+  max-height: 92vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.captain-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+  z-index: 1;
+}
+
+.captain-header h3 {
+  margin: 0;
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
+}
+
+.captain-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.captain-note {
+  font-size: 0.85em;
+  color: var(--warn, #f0c66a);
+}
+
+.captain-note:empty {
+  display: none;
+}
+
+/* Settings card */
+.captain-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.captain-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.captain-card-title {
+  font-weight: 600;
+}
+
+.captain-card-sub {
+  font-size: 0.82em;
+  color: var(--muted);
+}
+
+.captain-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.captain-key-form {
+  display: none;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.captain-key-form.open {
+  display: block;
+}
+
+.captain-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.captain-field label {
+  display: block;
+  font-size: 0.82em;
+  margin-bottom: 4px;
+  color: var(--muted);
+}
+
+.captain-field input,
+.captain-field select,
+.captain-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg, #0d1117);
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.captain-field textarea {
+  min-height: 118px;
+  resize: vertical;
+}
+
+.captain-field input:focus,
+.captain-field select:focus,
+.captain-field textarea:focus {
+  outline: none;
+  border-color: var(--accent, #58a6ff);
+}
+
+.captain-fine-print {
+  font-size: 0.78em;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.captain-fine-print:empty {
+  display: none;
+}
+
+/* Goal / repo / agent layout */
+.captain-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.captain-form-grid .captain-field-goal {
+  grid-column: 1 / -1;
+}
+
+/* Action row */
+.captain-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.captain-error {
+  display: none;
+  color: var(--bad);
+  font-size: 0.85em;
+}
+
+.captain-plan-status {
+  font-size: 0.85em;
+}
+
+.captain-plan-status:empty {
+  display: none;
+}
+
+/* Plan body — app.js renders the stepper + step list in here */
+.captain-plan-body:empty {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .captain-field-grid,
+  .captain-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

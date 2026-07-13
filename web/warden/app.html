@@ -10,6 +10,7 @@
   />
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./app.css?v=phase2-redesign" />
+  <link rel="stylesheet" href="./captain-deck.css?v=1" />
 </head>
 <body>
   <div class="warden-shell" data-testid="warden-shell">
@@ -868,66 +869,74 @@
     </div>
   </div>
 
-  <!-- Captain Deck Modal -->
-  <div id="captain-deck-modal" data-testid="captain-deck-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.56); display:none; align-items:center; justify-content:center; z-index:10001;">
-    <div style="background:var(--bg-2); border:1px solid var(--line); padding:16px; width:min(94vw, 980px); max-height:92vh; overflow:auto; border-radius:8px;">
-      <h3 style="margin-top:0;">Captain Deck</h3>
-      <div id="captain-config-note" data-testid="captain-config-note" style="font-size:0.85em; color:var(--warn, #f0c66a); margin-bottom:6px;"></div>
-      <div id="captain-settings" data-testid="captain-settings" class="captain-settings" style="border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-          <div>
-            <div style="font-weight:600;">Captain Settings</div>
-            <div id="captain-settings-status" data-testid="captain-settings-status" style="font-size:0.82em; color:var(--muted);"></div>
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button id="captain-set-key" data-testid="captain-set-key" class="btn" type="button">Set OpenRouter Key</button>
-            <button id="captain-remove-key" data-testid="captain-remove-key" class="btn bad" type="button" style="display:none;">Remove Key</button>
-          </div>
-        </div>
-        <div id="captain-settings-note" data-testid="captain-settings-note" style="font-size:0.78em; color:var(--muted); margin-top:6px;"></div>
-        <div id="captain-key-form" data-testid="captain-key-form" style="display:none; margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div>
-              <label for="captain-openrouter-key" style="display:block; font-size:0.82em; margin-bottom:4px;">OpenRouter API Key</label>
-              <input id="captain-openrouter-key" data-testid="captain-openrouter-key" type="password" autocomplete="off" spellcheck="false" style="width:100%; padding:8px;" placeholder="sk-or-..." />
-            </div>
-            <div>
-              <label for="captain-openrouter-model" style="display:block; font-size:0.82em; margin-bottom:4px;">Model</label>
-              <input id="captain-openrouter-model" data-testid="captain-openrouter-model" type="text" autocomplete="off" spellcheck="false" style="width:100%; padding:8px;" placeholder="openrouter/auto" />
-            </div>
-          </div>
-          <div id="captain-key-form-note" data-testid="captain-key-form-note" style="font-size:0.78em; color:var(--muted); margin-top:6px;"></div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-            <button id="captain-save-key" data-testid="captain-save-key" class="btn primary" type="button">Save Key</button>
-            <button id="captain-cancel-key" data-testid="captain-cancel-key" class="btn" type="button">Cancel</button>
-          </div>
-        </div>
-      </div>
-      <div id="captain-plan-status" data-testid="captain-plan-status" style="font-size:0.85em; margin-bottom:10px;"></div>
-      <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:10px;">
-        <div style="grid-column:1 / -1;">
-          <label for="captain-goal" style="display:block; font-size:0.85em; margin-bottom:4px;">Goal</label>
-          <textarea id="captain-goal" data-testid="captain-goal" placeholder="Describe what you want built or changed..." style="width:100%; min-height:118px; padding:8px;"></textarea>
-        </div>
-        <div>
-          <label for="captain-repo-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Repo</label>
-          <select id="captain-repo-select" data-testid="captain-repo-select" style="width:100%; padding:6px;"></select>
-        </div>
-        <div>
-          <label for="captain-agent-select" style="display:block; font-size:0.85em; margin-bottom:4px;">Agent</label>
-          <select id="captain-agent-select" data-testid="captain-agent-select" style="width:100%; padding:6px;"></select>
-          <div id="captain-agent-note" data-testid="captain-agent-note" style="display:none; font-size:0.78em; color:var(--warn, #f0c66a); margin-top:4px;"></div>
-        </div>
-      </div>
-      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-        <button id="captain-create-plan" data-testid="captain-create-plan" class="btn primary" type="button">Create Plan</button>
-        <button id="captain-deploy-first" data-testid="captain-deploy-first" class="btn good" type="button">Deploy Current Step</button>
-        <button id="captain-copy-plan" data-testid="captain-copy-plan" class="btn" type="button">Copy Plan</button>
+  <!-- Captain Deck Modal — styles in captain-deck.css; app.js drives visibility via style.display -->
+  <div id="captain-deck-modal" data-testid="captain-deck-modal" class="captain-overlay" style="display:none;">
+    <div class="captain-panel">
+      <div class="captain-header">
+        <h3>Captain Deck</h3>
         <button id="captain-close" data-testid="captain-close" class="btn" type="button">Close</button>
       </div>
-      <div id="captain-deploy-note" data-testid="captain-deploy-note" style="display:none; color:var(--bad); font-size:0.85em; margin-top:6px;"></div>
-      <div style="font-size:0.72em; color:var(--muted); margin-top:8px;">Captain creates a bounded plan. Deploy one prompt at a time through the existing Codex runner.</div>
-      <div id="captain-plan-body" data-testid="captain-plan-body" style="margin-top:12px;"></div>
+      <div class="captain-body">
+        <div id="captain-config-note" data-testid="captain-config-note" class="captain-note"></div>
+
+        <div id="captain-settings" data-testid="captain-settings" class="captain-card captain-settings">
+          <div class="captain-card-row">
+            <div>
+              <div class="captain-card-title">Captain Settings</div>
+              <div id="captain-settings-status" data-testid="captain-settings-status" class="captain-card-sub"></div>
+            </div>
+            <div class="captain-card-actions">
+              <button id="captain-set-key" data-testid="captain-set-key" class="btn" type="button">Set OpenRouter Key</button>
+              <button id="captain-remove-key" data-testid="captain-remove-key" class="btn bad" type="button" style="display:none;">Remove Key</button>
+            </div>
+          </div>
+          <div id="captain-settings-note" data-testid="captain-settings-note" class="captain-fine-print"></div>
+          <div id="captain-key-form" data-testid="captain-key-form" class="captain-key-form" style="display:none;">
+            <div class="captain-field-grid">
+              <div class="captain-field">
+                <label for="captain-openrouter-key">OpenRouter API Key</label>
+                <input id="captain-openrouter-key" data-testid="captain-openrouter-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-..." />
+              </div>
+              <div class="captain-field">
+                <label for="captain-openrouter-model">Model</label>
+                <input id="captain-openrouter-model" data-testid="captain-openrouter-model" type="text" autocomplete="off" spellcheck="false" placeholder="openrouter/auto" />
+              </div>
+            </div>
+            <div id="captain-key-form-note" data-testid="captain-key-form-note" class="captain-fine-print"></div>
+            <div class="captain-card-actions" style="margin-top:10px;">
+              <button id="captain-save-key" data-testid="captain-save-key" class="btn primary" type="button">Save Key</button>
+              <button id="captain-cancel-key" data-testid="captain-cancel-key" class="btn" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="captain-plan-status" data-testid="captain-plan-status" class="captain-plan-status"></div>
+
+        <div class="captain-form-grid">
+          <div class="captain-field captain-field-goal">
+            <label for="captain-goal">Goal</label>
+            <textarea id="captain-goal" data-testid="captain-goal" placeholder="Describe what you want built or changed..."></textarea>
+          </div>
+          <div class="captain-field">
+            <label for="captain-repo-select">Repo</label>
+            <select id="captain-repo-select" data-testid="captain-repo-select"></select>
+          </div>
+          <div class="captain-field">
+            <label for="captain-agent-select">Agent</label>
+            <select id="captain-agent-select" data-testid="captain-agent-select"></select>
+            <div id="captain-agent-note" data-testid="captain-agent-note" class="captain-note captain-fine-print" style="display:none;"></div>
+          </div>
+        </div>
+
+        <div class="captain-actions">
+          <button id="captain-create-plan" data-testid="captain-create-plan" class="btn primary" type="button">Create Plan</button>
+          <button id="captain-deploy-first" data-testid="captain-deploy-first" class="btn good" type="button">Deploy Current Step</button>
+          <button id="captain-copy-plan" data-testid="captain-copy-plan" class="btn" type="button">Copy Plan</button>
+        </div>
+        <div id="captain-deploy-note" data-testid="captain-deploy-note" class="captain-error" style="display:none;"></div>
+        <div class="captain-fine-print">Captain creates a bounded plan. Deploy one prompt at a time through the existing Codex runner.</div>
+        <div id="captain-plan-body" data-testid="captain-plan-body" class="captain-plan-body"></div>
+      </div>
     </div>
   </div>
 

@@ -845,7 +845,6 @@
       keyFormEl.style.display = deck.keyFormVisible ? "block" : "none";
     }
     if (setKeyBtn) {
-      setKeyBtn.style.display = deck.privateKeySetupEnabled ? "inline-flex" : "inline-flex";
       setKeyBtn.disabled = !deck.privateKeySetupEnabled || deck.keySource === "env" || deck.keySaving;
       setKeyBtn.textContent = deck.keySource === "env" ? "OpenRouter Key in Environment" : "Set OpenRouter Key";
     }
