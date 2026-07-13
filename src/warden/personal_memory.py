@@ -1,4 +1,4 @@
-"""PiecesOS-style personal memory — who Matt is and what he's working on right now."""
+"""PiecesOS-style personal memory — who the operator is and what they're working on."""
 from __future__ import annotations
 
 import json
@@ -10,45 +10,41 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 PROFILE_PATH = MCTABLE_ROOT / "personal_profile.json"
 
-_DEFAULT_PROFILE: dict[str, Any] = {
-    "name": "Matt McBride",
-    "email": "matthewjmcbridejr@gmail.com",
-    "bio": (
-        "Software engineer and builder running a local-first agent OS on a personal server. "
-        "Primary focus: Warden (supervised agent control room), Grademy (education platform), "
-        "and Marius (personal AI assistant). Values: safety-first, proof-gated execution, "
-        "local-first architecture, no arbitrary shell execution by agents."
-    ),
-    "active_projects": [
-        "Warden",
-        "Grademy",
-        "Marius",
-        "Hermes",
-        "hybrid-agent-os",
-    ],
-    "current_priorities": [
-        "Build Warden Agent OS v0.1 — Brain MCP + semantic memory",
-        "Any agent should be able to recall Matt's full context via MCP",
-        "Auto-ingest Obsidian vault and repos into Warden memory",
-    ],
-    "preferences": {
-        "code_style": "Python, TypeScript; no magic; proof-oriented",
-        "agent_trust": "agents read freely, writes gate through Warden proof gate",
-        "infra": "local-first, server at home, Google Drive + rclone, Obsidian vault",
-        "ai_models": "Claude Sonnet (default), Gemini for large context, Ollama for local",
-    },
-    "server_context": {
-        "hostname": "linux server",
-        "warden_port": 8125,
-        "public_warden_port": 8124,
-        "obsidian_vault": "~/Documents or ~/Obsidian",
-        "repos_root": "/home/matt/workspaces",
-    },
-    "last_updated": datetime.now(timezone.utc).isoformat(),
-}
+# Seeded only when no profile exists yet (seed_if_missing) — existing installs
+# keep their saved profile untouched. Deliberately generic: the name falls back
+# to the OS username so a fresh install never introduces itself as someone else;
+# the owner personalizes via warden_update_me or the UI.
+def _default_profile() -> dict[str, Any]:
+    import getpass
+
+    try:
+        username = getpass.getuser()
+    except Exception:
+        username = "operator"
+    return {
+        "name": username,
+        "email": "",
+        "bio": (
+            "Warden operator. Update this profile (warden_update_me or the UI) so "
+            "agents get real context: who you are, what you're building, how you work."
+        ),
+        "active_projects": [],
+        "current_priorities": [],
+        "preferences": {
+            "agent_trust": "agents read freely, writes gate through Warden proof gate",
+        },
+        "server_context": {
+            "repos_root": str(Path.home() / "workspaces"),
+        },
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+_DEFAULT_PROFILE: dict[str, Any] = _default_profile()
 
 
 def load_profile() -> dict[str, Any]:

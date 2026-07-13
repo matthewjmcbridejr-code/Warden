@@ -17,7 +17,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 CANONICAL_REPO = Path(
-    os.getenv("WARDEN_CANONICAL_REPO", "/home/matt/workspaces/warden/mcharness-public-export")
+    os.getenv("WARDEN_CANONICAL_REPO", str(Path(__file__).resolve().parents[2]))
 ).expanduser()
 
 WARDEN_API_BASE = os.getenv("WARDEN_API_BASE", "http://127.0.0.1:6969/api/mcharness")

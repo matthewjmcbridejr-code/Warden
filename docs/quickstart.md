@@ -29,7 +29,7 @@ bash scripts/warden-up
 Canonical UI (Command Center):
 
 ```
-http://127.0.0.1:6969/web/warden/app.html
+http://127.0.0.1:4242
 ```
 
 Left nav: **Command Center · Agents · Tasks · Proof · Runner Sessions · Runs · Memories · Brain · Mail · Model Gateway · Settings**

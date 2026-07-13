@@ -30,14 +30,15 @@ def test_warden_up_script_exists_and_is_executable():
     assert script.exists()
     assert os.access(script, os.X_OK)
     body = script.read_text()
-    assert "app.html" in body and "6969" in body
+    assert "uvicorn src.warden.app:app" in body and "WARDEN_PORT" in body
 
 
 def test_docs_point_to_canonical_ui():
     for doc in (ROOT / "README.md", ROOT / "docs" / "quickstart.md"):
         text = doc.read_text()
-        assert "web/warden/app.html" in text, doc.name
-        assert "warden-up" in text, doc.name
+        # The canonical entry is now the root URL served by `warden up`;
+        # docs must mention the CLI rather than a deep app.html path.
+        assert "warden up" in text or "warden-up" in text, doc.name
 
 
 def test_runner_sessions_endpoint_serves_the_new_panel():

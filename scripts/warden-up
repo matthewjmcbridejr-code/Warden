@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORT="${WARDEN_PORT:-6969}"
+PORT="${WARDEN_PORT:-4242}"
 HOST="${WARDEN_HOST:-127.0.0.1}"
 
 cd "$ROOT"

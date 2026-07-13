@@ -28,7 +28,8 @@ from .workbench import (
     WorkbenchRunProofGateCreateRequest,
 )
 
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 CAPTAIN_ROOT = MCTABLE_ROOT / "captain"
 RUNS_DIR = CAPTAIN_ROOT / "runs"
 FILE_LOCK = threading.Lock()

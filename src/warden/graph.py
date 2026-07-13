@@ -26,7 +26,8 @@ except Exception:  # pragma: no cover - exercised only when dependency is missin
 
 logger = logging.getLogger(__name__)
 
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 TASKS_DIR = MCTABLE_ROOT / "tasks"
 CHECKPOINTS_DIR = MCTABLE_ROOT / "checkpoints"
 CHECKPOINT_DB_PATH = CHECKPOINTS_DIR / "warden.sqlite"

@@ -4,7 +4,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 
-MCHARNESS_DATA_ROOT = os.getenv("MCHARNESS_DATA_ROOT", "_mctable")
+from src.warden.paths import data_root as _warden_data_root
+MCHARNESS_DATA_ROOT = str(_warden_data_root())
 MARIUS_DATA_ROOT = os.getenv("MARIUS_DATA_ROOT", MCHARNESS_DATA_ROOT)
 MEMORY_ROOT = Path(MARIUS_DATA_ROOT) / "marius" / "memory"
 

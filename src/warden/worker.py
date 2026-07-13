@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Iterator, List, Dict
 from .contracts import WorkerRun, WorkerResult
 
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 RUNS_DIR = MCTABLE_ROOT / "worker_runs"
 
 # Allowlist definition

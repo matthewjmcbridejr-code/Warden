@@ -40,11 +40,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "poll_interval_seconds": 10,
     "default_timeout_seconds": 1800,
     "log_dir": str(LOG_DIR),
+    # Default allowlist: this repo and the operator's ~/workspaces tree.
+    # Extend via the dispatcher config file, not by editing this default.
     "allowed_repo_roots": [
-        "/home/matt/Documents/Warden",
-        "/home/matt/workspaces/warden",
-        "/home/matt/workspaces/marius-core",
-        "/home/matt/workspaces/grademy",
+        str(Path(__file__).resolve().parents[2]),
+        str(Path.home() / "workspaces"),
     ],
     "agents": {
         "cl": {

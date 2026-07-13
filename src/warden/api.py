@@ -165,7 +165,8 @@ def _effective_repo_path(path: Path) -> Path:
     return path if path.exists() else _CANONICAL_REPO_ROOT
 
 
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 ARTIFACT_BODY_ROOT = MCTABLE_ROOT / "mcharness" / "artifacts"
 CAPTAIN_PLAN_ROOT = MCTABLE_ROOT / "captain" / "plans"
 REPO_ROOT = Path(__file__).resolve().parents[2]

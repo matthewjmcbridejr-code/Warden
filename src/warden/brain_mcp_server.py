@@ -25,12 +25,13 @@ from src.warden.personal_memory import get_workstream, load_profile, update_prof
 log = logging.getLogger(__name__)
 
 WARDEN_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:8125")
-MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
+from src.warden.paths import data_root as _warden_data_root
+MCTABLE_ROOT = _warden_data_root()
 BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
 SESSION_ID = str(uuid.uuid4())[:8]
 
 # Server-status tools: read-only, no arbitrary shell exec.
-WORKSPACES_ROOT = Path(os.getenv("WARDEN_WORKSPACES_ROOT", "/home/matt/workspaces"))
+WORKSPACES_ROOT = Path(os.getenv("WARDEN_WORKSPACES_ROOT", str(Path.home() / "workspaces")))
 DEFAULT_SERVICE_ALLOWLIST = [
     "mcharness-cockpit",
     "mcharness-cockpit-private",
@@ -174,7 +175,6 @@ def warden_health() -> str:
             p for p in [
                 Path.home() / "Documents",
                 Path.home() / "Obsidian",
-                Path("/home/matt/Documents"),
             ]
             if p.exists()
         ]
@@ -297,7 +297,7 @@ def warden_repo_catalog(root: str = "") -> str:
 
     Args:
         root: Optional override of the workspaces root to scan (must exist).
-            Defaults to WARDEN_WORKSPACES_ROOT / /home/matt/workspaces.
+            Defaults to WARDEN_WORKSPACES_ROOT (~/workspaces).
     """
     try:
         base = Path(root).expanduser() if root else WORKSPACES_ROOT

@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
-CANONICAL_FACTS = """
+from pathlib import Path as _Path
+
+CANONICAL_FACTS = f"""
 ## Identity
 - You are Marius, Matt’s local terminal resident assistant on McServer.
 - Marius runs through the Warden/McHarness repo.
@@ -29,7 +31,7 @@ CANONICAL_FACTS = """
 
 ## Project: McHarness
 - McHarness is the Warden codebase/control-plane lineage.
-- Current repo is /home/matt/workspaces/warden/mcharness-public-export.
+- Current repo is {_Path(__file__).resolve().parents[2]}.
 
 ## Project: MCTable
 - MCTable is related to the earlier Warden/McHarness public/demo/control-table surface.

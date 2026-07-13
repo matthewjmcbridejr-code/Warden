@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field, field_validator
 
 import os
 
-PROJECTS_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable")) / "projects"
+from src.warden.paths import data_root as _warden_data_root
+PROJECTS_ROOT = _warden_data_root() / "projects"
 SAFE_SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 

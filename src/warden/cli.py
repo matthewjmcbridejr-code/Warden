@@ -19,7 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_HOST = os.getenv("WARDEN_HOST", "127.0.0.1")
-DEFAULT_PORT = int(os.getenv("WARDEN_PORT", "6969"))
+DEFAULT_PORT = int(os.getenv("WARDEN_PORT", "4242"))
 
 
 def _ensure_src_on_path() -> None:

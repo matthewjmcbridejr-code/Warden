@@ -49,9 +49,10 @@ Full details: [docs/architecture.md](docs/architecture.md)
 ## Quick start
 
 ```bash
+git clone https://github.com/matthewjmcbridejr-code/Warden.git && cd Warden
 pip install -e .
 warden up
-# Opens http://127.0.0.1:6969 in your browser
+# Opens http://127.0.0.1:4242 in your browser
 ```
 
 (`bash scripts/warden-up` does the same thing and creates the virtualenv for you.)

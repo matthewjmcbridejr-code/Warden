@@ -14,15 +14,15 @@ def test_warden_app_static_asset_exists():
 def test_warden_app_contains_branding_copy():
     content = WARDEN_APP.read_text(encoding="utf-8")
     assert "Warden" in content
-    assert "by Marius Systems" in content
-    assert "Powered by McHarness" in content
+    assert "local-first agent ops" in content
+    assert "Warden engine" in content
 
 
 def test_warden_app_has_control_room_sections():
     content = WARDEN_APP.read_text(encoding="utf-8")
     required_snippets = [
         "Warden",
-        "by Marius Systems",
+        "local-first agent ops",
         "Supervise missions, runs, and proof gates.",
         "Control Room",
         "Agents",

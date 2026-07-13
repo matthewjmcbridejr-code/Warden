@@ -40,7 +40,7 @@ log = logging.getLogger("warden.memory_watcher")
 # ---------------------------------------------------------------------------
 
 CANONICAL_REPO = Path(
-    os.getenv("WARDEN_CANONICAL_REPO", "/home/matt/workspaces/warden/mcharness-public-export")
+    os.getenv("WARDEN_CANONICAL_REPO", str(Path(__file__).resolve().parents[2]))
 )
 WATCHED_PATHS: List[Path] = [
     CANONICAL_REPO / "src" / "warden",

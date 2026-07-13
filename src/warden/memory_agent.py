@@ -16,7 +16,7 @@ from typing import Any
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 CHAT_MODEL = os.getenv("WARDEN_MEMORY_CHAT_MODEL", "marius-fast:latest")
 CANONICAL_REPO = Path(
-    os.getenv("WARDEN_CANONICAL_REPO", "/home/matt/workspaces/warden/mcharness-public-export")
+    os.getenv("WARDEN_CANONICAL_REPO", str(Path(__file__).resolve().parents[2]))
 ).expanduser()
 
 SYSTEM_PROMPT = """\
