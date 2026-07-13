@@ -1,0 +1,260 @@
+/* ============================================================================
+   Warden — "Obsidian" design system
+   A token-level reskin loaded after app.css. Overrides the design tokens and
+   re-polishes core components (nav, panels, buttons, inputs) without touching
+   any DOM structure, IDs, or JS render targets.
+
+   Techniques used:
+   - OKLCH color space + color-mix() for a perceptually even palette
+   - Fluid typography via clamp()
+   - Glass surfaces with backdrop-filter and hairline borders
+   - :has() and :focus-visible interaction states
+   - Scroll-driven entrance animation with @supports + reduced-motion fallback
+   - Custom scrollbars, selection color, tuned font rendering
+   ========================================================================== */
+
+:root {
+  /* Palette — near-black graphite with one electric accent ramp */
+  --ink-0: oklch(0.13 0.012 260);            /* page background        */
+  --ink-1: oklch(0.16 0.014 260);            /* raised background      */
+  --ink-2: oklch(0.19 0.016 262);            /* panel                  */
+  --ink-3: oklch(0.23 0.02 262);             /* elevated panel         */
+  --accent-h: 265;
+  --accent-core: oklch(0.72 0.19 var(--accent-h));
+  --accent-soft: oklch(0.72 0.19 var(--accent-h) / 0.14);
+  --accent-cyan: oklch(0.82 0.14 195);
+
+  /* Remap the app's existing tokens onto the new ramp */
+  --bg: var(--ink-0);
+  --bg-2: var(--ink-1);
+  --panel: var(--ink-2);
+  --panel-2: var(--ink-3);
+  --panel-elevated: oklch(0.26 0.022 262);
+  --surface-alt: oklch(0.28 0.024 262);
+  --line: oklch(0.32 0.02 262 / 0.7);
+  --line-glow: oklch(0.72 0.19 var(--accent-h) / 0.25);
+  --text: oklch(0.96 0.005 260);
+  --text-secondary: oklch(0.82 0.015 260);
+  --muted: oklch(0.65 0.02 260);
+  --accent: var(--accent-core);
+  --accent-teal: var(--accent-cyan);
+  --accent-purple: oklch(0.74 0.16 300);
+  --good: oklch(0.78 0.16 155);
+  --warn: oklch(0.82 0.14 85);
+  --bad: oklch(0.7 0.19 15);
+  --radius: 14px;
+
+  /* Fluid type scale */
+  --fs-0: clamp(0.78rem, 0.74rem + 0.2vw, 0.86rem);
+  --fs-1: clamp(0.9rem, 0.85rem + 0.25vw, 1rem);
+  --fs-2: clamp(1.05rem, 0.95rem + 0.5vw, 1.25rem);
+  --fs-3: clamp(1.35rem, 1.15rem + 1vw, 1.9rem);
+
+  --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 32px oklch(0 0 0 / 0.35);
+  --ring: 0 0 0 2px var(--ink-0), 0 0 0 4px var(--accent-core);
+}
+
+/* ---- Base ---------------------------------------------------------------- */
+
+body {
+  background:
+    radial-gradient(1000px 500px at 80% -10%, var(--accent-soft), transparent 60%),
+    radial-gradient(800px 600px at -10% 30%, oklch(0.82 0.14 195 / 0.06), transparent 55%),
+    var(--ink-0);
+  background-attachment: fixed;
+  font-size: var(--fs-1);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklch, var(--accent-core) 35%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted) 40%, transparent) transparent;
+}
+
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted) 35%, transparent);
+  border-radius: 99px;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1, h2, h3 { letter-spacing: -0.015em; }
+
+/* ---- Panels: glass surfaces ---------------------------------------------- */
+
+.workspace-section, .cc-card, .inspector-card, .settings-card,
+.captain-panel, .captain-card {
+  background: color-mix(in oklch, var(--ink-2) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid oklch(1 0 0 / 0.07);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Hairline top highlight — the "machined edge" */
+.workspace-section, .cc-card, .captain-panel {
+  position: relative;
+}
+.workspace-section::before, .cc-card::before, .captain-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.16) 30%, oklch(1 0 0 / 0.16) 70%, transparent);
+  border-radius: var(--radius) var(--radius) 0 0;
+  pointer-events: none;
+}
+
+/* ---- Navigation ----------------------------------------------------------- */
+
+.nav-item {
+  border-radius: 10px;
+  transition: background 140ms ease, color 140ms ease, translate 140ms ease;
+}
+
+.nav-item:hover {
+  background: oklch(1 0 0 / 0.05);
+  translate: 2px 0;
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent-core);
+}
+
+.sidebar-group-label {
+  font-size: 0.68em;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+/* ---- Buttons ---------------------------------------------------------------
+   Layered: flat by default, lift + glow on hover, pressed state, visible focus. */
+
+.btn {
+  border-radius: 10px;
+  border: 1px solid oklch(1 0 0 / 0.1);
+  background: oklch(1 0 0 / 0.04);
+  transition: background 140ms ease, border-color 140ms ease, translate 100ms ease, box-shadow 140ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: oklch(1 0 0 / 0.08);
+  border-color: oklch(1 0 0 / 0.18);
+  translate: 0 -1px;
+}
+
+.btn:active:not(:disabled) { translate: 0 0; }
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent-core), oklch(0.62 0.2 calc(var(--accent-h) + 20)));
+  border-color: transparent;
+  color: oklch(0.13 0.02 260);
+  font-weight: 600;
+}
+
+.btn.primary:hover:not(:disabled) {
+  box-shadow: 0 4px 24px color-mix(in oklch, var(--accent-core) 45%, transparent);
+}
+
+.btn.good { border-color: color-mix(in oklch, var(--good) 45%, transparent); }
+.btn.bad  { border-color: color-mix(in oklch, var(--bad) 45%, transparent); }
+
+.btn:disabled { opacity: 0.45; }
+
+/* ---- Inputs ----------------------------------------------------------------- */
+
+input, select, textarea {
+  border-radius: 10px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent-core);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Search field grows a halo when it has content (:has on the form) */
+.sidebar-search-form:has(input:not(:placeholder-shown)) {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  border-radius: 10px;
+}
+
+/* ---- Entrance animation ------------------------------------------------------
+   Panels fade-rise on load; on browsers with scroll-driven animations they
+   animate as they enter the viewport instead. Fully disabled for users who
+   prefer reduced motion. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-section, .cc-card, .inspector-card {
+    animation: warden-rise 460ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  @supports (animation-timeline: view()) {
+    .workspace-section, .cc-card, .inspector-card {
+      animation: warden-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 40%;
+    }
+  }
+}
+
+@keyframes warden-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Status dots: breathing signal ------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .nav-item-dot-good {
+    animation: warden-breathe 2.6s ease-in-out infinite;
+  }
+}
+
+@keyframes warden-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--good) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 5px transparent; }
+}
+
+/* ---- Responsive: collapse fixed two-column workspace grids on small screens --- */
+
+@media (max-width: 860px) {
+  .workspace-top-grid,
+  .memory-work-grid,
+  .mission-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .warden-workspace {
+    min-width: 0;
+  }
+}
+
+/* ---- Captain deck inherits the system ---------------------------------------- */
+
+.captain-overlay {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.captain-header h3 {
+  font-size: var(--fs-2);
+  background: linear-gradient(90deg, var(--text), color-mix(in oklch, var(--accent-core) 60%, var(--text)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
