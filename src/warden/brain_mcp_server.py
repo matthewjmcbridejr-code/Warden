@@ -19,7 +19,7 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 from src.marius.tools import get_git_status, get_service_status
-from src.warden import brain_embed, brain_vector_store, personal_memory
+from src.warden import brain_embed, brain_vector_store, mcp_hub, personal_memory
 from src.warden.personal_memory import get_workstream, load_profile, update_profile, seed_if_missing
 
 log = logging.getLogger(__name__)
@@ -193,6 +193,28 @@ def warden_health() -> str:
         })
     except Exception as exc:
         return _err("warden_health", str(exc))
+
+
+@mcp.tool()
+def warden_mcp_hub_status() -> str:
+    """Report the MCP Hub's status: whether the McTable gateway was reachable
+    at boot, how many of its tools got proxied into Warden, and any
+    name collisions that were skipped. Useful over stdio transport where the
+    /health HTTP endpoint isn't reachable."""
+    try:
+        hs = mcp_hub.hub_status()
+        return _ok("warden_mcp_hub_status", {
+            "enabled": hs.enabled,
+            "reachable_at_boot": hs.reachable_at_boot,
+            "last_discovery_at": hs.last_discovery_at,
+            "last_error": hs.last_error,
+            "hub_tool_count": hs.hub_tool_count,
+            "native_tool_count": hs.native_tool_count,
+            "hub_tool_names": hs.hub_tool_names,
+            "skipped_collisions": hs.skipped_collisions,
+        })
+    except Exception as exc:
+        return _err("warden_mcp_hub_status", str(exc))
 
 
 def _read_meminfo() -> dict[str, Any]:
@@ -1966,6 +1988,12 @@ def main():
     seed_if_missing()
     logging.basicConfig(level=logging.WARNING)
 
+    hub_status = mcp_hub.bootstrap_hub(mcp)
+    log.warning(
+        "mcp_hub: reachable_at_boot=%s hub_tools=%d native_tools=%d",
+        hub_status.reachable_at_boot, hub_status.hub_tool_count, hub_status.native_tool_count,
+    )
+
     if args.http:
         token = os.getenv("WARDEN_BRAIN_TOKEN", "")
         from .mcp_tokens import list_clients
@@ -2006,7 +2034,23 @@ def main():
 
                 # Health check — no auth
                 if path == "/health":
-                    body = json.dumps({"ok": True, "server": "warden-brain", "tools": 46}).encode()
+                    hs = mcp_hub.hub_status()
+                    total = len(mcp._tool_manager._tools)
+                    body = json.dumps({
+                        "ok": True,
+                        "server": "warden-brain",
+                        "tools": {
+                            "warden": hs.native_tool_count,
+                            "hub": hs.hub_tool_count,
+                            "total": total,
+                        },
+                        "hub": {
+                            "enabled": hs.enabled,
+                            "reachable_at_boot": hs.reachable_at_boot,
+                            "last_discovery_at": hs.last_discovery_at,
+                            "last_error": hs.last_error,
+                        },
+                    }).encode()
                     await send({"type": "http.response.start", "status": 200,
                                 "headers": [[b"content-type", b"application/json"],
                                             [b"content-length", str(len(body)).encode()]]})
