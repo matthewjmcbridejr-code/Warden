@@ -1463,8 +1463,12 @@ def warden_memory_context(query: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def warden_captain_plan(goal: str, repo_id: str = "mcharness-public-export", lane_id: str = "codex_cli") -> str:
+async def warden_captain_plan(goal: str, repo_id: str = "mcharness-public-export", lane_id: str = "codex_cli") -> str:
     """Create a Captain plan: break a goal into 3–5 bounded, executable steps.
+
+    Uses the same real planner as the web UI (OpenRouter key if configured,
+    else the local Marius gateway, else a deterministic local preview) — the
+    response's `source` field says which one produced the plan.
 
     Args:
         goal: What you want to accomplish.
@@ -1472,19 +1476,23 @@ def warden_captain_plan(goal: str, repo_id: str = "mcharness-public-export", lan
         lane_id: Agent lane to use (default: codex_cli).
     """
     try:
-        from src.warden.captain_plans import persist_plan
-        from src.warden.api import _local_preview_plan
+        import asyncio as _asyncio
+        from src.warden.api import McHarnessCaptainPlanRequest, create_mcharness_captain_plan
 
-        plan_data = _local_preview_plan(goal=goal, repo_id=repo_id, lane_id=lane_id)
-        result = persist_plan(MCTABLE_ROOT, goal=goal, repo_id=repo_id, plan_data=plan_data)
+        payload = McHarnessCaptainPlanRequest(goal=goal, repo_id=repo_id, lane_id=lane_id)
+        # The endpoint calls asyncio.run() internally (gateway fallback), which
+        # would crash on this server's running loop — run it in a worker thread.
+        response = await _asyncio.to_thread(create_mcharness_captain_plan, payload)
+        plan = response.get("plan") or response
         return _ok("warden_captain_plan", {
-            "plan_id": result.get("plan_id"),
-            "title": result.get("title"),
+            "plan_id": plan.get("plan_id"),
+            "title": plan.get("title"),
             "steps": [
                 {"id": s.get("step_id"), "title": s.get("title"), "status": s.get("status")}
-                for s in (result.get("steps") or [])
+                for s in (plan.get("steps") or [])
             ],
-            "source": result.get("source", "local_preview"),
+            "source": response.get("source", plan.get("source", "local_preview")),
+            "notes": response.get("notes") or [],
         })
     except Exception as exc:
         return _err("warden_captain_plan", str(exc))
@@ -1517,54 +1525,39 @@ def warden_captain_recent_plans(limit: int = 5) -> str:
 
 
 @mcp.tool()
-def warden_captain_dispatch_step(plan_id: str, step_id: str) -> str:
-    """Dispatch a Captain plan step to the local runner.
+async def warden_captain_dispatch_step(plan_id: str, step_id: str) -> str:
+    """Dispatch a Captain plan step to the configured CLI runner.
 
-    If the runner is unavailable, a blocked_attempt memory is saved honestly.
-    Does NOT require runner to be configured — always returns a result.
+    Uses the same real dispatch path as the web UI: if the runner is enabled
+    (MCHARNESS_TMUX_RUNNER_ENABLED + MCHARNESS_CODEX_RUNNER_ENABLED) the step
+    actually runs and a watcher tracks it; otherwise a blocked_attempt memory
+    is saved honestly and blocked=True is returned. Fail-closed either way.
 
     Args:
         plan_id: Plan ID to dispatch.
         step_id: Step ID within the plan.
     """
     try:
-        from src.warden.captain_plans import get_plan_record, mark_step_dispatched
-        from src.warden.run_history import create_run_record
-        import uuid
+        import asyncio as _asyncio
+        from fastapi import HTTPException
+        from src.warden.api import post_mcharness_captain_plan_step_dispatch
 
-        plan = get_plan_record(MCTABLE_ROOT, plan_id)
-        if plan is None:
-            return _err("warden_captain_dispatch_step", f"Plan not found: {plan_id}")
+        try:
+            # The endpoint calls asyncio.run() internally (gateway decision
+            # note) — run in a worker thread to avoid nesting event loops.
+            response = await _asyncio.to_thread(
+                post_mcharness_captain_plan_step_dispatch, plan_id, step_id
+            )
+        except HTTPException as http_exc:
+            return _err("warden_captain_dispatch_step", f"{http_exc.status_code}: {http_exc.detail}")
 
-        step = next((s for s in (plan.get("steps") or []) if s.get("step_id") == step_id), None)
-        if step is None:
-            return _err("warden_captain_dispatch_step", f"Step not found: {step_id}")
-
-        repo_id = str(plan.get("repo_id") or "mcharness-public-export")
-        step_title = str(step.get("title") or "Captain step")
-        prompt = str(step.get("prompt") or "")
-        goal = str(plan.get("goal") or plan.get("title") or "")
-
-        # Always use blocked path from MCP — runner may not be in tmux context
-        run_id = "mcp-blocked-" + str(uuid.uuid4())[:8]
-        create_run_record(
-            MCTABLE_ROOT, run_id=run_id, title=f"[mcp-blocked] {step_title}",
-            agent_id="codex_cli", agent_adapter="codex_cli", repo_id=repo_id,
-            branch=None, prompt=prompt, status="blocked", plan_id=plan_id,
-            created_by="mcp_dispatch", service_mode="public",
-        )
-        from src.warden.api import _write_dispatch_memory
-        mem_id = _write_dispatch_memory(
-            kind="blocked_attempt", plan_id=plan_id, step_id=step_id,
-            step_title=step_title, run_id=run_id, repo_id=repo_id,
-            lane_id="codex_cli", goal=goal, reason="mcp_runner_unavailable",
-        )
         return _ok("warden_captain_dispatch_step", {
-            "ok": True,
-            "blocked": True,
-            "run_id": run_id,
-            "memory_id": mem_id,
-            "message": "Runner unavailable from MCP context — blocked attempt saved to Memory",
+            "ok": bool(response.get("ok")),
+            "blocked": bool(response.get("blocked")),
+            "run_id": response.get("run_id"),
+            "memory_id": response.get("memory_id"),
+            "watcher_id": response.get("watcher_id"),
+            "message": response.get("message") or response.get("decision_note") or "",
             "plan_id": plan_id,
             "step_id": step_id,
         })
