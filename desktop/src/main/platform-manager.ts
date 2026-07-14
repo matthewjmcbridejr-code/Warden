@@ -23,6 +23,7 @@ export class PlatformManager {
   constructor(private readonly window: BrowserWindow, private readonly store: StateStore, userData: string) { this.audit = new PlatformAuditLog(userData); }
 
   auditFile(): string { return this.audit.file; }
+  activePlatformIds(): string[] { return [...this.activeIds]; }
   private definition(id: string): WebPlatform { const platform = this.store.state.platforms.find((item) => item.id === id); if (!platform) throw new Error('Platform not found.'); if (!platform.enabled) throw new Error(`${platform.name} is disabled.`); return platform; }
   private sendStatus(id: string, patch: Partial<PlatformStatus> = {}): void { const platform = this.store.state.platforms.find((item) => item.id === id); const web = this.views.get(id)?.webContents; if (!platform) return; this.window.webContents.send('platform:status', { id, loading: web?.isLoading() || false, canGoBack: web?.navigationHistory.canGoBack() || false, canGoForward: web?.navigationHistory.canGoForward() || false, title: web?.getTitle() || platform.name, url: web?.getURL() || platform.startUrl, ...patch } satisfies PlatformStatus); }
   private sendMenuAction(action: MenuAction, platformId: string): void { if (!this.window.isDestroyed()) this.window.webContents.send('platform:menu-action', { action, platformId }); }

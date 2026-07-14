@@ -21,4 +21,11 @@ describe('quiet native browser chrome', () => {
     expect(manager).toContain("title: 'Clear this site’s data?'"); expect(manager).toContain('Chromium cookies are registrable-domain scoped'); expect(manager).toContain("title: 'Remove platform?'");
     expect(manager).toContain('callback: resolve'); expect(manager).toContain("event: 'menu.opened'"); expect(manager).not.toContain('positioningItem:');
   });
+
+  it('detaches the native provider surface before opening the add-platform dialog', () => {
+    const openDialog = renderer.match(/async function openPlatformDialog[\s\S]+?\n}/)?.[0] || '';
+    expect(openDialog).toContain('await window.wardenDesk.platform.hide()'); expect(openDialog).toContain('dialog.showModal()');
+    expect(openDialog.indexOf('platform.hide()')).toBeLessThan(openDialog.indexOf('dialog.showModal()'));
+    expect(renderer).toContain("platformDialog.addEventListener('close'"); expect(renderer).toContain('void openPlatformDialog()');
+  });
 });

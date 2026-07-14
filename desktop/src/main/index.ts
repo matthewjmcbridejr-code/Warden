@@ -217,6 +217,16 @@ function createWindow(): void {
       } catch (error) { console.error(`WARDEN_MENU_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
     });
   }
+  if (process.argv.includes('--warden-desk-platform-dialog-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2_000)); const target = store.state.platforms.find((item) => item.enabled && item.allowMainView); if (!target) throw new Error('No platform is available for the dialog smoke.'); platforms.show(target.id); await new Promise((resolve) => setTimeout(resolve, 300)); const before = platforms.activePlatformIds();
+        const renderer = await mainWindow?.webContents.executeJavaScript(`(async () => { document.querySelector('#add-platform')?.click(); await new Promise((resolve) => setTimeout(resolve, 500)); const dialog = document.querySelector('#platform-dialog'); return { open: Boolean(dialog?.open), title: document.querySelector('#platform-dialog-title')?.textContent, focused: document.activeElement?.id }; })()`);
+        const screenshot = process.env.WARDEN_DESK_SCREENSHOT_PATH || '/tmp/warden-platform-dialog.png'; const image = await mainWindow?.capturePage(); if (image) writeFileSync(screenshot, image.toPNG());
+        console.log(`WARDEN_PLATFORM_DIALOG_SMOKE result=${JSON.stringify({ before, after: platforms.activePlatformIds(), renderer, screenshot })}`);
+      } catch (error) { console.error(`WARDEN_PLATFORM_DIALOG_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
+    });
+  }
   mainWindow.on('close', (event) => { if (!isQuitting && !process.argv.some((argument) => argument.startsWith('--warden-desk-'))) { event.preventDefault(); mainWindow?.hide(); return; } if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); platforms.shutdown(); terminals.shutdown(); runs.shutdown(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
