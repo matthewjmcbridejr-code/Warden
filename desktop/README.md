@@ -21,6 +21,7 @@ npm run dev
 ```bash
 npm run check
 npm run package:linux
+npm run package:deb
 ```
 
 `package:linux` creates unpacked Linux artifacts under `desktop/dist-electron/`; it does not publish or release them.
@@ -41,4 +42,6 @@ Local Terminal uses `node-pty` and xterm.js. It supports multiple named sessions
 
 Non-secret desktop state is atomically written under Electron's per-user application-data directory. On restart, terminal names/directories/history are restored as **stopped** metadata; Warden never claims the PTY process survived.
 
-Codex, Claude, Gemini, and Grok Build are visible as structured adapters but intentionally disconnected. See [architecture.md](architecture.md) for the integration seam and legacy classification.
+Codex is connected through the installed Codex App Server. A run has a durable Warden record, normalized streamed events, approval requests, repository context, git/test evidence, local proof, and a compact cross-provider handoff. Interrupted runs retain the Codex thread ID and can be resumed after restarting the application.
+
+Claude, Gemini, and Grok Build remain visible and honestly disconnected until their provider-native adapters are implemented. See [architecture.md](architecture.md) for the integration seam and legacy classification.

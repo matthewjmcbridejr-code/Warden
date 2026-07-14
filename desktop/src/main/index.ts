@@ -1,14 +1,17 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell, WebContentsView } from 'electron';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import type { ProviderId, ProviderStatus } from '../shared/types';
 import { providerIds } from '../shared/types';
 import { isAllowedProviderUrl, PROVIDERS } from './providers';
 import { StateStore } from './state-store';
 import { TerminalManager } from './terminal-manager';
+import { RunManager } from './run-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let store: StateStore;
 let terminals: TerminalManager;
+let runs: RunManager;
 let activeView: WebContentsView | null = null;
 let activeProvider: ProviderId | null = null;
 const views = new Map<ProviderId, WebContentsView>();
@@ -64,11 +67,21 @@ function registerIpc(): void {
   ipcMain.handle('terminal:kill', (_event, id) => terminals.kill(id));
   ipcMain.handle('terminal:record-command', (_event, id, command) => terminals.recordCommand(id, command));
   ipcMain.handle('terminal:clear-history', (_event, id) => terminals.clearHistory(id));
+  ipcMain.handle('runs:list', () => runs.list());
+  ipcMain.handle('runs:get', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.get(id); });
+  ipcMain.handle('runs:preview-context', (_event, cwd: unknown) => { if (typeof cwd !== 'string') throw new Error('Invalid project directory.'); return runs.previewContext(cwd); });
+  ipcMain.handle('runs:start', async (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid run request.'); const value = input as Record<string, unknown>; if (typeof value.prompt !== 'string' || typeof value.cwd !== 'string' || typeof value.attachContext !== 'boolean' || (value.model !== undefined && typeof value.model !== 'string')) throw new Error('Invalid run request.'); const run = await runs.start({ prompt: value.prompt, cwd: value.cwd, attachContext: value.attachContext, model: value.model as string | undefined }); store.patch({ recentProjects: [run.cwd, ...store.state.recentProjects.filter((item) => item !== run.cwd)].slice(0, 10) }); return run; });
+  ipcMain.handle('runs:resume', (_event, id: unknown, prompt: unknown) => { if (typeof id !== 'string' || typeof prompt !== 'string') throw new Error('Invalid resume request.'); return runs.resume(id, prompt); });
+  ipcMain.handle('runs:cancel', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.cancel(id); });
+  ipcMain.handle('runs:approve', (_event, runId: unknown, approvalId: unknown, decision: unknown, scope: unknown) => { if (typeof runId !== 'string' || typeof approvalId !== 'string' || !['approve', 'deny'].includes(String(decision)) || (scope !== undefined && !['once', 'session'].includes(String(scope)))) throw new Error('Invalid approval response.'); return runs.approve(runId, approvalId, decision as 'approve' | 'deny', scope as 'once' | 'session' | undefined); });
+  ipcMain.handle('runs:handoff', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.handoff(id); });
+  ipcMain.handle('runs:save-proof', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.saveProof(id); });
 }
 function createWindow(): void {
   const bounds = store.state.windowBounds;
   mainWindow = new BrowserWindow({ ...bounds, minWidth: 1024, minHeight: 700, backgroundColor: '#0d100e', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   terminals = new TerminalManager(mainWindow, store);
+  runs = new RunManager(app.getPath('userData'), mainWindow);
   void mainWindow.loadFile(join(__dirname, 'index.html'));
   if (process.argv.includes('--warden-desk-smoke')) {
     mainWindow.webContents.once('did-finish-load', () => {
@@ -78,7 +91,70 @@ function createWindow(): void {
       setTimeout(() => { terminals.kill(terminal.id); console.log('WARDEN_DESK_SMOKE complete'); app.quit(); }, 800);
     });
   }
-  mainWindow.on('close', () => { if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); terminals.shutdown(); });
+  if (process.argv.includes('--warden-desk-codex-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
+      try {
+        console.log('WARDEN_CODEX_SMOKE starting');
+        const run = await runs.start({ prompt: 'Read the repository README or AGENTS.md, run a harmless printf command that prints WARDEN_CODEX_STRUCTURED_OK, make no file changes, and report what you verified.', cwd, attachContext: true });
+        const deadline = Date.now() + 120_000;
+        const poll = setInterval(() => {
+          const current = runs.get(run.id);
+          console.log(`WARDEN_CODEX_SMOKE status=${current.status} events=${current.events.length}`);
+          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) {
+            clearInterval(poll);
+            console.log(`WARDEN_CODEX_SMOKE result=${JSON.stringify({ id: current.id, status: current.status, threadId: current.threadId, events: current.events.length, commands: current.events.filter((event) => event.type === 'command.completed').length, finalMessage: current.evidence.finalMessage, error: current.error })}`);
+            app.quit();
+          }
+        }, 1000);
+      } catch (error) { console.error(`WARDEN_CODEX_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-codex-resume-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const previous = runs.list()[0]; if (!previous?.threadId) throw new Error('No persisted Codex run is available to resume.');
+        console.log(`WARDEN_RESUME_SMOKE previous=${previous.id} thread=${previous.threadId}`);
+        const resumed = await runs.resume(previous.id, 'Confirm that this is the same preserved thread, make no file changes, and reply with WARDEN_CODEX_RESUME_OK.');
+        const deadline = Date.now() + 120_000;
+        const poll = setInterval(() => {
+          const current = runs.get(resumed.id); console.log(`WARDEN_RESUME_SMOKE status=${current.status} events=${current.events.length}`);
+          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) { clearInterval(poll); console.log(`WARDEN_RESUME_SMOKE result=${JSON.stringify({ id: current.id, status: current.status, threadId: current.threadId, finalMessage: current.evidence.finalMessage, error: current.error })}`); app.quit(); }
+        }, 1000);
+      } catch (error) { console.error(`WARDEN_RESUME_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-codex-build-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
+      try {
+        const run = await runs.start({ prompt: 'Create add.js exporting an add(a, b) function and add.test.js using node:test. Run node --test, fix any failure, and report the result. Do not commit.', cwd, attachContext: true });
+        const deadline = Date.now() + 180_000;
+        const poll = setInterval(async () => {
+          const current = runs.get(run.id);
+          for (const approval of current.approvals.filter((item) => item.status === 'pending')) { console.log(`WARDEN_BUILD_SMOKE approving=${approval.method} detail=${approval.detail}`); await runs.approve(current.id, approval.id, 'approve', 'once'); }
+          console.log(`WARDEN_BUILD_SMOKE status=${current.status} events=${current.events.length}`);
+          if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) {
+            clearInterval(poll); const handoff = await runs.handoff(run.id); const proof = await runs.saveProof(run.id); const final = runs.get(run.id); console.log(`WARDEN_BUILD_SMOKE result=${JSON.stringify({ id: final.id, status: final.status, approvals: final.approvals.length, changedFiles: final.evidence.changedFiles, tests: final.evidence.tests.map((test) => ({ command: test.command, exitCode: test.exitCode })), finalMessage: final.evidence.finalMessage, handoff: handoff.path, proof })}`); app.quit();
+          }
+        }, 750);
+      } catch (error) { console.error(`WARDEN_BUILD_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-artifact-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try { const run = runs.list()[0]; if (!run) throw new Error('No run available.'); const handoff = await runs.handoff(run.id); const proof = await runs.saveProof(run.id); const refreshed = runs.get(run.id); console.log(`WARDEN_ARTIFACT_SMOKE result=${JSON.stringify({ changedFiles: refreshed.evidence.changedFiles, diffBytes: refreshed.evidence.diff?.length || 0, tests: refreshed.evidence.tests.length, handoff: handoff.path, proof })}`); app.quit(); } catch (error) { console.error(`WARDEN_ARTIFACT_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-gui-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await mainWindow?.webContents.executeJavaScript("document.querySelector('[data-workspace=build]')?.click(); document.querySelector('[data-execution=codex]')?.click();");
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const image = await mainWindow?.capturePage(); const output = process.env.WARDEN_DESK_SCREENSHOT_PATH || '/tmp/warden-desk-gui.png'; if (image) writeFileSync(output, image.toPNG()); console.log(`WARDEN_GUI_SMOKE screenshot=${output}`); app.quit();
+    });
+  }
+  mainWindow.on('close', () => { if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); terminals.shutdown(); runs.shutdown(); });
   mainWindow.on('closed', () => { mainWindow = null; activeView = null; views.clear(); });
 }
 

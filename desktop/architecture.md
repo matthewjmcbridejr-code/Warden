@@ -39,4 +39,12 @@ The next adapter slice should:
 7. Implement `turn/interrupt`, transport failure recovery, cancellation, and resume.
 8. Persist only non-secret thread/run references through a Warden run-store adapter.
 
-`CodexAppServerAdapter` is an honest disconnected boundary today. It does not fall back to CLI keystroke injection.
+`CodexAppServerProvider` now implements this lifecycle over stdio. It uses `untrusted` approvals and `workspace-write` sandboxing, records normalized events plus raw redacted payloads, persists the Codex thread ID, and resumes it after restart. It does not fall back to CLI keystroke injection.
+
+## Other structured providers
+
+- Claude target: the official [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview), preserving its native permission and session events behind `BuildProvider`.
+- Gemini target: official [Gemini CLI headless mode](https://google-gemini.github.io/gemini-cli/docs/cli/headless.html), using structured output/session support rather than terminal scraping.
+- Grok Build target: official [Grok Build headless and scripting interface](https://docs.x.ai/build/cli/headless-scripting), including streamed output and resumable sessions where supported.
+
+These adapters are deliberately disconnected in the UI today. No provider result is simulated.
