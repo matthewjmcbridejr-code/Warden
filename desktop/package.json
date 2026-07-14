@@ -1,9 +1,10 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "UNLICENSED",
   "description": "Chromium-backed local desktop workspace for Warden AI Desk",
+  "desktopName": "warden-ai-desk",
   "homepage": "https://github.com/matthewjmcbridejr-code/Warden",
   "author": { "name": "Warden Project", "email": "noreply@localhost" },
   "main": "dist/main.cjs",
@@ -36,6 +37,6 @@
     "files": ["dist/**", "package.json"],
     "directories": { "output": "dist-electron" },
     "asarUnpack": ["node_modules/node-pty/**"],
-    "linux": { "target": ["AppImage", "deb"], "category": "Development", "executableName": "warden-ai-desk" }
+    "linux": { "target": ["AppImage", "deb"], "category": "Development", "executableName": "warden-ai-desk", "icon": "assets/icon.png", "syncDesktopName": true }
   }
 }

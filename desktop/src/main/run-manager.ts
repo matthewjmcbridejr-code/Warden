@@ -26,7 +26,7 @@ export class RunManager {
   }
 
   async providerStatus(): Promise<ProviderAuthReport[]> { return Promise.all((Object.keys(this.providers) as StructuredProviderId[]).map((id) => this.providers[id].authStatus())); }
-  list(): WardenRun[] { return this.store.list(); }
+  list(projectId?: string): WardenRun[] { const runs = this.store.list(); return projectId ? runs.filter((run) => run.projectId === projectId || (!run.projectId && run.cwd === projectId)) : runs; }
   get(id: string): WardenRun { const run = this.store.get(id); if (!run) throw new Error('Run not found.'); return run; }
   private providerFor(run: WardenRun): BuildProvider { const provider = this.providers[run.provider as StructuredProviderId]; if (!provider) throw new Error(`No structured adapter for ${run.provider}.`); return provider; }
 
@@ -40,12 +40,12 @@ export class RunManager {
     return pack;
   }
 
-  async start(input: { provider: StructuredProviderId; prompt: string; cwd: string; attachContext: boolean; model?: string; authSource: 'subscription' | 'api_key'; apiFallbackApproved?: boolean }): Promise<WardenRun> {
+  async start(input: { provider: StructuredProviderId; prompt: string; cwd: string; projectId?: string; attachContext: boolean; model?: string; authSource: 'subscription' | 'api_key'; apiFallbackApproved?: boolean }): Promise<WardenRun> {
     const cwd = validateDirectory(input.cwd); const prompt = String(input.prompt || '').trim();
     if (!prompt || prompt.length > 100_000) throw new Error('Enter a build prompt under 100,000 characters.');
     const provider = this.providers[input.provider]; if (!provider) throw new Error('Unknown structured provider.');
     const context = input.attachContext ? await this.previewContext(cwd, prompt) : undefined;
-    const handle = await provider.startRun({ prompt, project: basename(cwd), workingDirectory: cwd, model: input.model, context, authSource: input.authSource, apiFallbackApproved: input.apiFallbackApproved });
+    const handle = await provider.startRun({ prompt, project: basename(cwd), projectId: input.projectId, workingDirectory: cwd, model: input.model, context, authSource: input.authSource, apiFallbackApproved: input.apiFallbackApproved });
     return this.get(handle.runId);
   }
 

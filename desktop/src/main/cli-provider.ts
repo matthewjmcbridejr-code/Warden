@@ -53,7 +53,7 @@ export class StructuredCliProvider implements BuildProvider {
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const report = await this.authStatus(); enforceAuthChoice(report, input.authSource, input.apiFallbackApproved);
     const auth = this.authSnapshot(report, input.authSource); const sessionId = randomUUID();
-    let run = this.store.create({ provider: this.id, project: input.project, cwd: input.workingDirectory, prompt: input.prompt, model: input.model, context: input.context, auth });
+    let run = this.store.create({ provider: this.id, project: input.project, projectId: input.projectId, cwd: input.workingDirectory, prompt: input.prompt, model: input.model, context: input.context, auth });
     run = this.store.update(run.id, { threadId: sessionId, status: 'running' });
     const started: NormalizedRunEvent = { type: 'run.started', runId: run.id, provider: this.id, timestamp: new Date().toISOString(), payload: { sessionId, authSource: auth.source, client: auth.client } };
     run = this.store.appendEvent(run.id, started); this.publish(run, started);

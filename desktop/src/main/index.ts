@@ -1,64 +1,50 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, WebContentsView } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, Menu, nativeImage, Tray, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
-import type { ProviderId, ProviderStatus } from '../shared/types';
-import { providerIds } from '../shared/types';
-import { isAllowedProviderUrl, PROVIDERS } from './providers';
+import type { PlatformNavigationDecision, WebPlatform } from '../shared/types';
 import { StateStore } from './state-store';
 import { TerminalManager } from './terminal-manager';
 import { RunManager } from './run-manager';
+import { PlatformManager } from './platform-manager';
+import { PLATFORM_PRESETS, presetInput } from './web-platforms';
 
 let mainWindow: BrowserWindow | null = null;
 let store: StateStore;
 let terminals: TerminalManager;
 let runs: RunManager;
-let activeView: WebContentsView | null = null;
-let activeProvider: ProviderId | null = null;
-const views = new Map<ProviderId, WebContentsView>();
-let contentBounds = { x: 248, y: 116, width: 1000, height: 700 };
+let platforms: PlatformManager;
+let tray: Tray | null = null;
+let isQuitting = false;
+app.enableSandbox();
 
-function validProvider(value: unknown): value is ProviderId { return providerIds.includes(value as ProviderId); }
-function sendStatus(id: ProviderId, patch: Partial<ProviderStatus> = {}): void {
-  const web = views.get(id)?.webContents;
-  mainWindow?.webContents.send('provider:status', { id, loading: web?.isLoading() || false, canGoBack: web?.navigationHistory.canGoBack() || false, canGoForward: web?.navigationHistory.canGoForward() || false, title: web?.getTitle() || PROVIDERS[id].name, ...patch } satisfies ProviderStatus);
-}
-function secureContents(id: ProviderId, web: Electron.WebContents): void {
-  web.session.setPermissionCheckHandler(() => false);
-  web.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  web.on('will-navigate', (event, url) => { if (!isAllowedProviderUrl(id, url)) { event.preventDefault(); void shell.openExternal(url); } });
-  web.setWindowOpenHandler(({ url }) => {
-    if (!isAllowedProviderUrl(id, url)) { if (url.startsWith('https:')) void shell.openExternal(url); return { action: 'deny' }; }
-    return { action: 'allow', overrideBrowserWindowOptions: { parent: mainWindow || undefined, autoHideMenuBar: true, webPreferences: { partition: PROVIDERS[id].partition, contextIsolation: true, nodeIntegration: false, sandbox: true } } };
-  });
-  web.on('did-create-window', (child) => secureContents(id, child.webContents));
-}
-function createProviderView(id: ProviderId): WebContentsView {
-  const definition = PROVIDERS[id];
-  const view = new WebContentsView({ webPreferences: { partition: definition.partition, contextIsolation: true, nodeIntegration: false, sandbox: true } });
-  secureContents(id, view.webContents);
-  view.webContents.on('did-start-loading', () => sendStatus(id));
-  view.webContents.on('did-stop-loading', () => sendStatus(id));
-  view.webContents.on('page-title-updated', () => sendStatus(id));
-  view.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => { if (isMainFrame && code !== -3) sendStatus(id, { error: `${description} (${code}) — ${url}` }); });
-  void view.webContents.loadURL(definition.homeUrl);
-  views.set(id, view); return view;
-}
-function showProvider(id: ProviderId): void {
-  if (!mainWindow) return;
-  if (activeView) mainWindow.contentView.removeChildView(activeView);
-  activeView = views.get(id) || createProviderView(id); activeProvider = id;
-  mainWindow.contentView.addChildView(activeView); activeView.setBounds(contentBounds);
-  store.patch({ selectedProvider: id, workspace: 'chat' }); sendStatus(id);
-}
-function hideProvider(): void { if (mainWindow && activeView) mainWindow.contentView.removeChildView(activeView); activeView = null; activeProvider = null; }
+function stringId(value: unknown): value is string { return typeof value === 'string' && /^[\w-]{1,120}$/.test(value); }
 function registerIpc(): void {
   ipcMain.handle('state:get', () => ({ state: store.state, warning: store.warning }));
-  ipcMain.handle('state:update', (_event, patch: unknown) => { if (!patch || typeof patch !== 'object') throw new Error('Invalid state update.'); const value = patch as Record<string, unknown>; const clean: Record<string, unknown> = {}; if (value.workspace === 'chat' || value.workspace === 'build') clean.workspace = value.workspace; if (validProvider(value.selectedProvider)) clean.selectedProvider = value.selectedProvider; return store.patch(clean); });
-  ipcMain.handle('provider:show', (_event, id: unknown) => { if (!validProvider(id)) throw new Error('Unknown provider.'); showProvider(id); });
-  ipcMain.handle('provider:hide', () => hideProvider());
-  ipcMain.handle('provider:action', (_event, id: unknown, action: unknown) => { if (!validProvider(id) || !['back', 'forward', 'reload', 'stop', 'home'].includes(String(action))) throw new Error('Invalid provider action.'); const web = views.get(id)?.webContents; if (!web) return; if (action === 'back' && web.navigationHistory.canGoBack()) web.navigationHistory.goBack(); if (action === 'forward' && web.navigationHistory.canGoForward()) web.navigationHistory.goForward(); if (action === 'reload') web.reload(); if (action === 'stop') web.stop(); if (action === 'home') void web.loadURL(PROVIDERS[id].homeUrl); });
-  ipcMain.handle('provider:clear-session', async (_event, id: unknown) => { if (!validProvider(id)) throw new Error('Unknown provider.'); if (activeProvider === id) hideProvider(); const view = views.get(id); if (view) { view.webContents.close(); views.delete(id); } const target = session.fromPartition(PROVIDERS[id].partition); await target.clearStorageData(); await target.clearCache(); sendStatus(id, { cleared: true, title: PROVIDERS[id].name }); });
-  ipcMain.on('provider:set-bounds', (_event, bounds: unknown) => { if (!bounds || typeof bounds !== 'object') return; const b = bounds as Record<string, unknown>; if (![b.x, b.y, b.width, b.height].every(Number.isFinite)) return; contentBounds = { x: Math.max(0, Number(b.x)), y: Math.max(0, Number(b.y)), width: Math.max(1, Number(b.width)), height: Math.max(1, Number(b.height)) }; activeView?.setBounds(contentBounds); });
+  ipcMain.handle('state:update', (_event, patch: unknown) => { if (!patch || typeof patch !== 'object') throw new Error('Invalid state update.'); const value = patch as Record<string, unknown>; const clean: Record<string, unknown> = {}; if (value.workspace === 'chat' || value.workspace === 'build') clean.workspace = value.workspace; if (typeof value.selectedPlatformId === 'string' && store.state.platforms.some((item) => item.id === value.selectedPlatformId)) clean.selectedPlatformId = value.selectedPlatformId; if (typeof value.activeProjectId === 'string' && store.state.projects.some((item) => item.id === value.activeProjectId)) clean.activeProjectId = value.activeProjectId; return store.patch(clean); });
+  ipcMain.handle('platform:list', () => store.state.platforms.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order));
+  ipcMain.handle('platform:presets', () => PLATFORM_PRESETS);
+  ipcMain.handle('platform:profiles', () => store.state.browserProfiles);
+  ipcMain.handle('platform:create-profile', (_event, name: unknown) => { if (typeof name !== 'string') throw new Error('Invalid profile name.'); return store.createProfile(name); });
+  ipcMain.handle('platform:rename-profile', (_event, id: unknown, name: unknown) => { if (!stringId(id) || typeof name !== 'string') throw new Error('Invalid profile update.'); return store.renameProfile(id, name); });
+  ipcMain.handle('platform:remove-profile', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid profile ID.'); return store.removeProfile(id); });
+  ipcMain.handle('platform:create', (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid platform definition.'); return store.createPlatform(input as Partial<WebPlatform> & { name: string; startUrl: string }); });
+  ipcMain.handle('platform:add-preset', (_event, key: unknown, browserProfileId: unknown) => { if (typeof key !== 'string' || (browserProfileId !== undefined && typeof browserProfileId !== 'string')) throw new Error('Invalid preset request.'); return store.createPlatform({ ...presetInput(key), browserProfileId: browserProfileId as string | undefined }); });
+  ipcMain.handle('platform:update', (_event, id: unknown, patch: unknown) => { if (!stringId(id) || !patch || typeof patch !== 'object') throw new Error('Invalid platform update.'); return store.updatePlatform(id, patch as Partial<WebPlatform>); });
+  ipcMain.handle('platform:remove', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); platforms.remove(id); });
+  ipcMain.handle('platform:removed', () => store.state.removedPlatforms);
+  ipcMain.handle('platform:restore', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return store.restorePlatform(id); });
+  ipcMain.handle('platform:restore-defaults', () => { for (const preset of PLATFORM_PRESETS.slice(0, 4)) if (!store.state.platforms.some((item) => item.startUrl === preset.startUrl)) store.createPlatform(presetInput(preset.key)); return store.state.platforms; });
+  ipcMain.handle('platform:show', (_event, id: unknown, splitId: unknown) => { if (!stringId(id) || (splitId !== undefined && !stringId(splitId))) throw new Error('Invalid platform selection.'); platforms.show(id, splitId as string | undefined); });
+  ipcMain.handle('platform:hide', () => platforms.hide());
+  ipcMain.handle('platform:action', (_event, id: unknown, action: unknown) => { if (!stringId(id) || !['back', 'forward', 'reload', 'stop', 'home'].includes(String(action))) throw new Error('Invalid platform action.'); platforms.action(id, action as 'back' | 'forward' | 'reload' | 'stop' | 'home'); });
+  ipcMain.handle('platform:open-external', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return platforms.openExternal(id); });
+  ipcMain.handle('platform:clear-site-data', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return platforms.clearSiteData(id); });
+  ipcMain.handle('platform:resolve-navigation', (_event, requestId: unknown, decision: unknown) => { if (typeof requestId !== 'string' || !['allow_once', 'trust', 'external', 'cancel'].includes(String(decision))) throw new Error('Invalid navigation decision.'); return platforms.resolveNavigation(requestId, decision as PlatformNavigationDecision); });
+  ipcMain.on('platform:set-bounds', (_event, bounds: unknown) => { if (!bounds || typeof bounds !== 'object') return; const b = bounds as Record<string, unknown>; if (![b.x, b.y, b.width, b.height].every(Number.isFinite)) return; platforms.setBounds({ x: Number(b.x), y: Number(b.y), width: Number(b.width), height: Number(b.height) }); });
+  ipcMain.handle('project:list', () => store.state.projects);
+  ipcMain.handle('project:create', (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid project request.'); const value = input as Record<string, unknown>; if (typeof value.cwd !== 'string' || (value.name !== undefined && typeof value.name !== 'string') || (value.browserProfileId !== undefined && typeof value.browserProfileId !== 'string')) throw new Error('Invalid project request.'); return store.createProject(value.cwd, value.name as string | undefined, value.browserProfileId as string | undefined); });
+  ipcMain.handle('project:activate', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid project ID.'); return store.activateProject(id); });
+  ipcMain.handle('project:update', (_event, id: unknown, patch: unknown) => { if (!stringId(id) || !patch || typeof patch !== 'object') throw new Error('Invalid project update.'); return store.updateProject(id, patch as never); });
   ipcMain.handle('terminal:list', () => terminals.list());
   ipcMain.handle('terminal:choose-directory', async () => { if (!mainWindow) return null; const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'], title: 'Choose project directory' }); return result.canceled ? null : result.filePaths[0]; });
   ipcMain.handle('terminal:create', (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid terminal request.'); const value = input as Record<string, unknown>; if (typeof value.name !== 'string' || typeof value.cwd !== 'string' || (value.restoreId !== undefined && typeof value.restoreId !== 'string')) throw new Error('Invalid terminal request.'); const terminal = terminals.create({ name: value.name, cwd: value.cwd, restoreId: value.restoreId }); const recentProjects = [terminal.cwd, ...store.state.recentProjects.filter((item) => item !== terminal.cwd)].slice(0, 10); store.patch({ recentProjects }); return terminal; });
@@ -67,11 +53,11 @@ function registerIpc(): void {
   ipcMain.handle('terminal:kill', (_event, id) => terminals.kill(id));
   ipcMain.handle('terminal:record-command', (_event, id, command) => terminals.recordCommand(id, command));
   ipcMain.handle('terminal:clear-history', (_event, id) => terminals.clearHistory(id));
-  ipcMain.handle('runs:list', () => runs.list());
+  ipcMain.handle('runs:list', (_event, projectId: unknown) => { if (projectId !== undefined && typeof projectId !== 'string') throw new Error('Invalid project ID.'); return runs.list(projectId as string | undefined); });
   ipcMain.handle('runs:providers', () => runs.providerStatus());
   ipcMain.handle('runs:get', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.get(id); });
   ipcMain.handle('runs:preview-context', (_event, cwd: unknown) => { if (typeof cwd !== 'string') throw new Error('Invalid project directory.'); return runs.previewContext(cwd); });
-  ipcMain.handle('runs:start', async (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid run request.'); const value = input as Record<string, unknown>; if (!['codex', 'claude', 'gemini', 'grok'].includes(String(value.provider)) || typeof value.prompt !== 'string' || typeof value.cwd !== 'string' || typeof value.attachContext !== 'boolean' || !['subscription', 'api_key'].includes(String(value.authSource)) || (value.model !== undefined && typeof value.model !== 'string') || (value.apiFallbackApproved !== undefined && typeof value.apiFallbackApproved !== 'boolean')) throw new Error('Invalid run request.'); const run = await runs.start({ provider: value.provider as 'codex' | 'claude' | 'gemini' | 'grok', prompt: value.prompt, cwd: value.cwd, attachContext: value.attachContext, model: value.model as string | undefined, authSource: value.authSource as 'subscription' | 'api_key', apiFallbackApproved: value.apiFallbackApproved as boolean | undefined }); store.patch({ recentProjects: [run.cwd, ...store.state.recentProjects.filter((item) => item !== run.cwd)].slice(0, 10) }); return run; });
+  ipcMain.handle('runs:start', async (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid run request.'); const value = input as Record<string, unknown>; if (!['codex', 'claude', 'gemini', 'grok'].includes(String(value.provider)) || typeof value.prompt !== 'string' || typeof value.cwd !== 'string' || (value.projectId !== undefined && typeof value.projectId !== 'string') || typeof value.attachContext !== 'boolean' || !['subscription', 'api_key'].includes(String(value.authSource)) || (value.model !== undefined && typeof value.model !== 'string') || (value.apiFallbackApproved !== undefined && typeof value.apiFallbackApproved !== 'boolean')) throw new Error('Invalid run request.'); const run = await runs.start({ provider: value.provider as 'codex' | 'claude' | 'gemini' | 'grok', prompt: value.prompt, cwd: value.cwd, projectId: value.projectId as string | undefined, attachContext: value.attachContext, model: value.model as string | undefined, authSource: value.authSource as 'subscription' | 'api_key', apiFallbackApproved: value.apiFallbackApproved as boolean | undefined }); store.patch({ recentProjects: [run.cwd, ...store.state.recentProjects.filter((item) => item !== run.cwd)].slice(0, 20) }); return run; });
   ipcMain.handle('runs:resume', (_event, id: unknown, prompt: unknown) => { if (typeof id !== 'string' || typeof prompt !== 'string') throw new Error('Invalid resume request.'); return runs.resume(id, prompt); });
   ipcMain.handle('runs:cancel', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.cancel(id); });
   ipcMain.handle('runs:approve', (_event, runId: unknown, approvalId: unknown, decision: unknown, scope: unknown) => { if (typeof runId !== 'string' || typeof approvalId !== 'string' || !['approve', 'deny'].includes(String(decision)) || (scope !== undefined && !['once', 'session'].includes(String(scope)))) throw new Error('Invalid approval response.'); return runs.approve(runId, approvalId, decision as 'approve' | 'deny', scope as 'once' | 'session' | undefined); });
@@ -83,6 +69,10 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({ ...bounds, minWidth: 1024, minHeight: 700, backgroundColor: '#0d100e', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   terminals = new TerminalManager(mainWindow, store);
   runs = new RunManager(app.getPath('userData'), mainWindow);
+  platforms = new PlatformManager(mainWindow, store);
+  if (!tray) {
+    const image = nativeImage.createFromPath(join(__dirname, 'assets', 'icon.png')).resize({ width: 22, height: 22 }); tray = new Tray(image); tray.setToolTip('Warden AI Desk'); tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Warden', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: 'Hide Warden', click: () => mainWindow?.hide() }, { type: 'separator' }, { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }])); tray.on('click', () => { if (!mainWindow) return; if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); } });
+  }
   void mainWindow.loadFile(join(__dirname, 'index.html'));
   if (process.argv.includes('--warden-desk-smoke')) {
     mainWindow.webContents.once('did-finish-load', () => {
@@ -190,10 +180,17 @@ function createWindow(): void {
       const image = await mainWindow?.capturePage(); const output = process.env.WARDEN_DESK_SCREENSHOT_PATH || '/tmp/warden-desk-gui.png'; if (image) writeFileSync(output, image.toPNG()); console.log(`WARDEN_GUI_SMOKE screenshot=${output}`); app.quit();
     });
   }
-  mainWindow.on('close', () => { if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); terminals.shutdown(); runs.shutdown(); });
-  mainWindow.on('closed', () => { mainWindow = null; activeView = null; views.clear(); });
+  if (process.argv.includes('--warden-desk-platform-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try { let platform = store.state.platforms.find((item) => item.name === 'HyperAgent'); if (!platform) platform = store.createPlatform(presetInput('hyperagent')); platforms.show(platform.id); console.log(`WARDEN_PLATFORM_SMOKE result=${JSON.stringify({ id: platform.id, name: platform.name, profile: platform.browserProfileId, startUrl: platform.startUrl, trustedAuthDomains: platform.trustedAuthDomains, persisted: store.state.platforms.some((item) => item.id === platform!.id) })}`); await new Promise((resolve) => setTimeout(resolve, 2500)); const screenshot = process.env.WARDEN_DESK_SCREENSHOT_PATH; if (screenshot) { const image = await mainWindow?.capturePage(); if (image) writeFileSync(screenshot, image.toPNG()); console.log(`WARDEN_PLATFORM_SMOKE screenshot=${screenshot}`); } } catch (error) { console.error(`WARDEN_PLATFORM_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
+    });
+  }
+  mainWindow.on('close', (event) => { if (!isQuitting && !process.argv.some((argument) => argument.startsWith('--warden-desk-'))) { event.preventDefault(); mainWindow?.hide(); return; } if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); platforms.shutdown(); terminals.shutdown(); runs.shutdown(); });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(() => { store = new StateStore(app.getPath('userData')); registerIpc(); createWindow(); });
+app.whenReady().then(() => { store = new StateStore(app.getPath('userData')); registerIpc(); createWindow(); globalShortcut.register('CommandOrControl+Alt+W', () => { if (!mainWindow) return; if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); } }); });
+app.on('before-quit', () => { isQuitting = true; });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); tray?.destroy(); tray = null; });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

@@ -1,47 +1,38 @@
 # Warden AI Desk
 
-The first usable Linux desktop shell for Warden. Electron supplies Chromium-backed, login-persistent tabs for Claude, ChatGPT, Gemini, and Grok; the Build workspace supplies managed interactive PTYs. Provider sessions are isolated from each other and never exposed to Warden's renderer.
+Warden AI Desk is a local Linux command center for project work. The Electron shell combines sandboxed, login-persistent AI websites, managed project terminals, and subscription-first structured agent runs without treating those three capability levels as interchangeable.
 
-## Install and run
+## Install, verify, and package
 
 ```bash
 cd desktop
 npm install
-npm start
-```
-
-Development currently uses the same deterministic build-then-launch command:
-
-```bash
-npm run dev
-```
-
-## Verify and package locally
-
-```bash
 npm run check
-npm run package:linux
+npm start
 npm run package:deb
 ```
 
-`package:linux` creates unpacked Linux artifacts under `desktop/dist-electron/`; it does not publish or release them.
+The Debian artifact is written to `desktop/dist-electron/`. Packaging does not publish or release it. The package installs Electron Builder's normal Chromium sandbox/AppArmor support; Warden does not ship a permanent `--no-sandbox` workaround.
 
-On Linux installations where Chromium's SUID helper or unprivileged user namespaces are disabled, Electron will refuse to start rather than silently drop its process sandbox. Configure the host's Electron/Chromium sandbox according to the distribution policy; use `--no-sandbox` only for disposable headless smoke tests, never for normal use.
+## Custom AI platforms
 
-## Security and session behavior
+Chat uses editable `WebPlatform` definitions rather than hardcoded provider tabs. Claude, ChatGPT, Gemini, and Grok are initial ordinary definitions. HyperAgent, Perplexity, and Microsoft Copilot are available from the same starter-preset picker used to create any custom platform.
 
-- Provider content uses Electron `WebContentsView`, never an iframe and never the Warden preload.
-- Every provider has its own `persist:warden-*` partition. Cookies and storage survive application restarts but are not shared between providers.
-- Provider permissions are denied by default. Standard provider and OAuth navigation stays in the originating provider partition; unrelated links open in the system browser.
-- **Clear session** deletes only the selected provider's cookies/cache/storage after confirmation.
-- Google, Microsoft, Apple, GitHub, and provider-specific login flows require manual live verification because their behavior changes independently of Warden.
+Each definition has a stable ID, category, start URL, icon, named browser profile, project associations, trusted first-party/authentication domains, main/split availability, navigation state, ordering, pinning, and enabled state. Definitions and last trusted URL restore after restart. Removed custom platforms go to a restorable list; removing one never deletes browser data.
 
-## Build workspace
+Named profiles map to persistent `persist:warden-profile-*` Chromium partitions. Platforms assigned to one profile intentionally share that profile's login state; profiles never share a partition and Warden never imports Chrome cookies. A platform `WebContentsView` has no preload, Node integration, terminal, filesystem, Brain, token, or IPC access. Context isolation, Chromium sandboxing, web security, HTTPS validation, navigation constraints, popup handling, and deny-by-default permissions stay enabled.
 
-Local Terminal uses `node-pty` and xterm.js. It supports multiple named sessions, working-directory selection and validation, interactive input, resize, status, command history, display clearing, and explicit process termination.
+Unknown OAuth/navigation domains pause and offer **Allow once**, **Trust for this platform**, **Open in system browser**, or **Cancel**. Downloads pause for an explicit save approval. “Clear this site's data” is an origin-scoped troubleshooting action behind the overflow menu. Cookies may be stored at registrable-domain scope, so the confirmation honestly warns that related sites in the same named profile can also be affected.
 
-Non-secret desktop state is atomically written under Electron's per-user application-data directory. On restart, terminal names/directories/history are restored as **stopped** metadata; Warden never claims the PTY process survived.
+## Projects and Build
 
-Codex is connected through the installed Codex App Server. A run has a durable Warden record, normalized streamed events, approval requests, repository context, git/test evidence, local proof, and a compact cross-provider handoff. Interrupted runs retain the Codex thread ID and can be resumed after restarting the application.
+A project stores its repository directory, named browser profile, selected/split platforms, Chat/Build workspace, execution mode, terminals, and active run reference. Switching projects restores that desktop context. Terminal metadata survives restart as stopped sessions; Warden never claims the PTY process itself survived.
 
-Claude, Gemini, and Grok Build remain visible and honestly disconnected until their provider-native adapters are implemented. See [architecture.md](architecture.md) for the integration seam and legacy classification.
+Structured Build is separate from web platforms:
+
+- Codex uses the installed Codex App Server with ChatGPT subscription login, streamed events, approvals, evidence, cancellation, and resume.
+- Claude uses the official Claude Code headless client and its Claude.ai subscription login.
+- Gemini uses the official Gemini CLI headless client and Google-account entitlement.
+- Grok uses the official Grok headless client and `grok login` state.
+
+Provider authentication remains owned by those clients. API-key billing is an explicitly approved fallback and is never selected silently. Durable runs retain normalized/redacted events, provider session references, approvals, diffs, commands/tests, handoffs, and honest local/Brain proof state. The legacy tmux prompt-injection runner is not a desktop dependency.

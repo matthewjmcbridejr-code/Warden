@@ -14,6 +14,18 @@
 
 Nothing in the legacy backend is removed or behaviorally changed by this desktop pass.
 
+## Capability boundaries
+
+Warden keeps three layers distinct:
+
+1. A **Web Platform** is an untrusted remote website in a sandboxed `WebContentsView`. Its definition controls navigation and profile selection only. It receives no preload or Warden capability.
+2. A **Structured Provider** is a provider-native App Server, SDK, CLI, headless, MCP, or ACP adapter implementing `BuildProvider`.
+3. A **Warden Extension** is a separately installed, explicitly trusted adapter. A URL definition can never create or imply one.
+
+Web platforms use named profile partitions (`persist:warden-profile-*`). The partition belongs to the profile, not to a platform, so intentional profile sharing works without copying credentials. Domain trust is per platform. Clearing storage enumerates only that platform's configured origins and never clears the entire partition; the UI still warns that Chromium cookies are registrable-domain scoped and can affect related sites.
+
+Project workspaces persist the repository, selected profile/platforms, split layout, execution mode, terminal references, and active run. Web definitions, project state, and durable run state are separate records so a project switch can restore the whole working context without conflating a website with an agent adapter.
+
 ## Structured provider boundary and authentication
 
 `src/shared/types.ts` defines `BuildProvider`, normalized run events, capabilities, authentication reports, inputs, approvals, and lifecycle operations. Provider-specific payloads survive on `NormalizedRunEvent.providerPayload`, so normalization does not erase provider detail.
