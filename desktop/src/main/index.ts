@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, globalShortcut, Menu, nativeImage, Tray, ipcMain } from 'electron';
 import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
-import type { PlatformNavigationDecision, WebPlatform } from '../shared/types';
+import { readFileSync, writeFileSync } from 'node:fs';
+import type { WebPlatform } from '../shared/types';
 import { StateStore } from './state-store';
 import { TerminalManager } from './terminal-manager';
 import { RunManager } from './run-manager';
 import { PlatformManager } from './platform-manager';
 import { PLATFORM_PRESETS, presetInput } from './web-platforms';
+import { startOAuthSmokeFixture } from './oauth-smoke';
 
 let mainWindow: BrowserWindow | null = null;
 let store: StateStore;
@@ -18,6 +19,7 @@ let isQuitting = false;
 app.enableSandbox();
 
 function stringId(value: unknown): value is string { return typeof value === 'string' && /^[\w-]{1,120}$/.test(value); }
+function requireMainRenderer(event: Electron.IpcMainInvokeEvent): void { if (!mainWindow || event.sender.id !== mainWindow.webContents.id || event.senderFrame?.url !== mainWindow.webContents.getURL()) throw new Error('Untrusted IPC sender.'); }
 function registerIpc(): void {
   ipcMain.handle('state:get', () => ({ state: store.state, warning: store.warning }));
   ipcMain.handle('state:update', (_event, patch: unknown) => { if (!patch || typeof patch !== 'object') throw new Error('Invalid state update.'); const value = patch as Record<string, unknown>; const clean: Record<string, unknown> = {}; if (value.workspace === 'chat' || value.workspace === 'build') clean.workspace = value.workspace; if (typeof value.selectedPlatformId === 'string' && store.state.platforms.some((item) => item.id === value.selectedPlatformId)) clean.selectedPlatformId = value.selectedPlatformId; if (typeof value.activeProjectId === 'string' && store.state.projects.some((item) => item.id === value.activeProjectId)) clean.activeProjectId = value.activeProjectId; return store.patch(clean); });
@@ -39,7 +41,7 @@ function registerIpc(): void {
   ipcMain.handle('platform:action', (_event, id: unknown, action: unknown) => { if (!stringId(id) || !['back', 'forward', 'reload', 'stop', 'home'].includes(String(action))) throw new Error('Invalid platform action.'); platforms.action(id, action as 'back' | 'forward' | 'reload' | 'stop' | 'home'); });
   ipcMain.handle('platform:open-external', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return platforms.openExternal(id); });
   ipcMain.handle('platform:clear-site-data', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return platforms.clearSiteData(id); });
-  ipcMain.handle('platform:resolve-navigation', (_event, requestId: unknown, decision: unknown) => { if (typeof requestId !== 'string' || !['allow_once', 'trust', 'external', 'cancel'].includes(String(decision))) throw new Error('Invalid navigation decision.'); return platforms.resolveNavigation(requestId, decision as PlatformNavigationDecision); });
+  ipcMain.handle('platform:show-menu', (event, id: unknown, anchor: unknown) => { requireMainRenderer(event); if (!stringId(id) || !anchor || typeof anchor !== 'object') throw new Error('Invalid menu request.'); const value = anchor as Record<string, unknown>; if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) throw new Error('Invalid menu position.'); return platforms.showMenu(id, { x: Number(value.x), y: Number(value.y) }); });
   ipcMain.on('platform:set-bounds', (_event, bounds: unknown) => { if (!bounds || typeof bounds !== 'object') return; const b = bounds as Record<string, unknown>; if (![b.x, b.y, b.width, b.height].every(Number.isFinite)) return; platforms.setBounds({ x: Number(b.x), y: Number(b.y), width: Number(b.width), height: Number(b.height) }); });
   ipcMain.handle('project:list', () => store.state.projects);
   ipcMain.handle('project:create', (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid project request.'); const value = input as Record<string, unknown>; if (typeof value.cwd !== 'string' || (value.name !== undefined && typeof value.name !== 'string') || (value.browserProfileId !== undefined && typeof value.browserProfileId !== 'string')) throw new Error('Invalid project request.'); return store.createProject(value.cwd, value.name as string | undefined, value.browserProfileId as string | undefined); });
@@ -69,7 +71,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({ ...bounds, minWidth: 1024, minHeight: 700, backgroundColor: '#0d100e', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   terminals = new TerminalManager(mainWindow, store);
   runs = new RunManager(app.getPath('userData'), mainWindow);
-  platforms = new PlatformManager(mainWindow, store);
+  platforms = new PlatformManager(mainWindow, store, app.getPath('userData'));
   if (!tray) {
     const image = nativeImage.createFromPath(join(__dirname, 'assets', 'icon.png')).resize({ width: 22, height: 22 }); tray = new Tray(image); tray.setToolTip('Warden AI Desk'); tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Warden', click: () => { mainWindow?.show(); mainWindow?.focus(); } }, { label: 'Hide Warden', click: () => mainWindow?.hide() }, { type: 'separator' }, { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }])); tray.on('click', () => { if (!mainWindow) return; if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); } });
   }
@@ -183,6 +185,36 @@ function createWindow(): void {
   if (process.argv.includes('--warden-desk-platform-smoke')) {
     mainWindow.webContents.once('did-finish-load', async () => {
       try { let platform = store.state.platforms.find((item) => item.name === 'HyperAgent'); if (!platform) platform = store.createPlatform(presetInput('hyperagent')); platforms.show(platform.id); console.log(`WARDEN_PLATFORM_SMOKE result=${JSON.stringify({ id: platform.id, name: platform.name, profile: platform.browserProfileId, startUrl: platform.startUrl, trustedAuthDomains: platform.trustedAuthDomains, persisted: store.state.platforms.some((item) => item.id === platform!.id) })}`); await new Promise((resolve) => setTimeout(resolve, 2500)); const screenshot = process.env.WARDEN_DESK_SCREENSHOT_PATH; if (screenshot) { const image = await mainWindow?.capturePage(); if (image) writeFileSync(screenshot, image.toPNG()); console.log(`WARDEN_PLATFORM_SMOKE screenshot=${screenshot}`); } } catch (error) { console.error(`WARDEN_PLATFORM_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-oauth-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      let fixture: Awaited<ReturnType<typeof startOAuthSmokeFixture>> | undefined;
+      try {
+        console.log('WARDEN_OAUTH_SMOKE phase=starting'); if (process.env.NODE_ENV !== 'development') throw new Error('OAuth smoke requires the explicit localhost development exception.'); fixture = await startOAuthSmokeFixture(); console.log('WARDEN_OAUTH_SMOKE phase=fixture-ready');
+        const platform = store.createPlatform({ name: 'OAuth Fixture', startUrl: fixture.url, category: 'Other', browserProfileId: store.state.browserProfiles[0].id, trustedFirstPartyDomains: ['127.0.0.1'], trustedAuthDomains: ['127.0.0.1'] }); platforms.show(platform.id);
+        console.log('WARDEN_OAUTH_SMOKE phase=platform-shown'); const deadline = Date.now() + 5_000; while (!fixture.completed() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100)); await new Promise((resolve) => setTimeout(resolve, 300)); console.log('WARDEN_OAUTH_SMOKE phase=collecting');
+        const audit = readFileSync(platforms.auditFile(), 'utf8'); const events = audit.trim().split('\n').map((line) => JSON.parse(line) as { event?: string; outcome?: string }).filter((item) => item.event?.startsWith('popup.'));
+        console.log(`WARDEN_OAUTH_SMOKE result=${JSON.stringify({ completed: fixture.completed(), cookieReturned: fixture.cookieReturned(), openerPreserved: fixture.openerPreserved(), requests: fixture.requests(), popupCreatedVisible: events.some((item) => item.event === 'popup.created' && item.outcome === 'visible'), popupClosed: events.some((item) => item.event === 'popup.closed'), partition: `persist:warden-profile-${store.state.browserProfiles[0].id}`, auditContainsSecret: audit.includes('fixture-secret-code') })}`);
+      } catch (error) { console.error(`WARDEN_OAUTH_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { console.log('WARDEN_OAUTH_SMOKE phase=stopping'); await fixture?.close().catch(() => undefined); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-menu-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const platform = store.createPlatform({ name: 'Menu Target', startUrl: 'https://example.com/', category: 'Other', browserProfileId: store.state.browserProfiles[0].id, trustedFirstPartyDomains: ['example.com'], trustedAuthDomains: [] });
+        platforms.show(platform.id); mainWindow?.show(); mainWindow?.focus();
+        const runCycle = async (mode: 'windowed' | 'maximized'): Promise<boolean> => {
+          if (!mainWindow) throw new Error('Main window closed during menu smoke.');
+          await new Promise((resolve) => setTimeout(resolve, 500)); const bounds = mainWindow.getContentBounds(); let forced = false;
+          console.log(`WARDEN_MENU_SMOKE phase=${mode}-menu-open target=${platform.id} bounds=${bounds.width}x${bounds.height}`);
+          const fallback = setTimeout(() => { forced = true; platforms.closeMenu(); }, 8_000);
+          await platforms.showMenu(platform.id, { x: bounds.width - 18, y: 38 }); clearTimeout(fallback); return !forced;
+        };
+        mainWindow?.unmaximize(); mainWindow?.setSize(1024, 700); mainWindow?.center(); const windowedEscape = await runCycle('windowed');
+        mainWindow?.maximize(); const maximizedEscape = await runCycle('maximized'); const audit = readFileSync(platforms.auditFile(), 'utf8'); const menuEvents = audit.trim().split('\n').map((line) => JSON.parse(line) as { event?: string; platformId?: string; outcome?: string }).filter((item) => item.event?.startsWith('menu.'));
+        console.log(`WARDEN_MENU_SMOKE result=${JSON.stringify({ target: platform.id, activeTarget: store.state.selectedPlatformId, windowedEscape, maximizedEscape, opened: menuEvents.filter((item) => item.event === 'menu.opened' && item.platformId === platform.id).length, closed: menuEvents.filter((item) => item.event === 'menu.closed' && item.platformId === platform.id).length, modes: menuEvents.filter((item) => item.event === 'menu.opened' && item.platformId === platform.id).map((item) => item.outcome) })}`);
+      } catch (error) { console.error(`WARDEN_MENU_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
     });
   }
   mainWindow.on('close', (event) => { if (!isQuitting && !process.argv.some((argument) => argument.startsWith('--warden-desk-'))) { event.preventDefault(); mainWindow?.hide(); return; } if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); platforms.shutdown(); terminals.shutdown(); runs.shutdown(); });

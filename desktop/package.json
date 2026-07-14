@@ -1,6 +1,6 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "license": "UNLICENSED",
   "description": "Chromium-backed local desktop workspace for Warden AI Desk",

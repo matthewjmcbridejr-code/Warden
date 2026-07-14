@@ -33,8 +33,8 @@ export interface WebPlatform {
 }
 export interface PlatformPreset { key: string; name: string; startUrl: string; category: PlatformCategory; icon: PlatformIcon; trustedFirstPartyDomains: string[]; trustedAuthDomains: string[] }
 export type PlatformNavigationDecision = 'allow_once' | 'trust' | 'external' | 'cancel';
-export interface PlatformNavigationRequest { requestId: string; platformId: string; platformName: string; url: string; domain: string; reason: 'navigation' | 'popup' }
 export interface PlatformStatus { id: string; loading: boolean; canGoBack: boolean; canGoForward: boolean; title: string; url?: string; error?: string; cleared?: boolean }
+export interface PlatformMenuAction { action: 'settings' | 'split' | 'refresh' | 'removed' | 'cleared'; platformId: string }
 
 export interface ProjectWorkspace {
   id: string;
@@ -96,10 +96,10 @@ export interface DesktopApi {
     action(id: string, action: 'back' | 'forward' | 'reload' | 'stop' | 'home'): Promise<void>;
     openExternal(id: string): Promise<void>;
     clearSiteData(id: string): Promise<void>;
-    resolveNavigation(requestId: string, decision: PlatformNavigationDecision): Promise<void>;
+    showMenu(id: string, anchor: { x: number; y: number }): Promise<void>;
     setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
     onStatus(listener: (status: PlatformStatus) => void): () => void;
-    onNavigationRequest(listener: (request: PlatformNavigationRequest) => void): () => void;
+    onMenuAction(listener: (action: PlatformMenuAction) => void): () => void;
   };
   project: { list(): Promise<ProjectWorkspace[]>; create(input: { name?: string; cwd: string; browserProfileId?: string }): Promise<ProjectWorkspace>; activate(id: string): Promise<ProjectWorkspace>; update(id: string, patch: Partial<ProjectWorkspace>): Promise<ProjectWorkspace> };
   terminal: { list(): Promise<TerminalMetadata[]>; chooseDirectory(): Promise<string | null>; create(input: { name: string; cwd: string; restoreId?: string }): Promise<TerminalMetadata>; write(id: string, data: string): void; resize(id: string, cols: number, rows: number): void; kill(id: string): Promise<void>; clearHistory(id: string): Promise<void>; recordCommand(id: string, command: string): Promise<void>; onData(listener: (payload: { id: string; data: string }) => void): () => void; onState(listener: (terminal: TerminalMetadata) => void): () => void };
