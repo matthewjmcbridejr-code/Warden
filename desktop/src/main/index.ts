@@ -68,9 +68,10 @@ function registerIpc(): void {
   ipcMain.handle('terminal:record-command', (_event, id, command) => terminals.recordCommand(id, command));
   ipcMain.handle('terminal:clear-history', (_event, id) => terminals.clearHistory(id));
   ipcMain.handle('runs:list', () => runs.list());
+  ipcMain.handle('runs:providers', () => runs.providerStatus());
   ipcMain.handle('runs:get', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.get(id); });
   ipcMain.handle('runs:preview-context', (_event, cwd: unknown) => { if (typeof cwd !== 'string') throw new Error('Invalid project directory.'); return runs.previewContext(cwd); });
-  ipcMain.handle('runs:start', async (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid run request.'); const value = input as Record<string, unknown>; if (typeof value.prompt !== 'string' || typeof value.cwd !== 'string' || typeof value.attachContext !== 'boolean' || (value.model !== undefined && typeof value.model !== 'string')) throw new Error('Invalid run request.'); const run = await runs.start({ prompt: value.prompt, cwd: value.cwd, attachContext: value.attachContext, model: value.model as string | undefined }); store.patch({ recentProjects: [run.cwd, ...store.state.recentProjects.filter((item) => item !== run.cwd)].slice(0, 10) }); return run; });
+  ipcMain.handle('runs:start', async (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid run request.'); const value = input as Record<string, unknown>; if (!['codex', 'claude', 'gemini', 'grok'].includes(String(value.provider)) || typeof value.prompt !== 'string' || typeof value.cwd !== 'string' || typeof value.attachContext !== 'boolean' || !['subscription', 'api_key'].includes(String(value.authSource)) || (value.model !== undefined && typeof value.model !== 'string') || (value.apiFallbackApproved !== undefined && typeof value.apiFallbackApproved !== 'boolean')) throw new Error('Invalid run request.'); const run = await runs.start({ provider: value.provider as 'codex' | 'claude' | 'gemini' | 'grok', prompt: value.prompt, cwd: value.cwd, attachContext: value.attachContext, model: value.model as string | undefined, authSource: value.authSource as 'subscription' | 'api_key', apiFallbackApproved: value.apiFallbackApproved as boolean | undefined }); store.patch({ recentProjects: [run.cwd, ...store.state.recentProjects.filter((item) => item !== run.cwd)].slice(0, 10) }); return run; });
   ipcMain.handle('runs:resume', (_event, id: unknown, prompt: unknown) => { if (typeof id !== 'string' || typeof prompt !== 'string') throw new Error('Invalid resume request.'); return runs.resume(id, prompt); });
   ipcMain.handle('runs:cancel', (_event, id: unknown) => { if (typeof id !== 'string') throw new Error('Invalid run ID.'); return runs.cancel(id); });
   ipcMain.handle('runs:approve', (_event, runId: unknown, approvalId: unknown, decision: unknown, scope: unknown) => { if (typeof runId !== 'string' || typeof approvalId !== 'string' || !['approve', 'deny'].includes(String(decision)) || (scope !== undefined && !['once', 'session'].includes(String(scope)))) throw new Error('Invalid approval response.'); return runs.approve(runId, approvalId, decision as 'approve' | 'deny', scope as 'once' | 'session' | undefined); });
@@ -96,10 +97,11 @@ function createWindow(): void {
       const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
       try {
         console.log('WARDEN_CODEX_SMOKE starting');
-        const run = await runs.start({ prompt: 'Read the repository README or AGENTS.md, run a harmless printf command that prints WARDEN_CODEX_STRUCTURED_OK, make no file changes, and report what you verified.', cwd, attachContext: true });
+        const run = await runs.start({ provider: 'codex', authSource: 'subscription', prompt: 'Read the repository README or AGENTS.md, run a harmless printf command that prints WARDEN_CODEX_STRUCTURED_OK, make no file changes, and report what you verified.', cwd, attachContext: true });
         const deadline = Date.now() + 120_000;
-        const poll = setInterval(() => {
+        const poll = setInterval(async () => {
           const current = runs.get(run.id);
+          for (const approval of current.approvals.filter((item) => item.status === 'pending')) { console.log(`WARDEN_CODEX_SMOKE approving=${approval.method}`); await runs.approve(current.id, approval.id, 'approve', 'once'); }
           console.log(`WARDEN_CODEX_SMOKE status=${current.status} events=${current.events.length}`);
           if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) {
             clearInterval(poll);
@@ -108,6 +110,40 @@ function createWindow(): void {
           }
         }, 1000);
       } catch (error) { console.error(`WARDEN_CODEX_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-provider-auth-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try { const reports = await runs.providerStatus(); console.log(`WARDEN_AUTH_SMOKE result=${JSON.stringify(reports.map(({ provider, state, source, installed, client, version, entitlement, detail, canStart, apiFallbackAvailable }) => ({ provider, state, source, installed, client, version, entitlement, detail, canStart, apiFallbackAvailable })))}`); } catch (error) { console.error(`WARDEN_AUTH_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-grok-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
+      try {
+        const run = await runs.start({ provider: 'grok', authSource: 'subscription', prompt: 'Reply exactly WARDEN_GROK_ADAPTER_OK. Do not use tools or change files.', cwd, attachContext: false });
+        const deadline = Date.now() + 90_000; const poll = setInterval(() => { const current = runs.get(run.id); console.log(`WARDEN_GROK_SMOKE status=${current.status} events=${current.events.length}`); if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) { clearInterval(poll); console.log(`WARDEN_GROK_SMOKE result=${JSON.stringify({ id: current.id, status: current.status, sessionId: current.threadId, auth: current.auth?.source, events: current.events.length, finalMessage: current.evidence.finalMessage, error: current.error })}`); app.quit(); } }, 500);
+      } catch (error) { console.error(`WARDEN_GROK_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  if (process.argv.includes('--warden-desk-grok-resume-smoke')) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const previous = runs.list().find((run) => run.provider === 'grok' && run.threadId); if (!previous) throw new Error('No persisted Grok run is available to resume.');
+        const resumed = await runs.resume(previous.id, 'Reply exactly WARDEN_GROK_RESUME_OK. Do not use tools or change files.'); const deadline = Date.now() + 90_000;
+        const poll = setInterval(() => { const current = runs.get(resumed.id); console.log(`WARDEN_GROK_RESUME status=${current.status} events=${current.events.length}`); if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) { clearInterval(poll); console.log(`WARDEN_GROK_RESUME result=${JSON.stringify({ id: current.id, status: current.status, sessionId: current.threadId, auth: current.auth?.source, finalMessage: current.evidence.finalMessage, error: current.error })}`); app.quit(); } }, 500);
+      } catch (error) { console.error(`WARDEN_GROK_RESUME failed=${error instanceof Error ? error.stack : String(error)}`); app.quit(); }
+    });
+  }
+  const cliSmokeArgument = process.argv.find((argument) => argument.startsWith('--warden-desk-cli-smoke='));
+  if (cliSmokeArgument) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      const provider = cliSmokeArgument.split('=')[1] as 'claude' | 'gemini' | 'grok'; const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
+      try {
+        if (!['claude', 'gemini', 'grok'].includes(provider)) throw new Error('Unsupported CLI smoke provider.');
+        const run = await runs.start({ provider, authSource: 'subscription', prompt: `Reply exactly WARDEN_${provider.toUpperCase()}_CLI_ADAPTER_OK. Do not use tools or change files.`, cwd, attachContext: false }); const deadline = Date.now() + 90_000;
+        const poll = setInterval(() => { const current = runs.get(run.id); if (['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status) || Date.now() > deadline) { clearInterval(poll); console.log(`WARDEN_CLI_SMOKE result=${JSON.stringify({ provider, id: current.id, status: current.status, sessionId: current.threadId, auth: current.auth?.source, events: current.events.length, finalMessage: current.evidence.finalMessage, error: current.error })}`); app.quit(); } }, 500);
+      } catch (error) { console.error(`WARDEN_CLI_SMOKE blocked=${provider}:${error instanceof Error ? error.message : String(error)}`); app.quit(); }
     });
   }
   if (process.argv.includes('--warden-desk-codex-resume-smoke')) {
@@ -128,7 +164,7 @@ function createWindow(): void {
     mainWindow.webContents.once('did-finish-load', async () => {
       const cwd = process.env.WARDEN_DESK_SMOKE_CWD || process.cwd();
       try {
-        const run = await runs.start({ prompt: 'Create add.js exporting an add(a, b) function and add.test.js using node:test. Run node --test, fix any failure, and report the result. Do not commit.', cwd, attachContext: true });
+        const run = await runs.start({ provider: 'codex', authSource: 'subscription', prompt: 'Create add.js exporting an add(a, b) function and add.test.js using node:test. Run node --test, fix any failure, and report the result. Do not commit.', cwd, attachContext: true });
         const deadline = Date.now() + 180_000;
         const poll = setInterval(async () => {
           const current = runs.get(run.id);
@@ -148,9 +184,9 @@ function createWindow(): void {
   }
   if (process.argv.includes('--warden-desk-gui-smoke')) {
     mainWindow.webContents.once('did-finish-load', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
       await mainWindow?.webContents.executeJavaScript("document.querySelector('[data-workspace=build]')?.click(); document.querySelector('[data-execution=codex]')?.click();");
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       const image = await mainWindow?.capturePage(); const output = process.env.WARDEN_DESK_SCREENSHOT_PATH || '/tmp/warden-desk-gui.png'; if (image) writeFileSync(output, image.toPNG()); console.log(`WARDEN_GUI_SMOKE screenshot=${output}`); app.quit();
     });
   }

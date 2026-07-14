@@ -14,11 +14,15 @@
 
 Nothing in the legacy backend is removed or behaviorally changed by this desktop pass.
 
-## Structured provider boundary
+## Structured provider boundary and authentication
 
-`src/shared/types.ts` defines `BuildProvider`, normalized run events, capabilities, inputs, approvals, and lifecycle operations. Provider-specific payloads survive on `NormalizedRunEvent.providerPayload`, so normalization does not erase provider detail.
+`src/shared/types.ts` defines `BuildProvider`, normalized run events, capabilities, authentication reports, inputs, approvals, and lifecycle operations. Provider-specific payloads survive on `NormalizedRunEvent.providerPayload`, so normalization does not erase provider detail.
 
-The future persistent run record can include run/thread ID, prompt, project, working directory/branch, terminal transcript reference, changed files, diff, commands/tests, approvals, usage, result, and Brain proof state. This pass defines the boundary only; it generates no fake runs or proof.
+Structured Build is subscription-first. Warden asks each official local client for status or performs a bounded read-only entitlement probe, but it never reads provider credential files or handles OAuth tokens. Subscription child processes remove API credential variables from their inherited environment. Gemini additionally receives `GEMINI_DEFAULT_AUTH_TYPE=oauth-personal`. Authentication and refresh remain entirely inside `codex`, `claude`, `gemini`, or `grok`.
+
+The UI reports `subscription authenticated`, `API-key authenticated`, `disconnected`, `installed but not authenticated`, `unsupported`, or `unknown entitlement`. Every persisted run snapshots the active authentication/billing source. API-key execution is opt-in: it is unavailable unless an API credential is already present in the launch environment, requires a billing warning and per-run approval, and is never selected or resumed silently.
+
+The persistent run record includes provider session/thread ID, authentication source, prompt, project, working directory/branch, changed files, diff, commands/tests, approvals, normalized events with redacted raw metadata, result, and Brain proof state. No adapter simulates completion or proof.
 
 ## Codex App Server target
 
@@ -41,10 +45,13 @@ The next adapter slice should:
 
 `CodexAppServerProvider` now implements this lifecycle over stdio. It uses `untrusted` approvals and `workspace-write` sandboxing, records normalized events plus raw redacted payloads, persists the Codex thread ID, and resumes it after restart. It does not fall back to CLI keystroke injection.
 
-## Other structured providers
+## Structured provider implementations
 
-- Claude target: the official [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview), preserving its native permission and session events behind `BuildProvider`.
-- Gemini target: official [Gemini CLI headless mode](https://google-gemini.github.io/gemini-cli/docs/cli/headless.html), using structured output/session support rather than terminal scraping.
-- Grok Build target: official [Grok Build headless and scripting interface](https://docs.x.ai/build/cli/headless-scripting), including streamed output and resumable sessions where supported.
+- Codex uses App Server JSON-RPC with `account/read`, `thread/start|resume`, `turn/start|interrupt`, streamed notifications, and bidirectional approval responses. `account/read` is called with `refreshToken: false`.
+- Claude uses the official Claude Code headless client with `stream-json`, explicit session IDs, resume, cancellation, and the client-owned Claude.ai login. The adapter preserves raw structured events. It does not impersonate the unsupported interactive permission prompt; unapproved tools stay denied by Claude Code.
+- Gemini uses the official Gemini CLI headless client with `stream-json`, session IDs, resume, cancellation, and forced Google-account authentication for subscription runs. A failed entitlement probe is reported honestly and blocks dispatch.
+- Grok Build uses its official `streaming-json` headless interface with session IDs, resume, cancellation, and cached `grok login` authentication. API environment credentials are excluded from subscription runs.
 
-These adapters are deliberately disconnected in the UI today. No provider result is simulated.
+Local Terminal remains a separate PTY execution mode. None of these adapters call the legacy tmux prompt-injection runner or scrape terminal text.
+
+The current non-Codex headless clients do not expose a Warden-controlled approval callback in their stream interfaces, so their capability reports set `approvals: false` and leave unapproved tool actions to the official client policy. Codex App Server remains the fully bridged approval implementation. Grok ACP and Gemini ACP are the next path to richer provider-native approval negotiation without weakening this boundary.

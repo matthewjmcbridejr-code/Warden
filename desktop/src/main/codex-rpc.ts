@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { clientEnvironment } from './provider-auth';
 
 type JsonObject = Record<string, unknown>;
 type Pending = { resolve(value: unknown): void; reject(error: Error): void };
@@ -10,7 +11,9 @@ export class CodexRpcClient {
   onStderr?: (message: string) => void;
   async ensureStarted(): Promise<void> { if (this.ready) return this.ready; this.ready = this.start(); return this.ready; }
   private async start(): Promise<void> {
-    this.process = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: process.env, shell: false });
+    // Subscription-first: never let launch-environment API credentials override
+    // the official Codex login owned by `codex login`.
+    this.process = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: clientEnvironment('codex', 'subscription'), shell: false });
     this.process.stderr.on('data', (data) => this.onStderr?.(String(data)));
     this.process.on('exit', (code, signal) => { const error = new Error(`Codex App Server exited (${code ?? signal ?? 'unknown'}).`); for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); this.process = undefined; this.ready = undefined; });
     createInterface({ input: this.process.stdout }).on('line', (line) => this.receive(line));
