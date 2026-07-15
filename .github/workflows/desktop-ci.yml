@@ -51,7 +51,9 @@ jobs:
           package="$(find dist-electron -maxdepth 1 -name 'warden-ai-desk_*_amd64.deb' -print -quit)"
           test -n "$package"
           dpkg-deb --info "$package"
-          sha256sum "$package" > "$package.sha256"
+          package_dir="$(dirname "$package")"
+          package_name="$(basename "$package")"
+          (cd "$package_dir" && sha256sum "$package_name" > "$package_name.sha256")
 
       - name: Upload release-candidate artifact
         uses: actions/upload-artifact@v4

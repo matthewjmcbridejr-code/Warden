@@ -20,7 +20,9 @@ npm run check
 npm run package:deb
 package="$(find dist-electron -maxdepth 1 -name 'warden-ai-desk_*_amd64.deb' -print -quit)"
 dpkg-deb --info "$package"
-sha256sum "$package" > "$package.sha256"
+package_dir="$(dirname "$package")"
+package_name="$(basename "$package")"
+(cd "$package_dir" && sha256sum "$package_name" > "$package_name.sha256")
 ```
 
 - [ ] Normal-sandbox packaged runtime smoke passes without `--no-sandbox`.
