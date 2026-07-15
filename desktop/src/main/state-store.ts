@@ -8,7 +8,7 @@ import { createPlatform, presetInput } from './web-platforms';
 const createdAt = new Date(0).toISOString();
 const personalProfile: BrowserProfile = { id: 'profile-personal', name: 'Personal', createdAt };
 function defaultPlatforms(): WebPlatform[] { return ['claude', 'chatgpt', 'gemini', 'grok'].map((key, order) => createPlatform({ ...presetInput(key), id: `platform-${key}`, browserProfileId: personalProfile.id, order }, [personalProfile], order)); }
-const defaults: DesktopState = { version: 2, workspace: 'chat', selectedProvider: 'claude', selectedPlatformId: 'platform-claude', recentProjects: [], projects: [], browserProfiles: [personalProfile], platforms: defaultPlatforms(), removedPlatforms: [], terminals: [], windowBounds: { width: 1440, height: 920 } };
+const defaults: DesktopState = { version: 2, onboardingComplete: false, workspace: 'chat', selectedProvider: 'claude', selectedPlatformId: 'platform-claude', recentProjects: [], projects: [], browserProfiles: [personalProfile], platforms: defaultPlatforms(), removedPlatforms: [], terminals: [], windowBounds: { width: 1440, height: 920 } };
 function isProvider(value: unknown): value is ProviderId { return ['claude', 'chatgpt', 'gemini', 'grok'].includes(String(value)); }
 function isWorkspace(value: unknown): value is WorkspaceId { return value === 'chat' || value === 'build'; }
 function cleanTerminal(value: unknown): TerminalMetadata | null { if (!value || typeof value !== 'object') return null; const item = value as Partial<TerminalMetadata>; if (typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.cwd !== 'string') return null; return { id: item.id, name: item.name.slice(0, 60), cwd: item.cwd, status: 'stopped', history: Array.isArray(item.history) ? item.history.filter((x): x is string => typeof x === 'string').slice(-200) : [] }; }
@@ -33,7 +33,7 @@ export class StateStore {
       const legacySelected = `platform-${selectedProvider}`;
       const selectedPlatformId = typeof raw.selectedPlatformId === 'string' && platforms.some((item) => item.id === raw.selectedPlatformId) ? raw.selectedPlatformId : platforms.find((item) => item.id === legacySelected)?.id || platforms[0]?.id;
       const activeProjectId = typeof raw.activeProjectId === 'string' && projects.some((item) => item.id === raw.activeProjectId) ? raw.activeProjectId : projects[0]?.id;
-      this.state = { version: 2, workspace: isWorkspace(raw.workspace) ? raw.workspace : 'chat', selectedProvider, selectedPlatformId, activeProjectId, recentProjects, projects, browserProfiles, platforms, removedPlatforms, terminals, windowBounds: { ...defaults.windowBounds, ...((raw.windowBounds && typeof raw.windowBounds === 'object') ? raw.windowBounds : {}) } };
+      this.state = { version: 2, onboardingComplete: raw.onboardingComplete === true, workspace: isWorkspace(raw.workspace) ? raw.workspace : 'chat', selectedProvider, selectedPlatformId, activeProjectId, recentProjects, projects, browserProfiles, platforms, removedPlatforms, terminals, windowBounds: { ...defaults.windowBounds, ...((raw.windowBounds && typeof raw.windowBounds === 'object') ? raw.windowBounds : {}) } };
       if (platformWarnings.length) this.warning = `Recovered desktop state with warnings. ${platformWarnings.join(' ')}`;
     } catch (error) {
       const backup = `${this.file}.corrupt-${Date.now()}`; try { copyFileSync(this.file, backup); } catch { /* best effort */ }

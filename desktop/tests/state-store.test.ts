@@ -6,6 +6,14 @@ import { StateStore } from '../src/main/state-store';
 import { presetInput } from '../src/main/web-platforms';
 
 describe('project, profile, and platform persistence', () => {
+  it('persists the completed first-run state without changing the state schema', () => {
+    const root = mkdtempSync(join(tmpdir(), 'warden-onboarding-')); const first = new StateStore(root);
+    expect(first.state.onboardingComplete).toBe(false);
+    first.patch({ onboardingComplete: true });
+    const recovered = new StateStore(root);
+    expect(recovered.state.version).toBe(2); expect(recovered.state.onboardingComplete).toBe(true);
+  });
+
   it('persists editable platforms, profile assignment, order, removal, restoration, and projects', () => {
     const root = mkdtempSync(join(tmpdir(), 'warden-state-')); const first = new StateStore(root);
     const work = first.createProfile('Work');

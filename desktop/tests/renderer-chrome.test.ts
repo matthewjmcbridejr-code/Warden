@@ -28,4 +28,19 @@ describe('quiet native browser chrome', () => {
     expect(openDialog.indexOf('platform.hide()')).toBeLessThan(openDialog.indexOf('dialog.showModal()'));
     expect(renderer).toContain("platformDialog.addEventListener('close'"); expect(renderer).toContain('void openPlatformDialog()');
   });
+
+  it('makes first-run, project/profile context, custom platforms, and version information visible', () => {
+    expect(html).toContain('id="onboarding-dialog"'); expect(html).toContain('id="onboarding-project"'); expect(html).toContain('id="empty-add-platform"');
+    expect(html).toContain('id="context-project"'); expect(html).toContain('id="context-profile"'); expect(html).toContain('id="about-dialog"'); expect(html).toContain('id="version-badge"');
+    expect(renderer).toContain('window.wardenDesk.app.info()'); expect(renderer).toContain('onboardingComplete: true'); expect(renderer).toContain('renderWorkspaceContext()');
+    const aboutDialog = renderer.match(/async function openAboutDialog[\s\S]+?\n}/)?.[0] || '';
+    expect(aboutDialog.indexOf('platform.hide()')).toBeLessThan(aboutDialog.indexOf('dialog.showModal()'));
+    expect(css).toContain('.onboarding-grid'); expect(css).toContain('button:focus-visible');
+  });
+
+  it('reports release metadata without weakening the renderer boundary', () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string; license: string };
+    expect(packageJson.version).toBe('0.3.0'); expect(packageJson.license).toBe('Apache-2.0');
+    expect(main).toContain("ipcMain.handle('app:info'"); expect(main).toContain('requireMainRenderer(event)');
+  });
 });

@@ -1,12 +1,12 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
-  "license": "UNLICENSED",
-  "description": "Chromium-backed local desktop workspace for Warden AI Desk",
+  "license": "Apache-2.0",
+  "description": "Subscription-first Linux workstation for AI web workspaces, local terminals, and structured agent runs",
   "desktopName": "warden-ai-desk",
   "homepage": "https://github.com/matthewjmcbridejr-code/Warden",
-  "author": { "name": "Warden Project", "email": "noreply@localhost" },
+  "author": { "name": "Matt McBride" },
   "main": "dist/main.cjs",
   "scripts": {
     "build": "node scripts/build.mjs",

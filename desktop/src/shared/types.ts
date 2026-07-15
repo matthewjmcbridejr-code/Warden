@@ -53,6 +53,7 @@ export interface ProjectWorkspace {
 export interface TerminalMetadata { id: string; name: string; cwd: string; status: 'running' | 'stopped' | 'exited' | 'failed'; exitCode?: number; history: string[] }
 export interface DesktopState {
   version: 2;
+  onboardingComplete: boolean;
   workspace: WorkspaceId;
   selectedProvider: ProviderId;
   selectedPlatformId?: string;
@@ -65,6 +66,7 @@ export interface DesktopState {
   terminals: TerminalMetadata[];
   windowBounds: { width: number; height: number; x?: number; y?: number };
 }
+export interface AppInfo { name: string; version: string; platform: string; arch: string }
 
 export interface ContextPack { project: string; cwd: string; branch?: string; gitStatus: string; instructionFiles: Array<{ path: string; content: string }>; skills: string[]; memories: Array<{ id: string; kind: string; summary: string }>; brainContext?: string; assembledAt: string; warnings: string[] }
 export interface RunApproval { id: string; requestId: string | number; method: string; status: 'pending' | 'approved' | 'denied'; title: string; detail: string; createdAt: string; providerPayload: unknown }
@@ -85,7 +87,8 @@ export type Unsubscribe = () => void;
 export interface BuildProvider { readonly id: string; capabilities(): ProviderCapabilities; authStatus(): Promise<ProviderAuthReport>; startRun(input: StartRunInput): Promise<RunHandle>; resumeRun(input: ResumeRunInput): Promise<RunHandle>; cancelRun(runId: string): Promise<void>; respondToApproval(input: ApprovalResponse): Promise<void>; subscribe(runId: string, listener: RunEventListener): Unsubscribe }
 
 export interface DesktopApi {
-  state: { get(): Promise<{ state: DesktopState; warning?: string }>; update(patch: Partial<Pick<DesktopState, 'workspace' | 'selectedProvider' | 'selectedPlatformId' | 'activeProjectId'>>): Promise<DesktopState> };
+  app: { info(): Promise<AppInfo> };
+  state: { get(): Promise<{ state: DesktopState; warning?: string }>; update(patch: Partial<Pick<DesktopState, 'workspace' | 'selectedProvider' | 'selectedPlatformId' | 'activeProjectId' | 'onboardingComplete'>>): Promise<DesktopState> };
   platform: {
     list(): Promise<WebPlatform[]>; presets(): Promise<PlatformPreset[]>; profiles(): Promise<BrowserProfile[]>; createProfile(name: string): Promise<BrowserProfile>; renameProfile(id: string, name: string): Promise<BrowserProfile>; removeProfile(id: string): Promise<void>;
     create(input: Partial<WebPlatform> & { name: string; startUrl: string }): Promise<WebPlatform>;
