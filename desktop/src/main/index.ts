@@ -177,8 +177,10 @@ function createWindow(): void {
   }
   if (process.argv.includes('--warden-desk-gui-smoke')) {
     mainWindow.webContents.once('did-finish-load', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10_000));
-      await mainWindow?.webContents.executeJavaScript("document.querySelector('[data-workspace=build]')?.click(); document.querySelector('[data-execution=codex]')?.click();");
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      const scene = process.env.WARDEN_DESK_GUI_SCENE || 'build';
+      if (scene === 'platform') await mainWindow?.webContents.executeJavaScript("document.querySelector('#add-platform')?.click()");
+      else await mainWindow?.webContents.executeJavaScript("document.querySelector('[data-workspace=build]')?.click(); document.querySelector('[data-execution=codex]')?.click();");
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const image = await mainWindow?.capturePage(); const output = process.env.WARDEN_DESK_SCREENSHOT_PATH || '/tmp/warden-desk-gui.png'; if (image) writeFileSync(output, image.toPNG()); console.log(`WARDEN_GUI_SMOKE screenshot=${output}`); app.quit();
     });

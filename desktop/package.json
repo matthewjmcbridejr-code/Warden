@@ -37,6 +37,6 @@
     "files": ["dist/**", "package.json"],
     "directories": { "output": "dist-electron" },
     "asarUnpack": ["node_modules/node-pty/**"],
-    "linux": { "target": ["AppImage", "deb"], "category": "Development", "executableName": "warden-ai-desk", "icon": "assets/icon.png", "syncDesktopName": true }
+    "linux": { "target": ["AppImage", "deb"], "category": "Development", "executableName": "warden-ai-desk", "icon": "assets/icon.png", "syncDesktopName": true, "maintainer": "Warden contributors <noreply@users.noreply.github.com>" }
   }
 }
