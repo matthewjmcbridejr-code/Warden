@@ -51,7 +51,7 @@ export class CodexAppServerProvider implements BuildProvider {
     if (input.authSource === 'subscription' && auth.state !== 'subscription_authenticated') throw new Error(`Codex subscription run unavailable: ${auth.detail}`);
     if (input.authSource === 'api_key' && (auth.state !== 'api_key_authenticated' || !input.apiFallbackApproved)) throw new Error('Codex API-key execution requires the official client to be API-key authenticated and explicit billing approval.');
     const activeAuth = input.authSource === 'api_key' ? { ...auth, canStart: true, detail: 'Codex API-key authentication explicitly approved for this run.' } : auth;
-    const run = this.store.create({ provider: this.id, project: input.project, projectId: input.projectId, cwd: input.workingDirectory, prompt: input.prompt, model: input.model, context: input.context, auth: activeAuth }); this.publish(run);
+    const run = this.store.create({ provider: this.id, project: input.project, projectId: input.projectId, cwd: input.workingDirectory, projectCwd: input.projectCwd, safeWorkspace: input.safeWorkspace, prompt: input.prompt, model: input.model, context: input.context, auth: activeAuth }); this.publish(run);
     try {
       await this.rpc.ensureStarted();
       const response = await this.rpc.request<Record<string, unknown>>('thread/start', { cwd: input.workingDirectory, model: input.model || null, approvalPolicy: 'untrusted', sandbox: 'workspace-write', ephemeral: false });

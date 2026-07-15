@@ -5,6 +5,7 @@ import { StructuredCliProvider } from './cli-provider';
 import { CodexAppServerProvider } from './codex-adapter';
 import { assembleContext } from './context-assembler';
 import { collectEvidence } from './evidence';
+import { discardSafeWorkspace, GitSafeLoopError, isCleanGitProject, keepSafeWorkspace, startSafeWorkspace, undoConsolidatedCommit } from './git-safe-loop';
 import { createHandoff } from './handoff';
 import { RunStore } from './run-store';
 import { validateDirectory } from './terminal-manager';
@@ -26,6 +27,7 @@ export class RunManager {
   }
 
   async providerStatus(): Promise<ProviderAuthReport[]> { return Promise.all((Object.keys(this.providers) as StructuredProviderId[]).map((id) => this.providers[id].authStatus())); }
+  checkProject(cwd: string): Promise<{ isGit: boolean; clean: boolean }> { return isCleanGitProject(validateDirectory(cwd)); }
   list(projectId?: string): WardenRun[] { const runs = this.store.list(); return projectId ? runs.filter((run) => run.projectId === projectId || (!run.projectId && run.cwd === projectId)) : runs; }
   get(id: string): WardenRun { const run = this.store.get(id); if (!run) throw new Error('Run not found.'); return run; }
   private providerFor(run: WardenRun): BuildProvider { const provider = this.providers[run.provider as StructuredProviderId]; if (!provider) throw new Error(`No structured adapter for ${run.provider}.`); return provider; }
@@ -40,18 +42,61 @@ export class RunManager {
     return pack;
   }
 
-  async start(input: { provider: StructuredProviderId; prompt: string; cwd: string; projectId?: string; attachContext: boolean; model?: string; authSource: 'subscription' | 'api_key'; apiFallbackApproved?: boolean }): Promise<WardenRun> {
-    const cwd = validateDirectory(input.cwd); const prompt = String(input.prompt || '').trim();
+  async start(input: { provider: StructuredProviderId; prompt: string; cwd: string; projectId?: string; attachContext: boolean; model?: string; authSource: 'subscription' | 'api_key'; apiFallbackApproved?: boolean; safe?: boolean }): Promise<WardenRun> {
+    const projectCwd = validateDirectory(input.cwd); const prompt = String(input.prompt || '').trim();
     if (!prompt || prompt.length > 100_000) throw new Error('Enter a build prompt under 100,000 characters.');
     const provider = this.providers[input.provider]; if (!provider) throw new Error('Unknown structured provider.');
-    const context = input.attachContext ? await this.previewContext(cwd, prompt) : undefined;
-    const handle = await provider.startRun({ prompt, project: basename(cwd), projectId: input.projectId, workingDirectory: cwd, model: input.model, context, authSource: input.authSource, apiFallbackApproved: input.apiFallbackApproved });
-    return this.get(handle.runId);
+
+    // D1: Simple Mode runs Codex inside an isolated safe workspace, never
+    // the real project directory. input.safe is only honored for Codex —
+    // Claude/Gemini/Grok get parity in Phase 3.
+    let workingDirectory = projectCwd; let safeWorkspace: WardenRun['safeWorkspace'];
+    if (input.safe && input.provider === 'codex') {
+      safeWorkspace = await startSafeWorkspace(projectCwd);
+      workingDirectory = safeWorkspace.worktreePath;
+    }
+
+    const context = input.attachContext ? await this.previewContext(workingDirectory, prompt) : undefined;
+    try {
+      const handle = await provider.startRun({ prompt, project: basename(projectCwd), projectId: input.projectId, workingDirectory, projectCwd: safeWorkspace ? projectCwd : undefined, safeWorkspace, model: input.model, context, authSource: input.authSource, apiFallbackApproved: input.apiFallbackApproved });
+      return this.get(handle.runId);
+    } catch (error) {
+      if (safeWorkspace) await discardSafeWorkspace(projectCwd, safeWorkspace).catch(() => undefined);
+      throw error;
+    }
   }
 
   async resume(id: string, prompt: string): Promise<WardenRun> { const run = this.get(id); await this.providerFor(run).resumeRun({ runId: id, prompt: String(prompt || '').trim() || undefined }); return this.get(id); }
   cancel(id: string): Promise<void> { const run = this.get(id); return this.providerFor(run).cancelRun(id); }
   approve(runId: string, approvalId: string, decision: 'approve' | 'deny', scope?: 'once' | 'session'): Promise<void> { const run = this.get(runId); return this.providerFor(run).respondToApproval({ runId, approvalId, decision, scope }); }
+
+  /** Keep changes — consolidate the safe workspace into one saved version on the real project. Never pushes remotely. */
+  async keep(id: string): Promise<WardenRun> {
+    const run = this.get(id);
+    if (!run.safeWorkspace || !run.projectCwd) throw new Error('This task has no safe workspace to keep.');
+    if (run.status === 'running' || run.status === 'starting' || run.status === 'waiting_approval') throw new Error('Wait for the task to finish before keeping changes.');
+    const summary = run.evidence.finalMessage?.slice(0, 200) || `Warden update: ${run.prompt.slice(0, 120)}`;
+    let safeWorkspace;
+    try { safeWorkspace = await keepSafeWorkspace(run.projectCwd, run.safeWorkspace, summary); }
+    catch (error) { throw error instanceof GitSafeLoopError ? error : new Error(error instanceof Error ? error.message : String(error)); }
+    const updated = this.store.update(id, { safeWorkspace }); if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) this.window.webContents.send('runs:changed', updated); return updated;
+  }
+
+  /** Discard (pre-acceptance) — tears down the isolated worktree only; the real project is never touched. */
+  async discard(id: string): Promise<WardenRun> {
+    const run = this.get(id);
+    if (!run.safeWorkspace || !run.projectCwd) throw new Error('This task has no safe workspace to discard.');
+    const safeWorkspace = await discardSafeWorkspace(run.projectCwd, run.safeWorkspace);
+    const updated = this.store.update(id, { safeWorkspace }); if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) this.window.webContents.send('runs:changed', updated); return updated;
+  }
+
+  /** Undo this update (post-acceptance) — a reversible revert, never a destructive reset. */
+  async undoUpdate(id: string): Promise<WardenRun> {
+    const run = this.get(id);
+    if (!run.safeWorkspace || !run.projectCwd) throw new Error('This task has no saved update to undo.');
+    await undoConsolidatedCommit(run.projectCwd, run.safeWorkspace);
+    return run;
+  }
   async handoff(id: string): Promise<{ path: string; content: string }> { let run = this.get(id); run = this.store.update(id, { evidence: await collectEvidence(run) }); const content = createHandoff(run); return { path: this.store.saveArtifact(id, 'handoff.md', content), content }; }
 
   async saveProof(id: string): Promise<ProofState> {
