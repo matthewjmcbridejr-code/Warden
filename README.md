@@ -1,140 +1,137 @@
-# Warden
+# Warden AI Desk
 
-[![CI](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/ci.yml/badge.svg)](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+**A subscription-first Linux workstation that keeps AI conversations, local project tools, and structured agent work in one durable project workspace.**
 
-**A local-first control room for AI coding agents** — shared memory, task handoffs, proof gates, and a human-visible command center.
+[![Desktop CI](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/desktop-ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-789e78.svg)](LICENSE)
 
-Warden exists to answer one question reliably: *"What is going on across all my agents, projects, repos, proofs, failures, and next actions — and what should happen next?"*
+![Warden AI Desk Build workspace](docs/screenshots/warden-ai-desk-build.png)
 
-![Warden control room](docs/screenshots/warden-control-room-real.png)
+Warden is more than a browser with AI tabs. A project restores its repository, browser profile, provider workspaces, split layout, terminal references, structured runs, context, approvals, evidence, and handoffs. Chat remains a safe web surface; Build uses official locally authenticated provider clients and records what happened.
 
-## Why this exists
+> **Release candidate:** 0.3.0 targets Debian/Ubuntu on x86-64. Provider subscriptions and local clients are not bundled.
 
-Running multiple coding agents (Claude Code, Codex, Gemini) against the same projects creates three problems Warden solves:
+![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.png)
 
-1. **Amnesia** — every agent session starts cold. Warden gives all agents a shared, queryable memory (decisions, proofs, failures, context packs) over MCP.
-2. **Coordination** — agents can't hand work to each other. Warden's task board and handoff protocol let one agent post work with context and another claim it.
-3. **Trust** — autonomous agents want to merge and deploy. Warden inserts manual proof gates: an operator approves, blocks, or demands more evidence before anything ships.
+## Two surfaces, one project
+
+| Chat | Build |
+|---|---|
+| Persistent Claude, ChatGPT, Gemini, Grok, HyperAgent, and custom websites | Local PTYs plus structured Codex, Claude Code, Gemini CLI, and Grok runs |
+| Named Chromium profiles; no Chrome-cookie import | Subscription authentication owned by each official client |
+| Sandboxed remote content with no Warden preload or privileged IPC | Durable events, approvals, cancellation, evidence, proof, and handoffs |
+| OAuth popups stay visible in the originating profile | API-key billing is an explicit per-run fallback, never a silent choice |
+
+![Add a custom AI platform](docs/screenshots/warden-ai-desk-platform.png)
+
+## What works today
+
+- Project-centered restoration across Chat, Build, browser profile, platform selection, execution mode, terminals, and runs.
+- Persistent sandboxed provider sessions and editable custom Web Platforms with HyperAgent and other ordinary starter presets.
+- Secure OAuth popup/redirect handling with visible domain-trust decisions.
+- Managed local project terminals with restartable metadata and private command history.
+- Codex App Server threads, streamed events, bidirectional approvals, cancellation, resume, evidence, and proof.
+- Subscription-first headless adapters for Claude Code, Gemini CLI, and Grok when their installed client and entitlement support it.
+- Compact cross-provider handoffs and repository context packs with instructions, skills, git state, scoped memories, and optional private Warden Brain context.
+- Crash-safe JSON persistence, corrupt-state recovery, a tray, keyboard navigation, and a native overflow menu that renders above remote content.
+
+## Provider capability matrix
+
+“Subscription” means Warden invokes the official local client and leaves sign-in/token refresh to it. Availability still depends on the client version, account, region, and plan.
+
+| Integration | Web workspace | Persistent session | Subscription auth | Structured Build | Approval bridge | Resume | Current limitation |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| ChatGPT / Codex | Yes | Yes | Yes, `codex login` | **Codex App Server** | **Yes** | Yes | Requires a compatible installed Codex client |
+| Claude / Claude Code | Yes | Yes | Yes, Claude Code login | Headless stream | No | Yes | Official stream does not expose an interactive Warden approval callback |
+| Gemini / Gemini CLI | Yes | Yes | Google account / Code Assist entitlement | Headless stream | No | Yes | Entitlement probing varies by Gemini CLI version and may report unknown/unsupported |
+| Grok / Grok Build | Yes | Yes | Yes, `grok login` | Headless stream | No | Yes | ACP-grade approval negotiation remains future work |
+| HyperAgent | Preset | Yes | Website-owned | No | No | Website only | A Web Platform is not a structured provider |
+| Any HTTPS site | Yes | Yes | Website-owned | No | No | Website only | Adding a URL never grants filesystem, terminal, Brain, or execution access |
+
+See the [full capability notes](docs/capability-matrix.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph Agents
-    CC[Claude Code]
-    CX[Codex CLI]
-    GM[Gemini]
-  end
-  subgraph Warden["Warden (local-first)"]
-    MCP["Warden Brain MCP<br/>47 tools"]
-    MEM["Shared memory<br/>SQLite + embeddings"]
-    BOARD["Task board<br/>+ handoffs"]
-    GATE["Proof gates<br/>(operator-approved)"]
-    API["FastAPI"]
-  end
-  UI["Web control room"]
-  NOTION["Notion<br/>command center"]
-
-  CC & CX & GM <--> MCP
-  MCP --> MEM & BOARD & GATE
-  API --> UI
-  GATE --> NOTION
+  P["Project workspace"] --> UI["Electron renderer"]
+  UI --> WEB["Sandboxed WebContentsViews"]
+  UI --> IPC["Narrow validated IPC"]
+  WEB --> PROF["Named persistent Chromium profiles"]
+  IPC --> PTY["Local PTY manager"]
+  IPC --> RUN["Provider-neutral run manager"]
+  RUN --> CX["Codex App Server"]
+  RUN --> CL["Claude Code headless"]
+  RUN --> GM["Gemini CLI headless"]
+  RUN --> GR["Grok headless"]
+  RUN --> STORE["Events, approvals, evidence, proof"]
+  STORE -. optional .-> BRAIN["Private Warden Brain"]
 ```
 
-- **Warden** — the operator control room (UI + proof gates)
-- The HTTP API lives under the `/api/mcharness` namespace (legacy internal name; a rename with aliases is planned)
-- **Warden Brain MCP** — the agent-facing surface: any MCP client gets memory, board, and handoffs
-- Semantic recall uses **Ollama `mxbai-embed-large`** embeddings with a pure-SQLite cosine fallback — no cloud dependency required
+Electron/Chromium is intentional: Google and OpenAI authentication is unreliable in many Linux system webviews, while Chromium is the proven compatibility surface used by multi-service desktop wrappers. Remote provider pages run in sandboxed `WebContentsView`s with `nodeIntegration: false`, context isolation, no preload, no script injection, deny-by-default permissions, and constrained navigation. Named profiles use separate `persist:` partitions and never import or decrypt Chrome cookies.
 
-Full details: [docs/architecture.md](docs/architecture.md)
+Structured Build is a different trust boundary. Official local clients own authentication. Subscription launches scrub API credential variables; Warden will not silently fall back to API billing. The legacy tmux prompt-injection runner remains isolated in the older service and is not a desktop dependency.
 
-## Quick start
+Read [desktop/architecture.md](desktop/architecture.md) and [SECURITY.md](SECURITY.md) for the full boundary model.
+
+## Install on Debian or Ubuntu
+
+Download the 0.3.0 `.deb` and checksum from a future tagged release, then verify before installing:
 
 ```bash
-git clone https://github.com/matthewjmcbridejr-code/Warden.git && cd Warden
-pip install -e .
-warden up
-# Opens http://127.0.0.1:4242 in your browser
+sha256sum --check warden-ai-desk_0.3.0_amd64.deb.sha256
+sudo apt install ./warden-ai-desk_0.3.0_amd64.deb
+warden-ai-desk
 ```
 
-(`bash scripts/warden-up` does the same thing and creates the virtualenv for you.)
+This branch prepares the artifact but does not publish it. Linux must support Electron's normal Chromium sandbox/AppArmor behavior; Warden does not install a permanent `--no-sandbox` workaround.
 
-Connect an agent (Claude Code example):
+## Develop and verify
 
 ```bash
-claude mcp add warden -- warden mcp
+git clone https://github.com/matthewjmcbridejr-code/Warden.git
+cd Warden/desktop
+npm ci
+npm run dev          # build and launch
+npm run check        # typecheck, tests, production build
+npm run package:deb  # local .deb; never publishes
 ```
 
-Smoke proof in one command:
+The desktop suite covers state recovery, URL policy, profile assignment, OAuth popups, native navigation/menu boundaries, adapters, authentication reporting, events, runs, approvals, context, handoffs, and evidence. See [CONTRIBUTING.md](CONTRIBUTING.md) for the older Python services and contributor workflow.
 
-```bash
-bash scripts/warden_smoke.sh
-```
+## Local data and privacy
 
-See [docs/quickstart.md](docs/quickstart.md) and [docs/mcp_client_connect.md](docs/mcp_client_connect.md).
+Desktop state, named Chromium profile data, redacted run records, diagnostics, and proof artifacts live under Electron's per-user application-data directory (normally `~/.config/Warden AI Desk/` on Linux). They are intentionally excluded from Git. Removing a platform does not remove its profile data; clearing site data is a separately confirmed troubleshooting action and can affect related domains sharing the same Warden profile.
 
-## MCP tool surface (47 tools)
+Warden never copies OAuth tokens between providers, imports Chrome cookies, or claims a private Brain save succeeded when the service is unavailable. Read [docs/privacy.md](docs/privacy.md) before using sensitive repositories.
 
-| Area | Tools |
-|------|-------|
-| Identity & session | `warden_bootstrap`, `warden_me`, `warden_update_me`, `warden_health` |
-| Shared memory | `warden_recall`, `warden_remember`, `warden_context_pack`, `warden_memory_context`, `warden_ingest`, `warden_search_docs` |
-| Coordination | `warden_board`, `warden_post_task`, `warden_claim_task`, `warden_handoff`, `warden_who_is_working`, `warden_workstream`, `warden_agent` |
-| Planning & dispatch | `warden_captain_plan`, `warden_captain_recent_plans`, `warden_captain_dispatch_step`, `warden_run_get` |
-| Resident assistant | `warden_ask_marius` (assistant Q&A) |
-| Connectors & mail | `warden_connectors_providers`, `warden_connectors_accounts`, `warden_mail_*` (4 tools) |
-| Second brain vault | `brain_status`, `brain_search`, `brain_ask`, `brain_write_note`, plus ingest/reindex/mirror tools |
+## Screenshots
 
-## Agents (honest status)
+| Provider workspace | Project-centered Build | Custom platform boundary |
+|---|---|---|
+| ![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.png) | ![Structured Build run](docs/screenshots/warden-ai-desk-build.png) | ![Custom platform form](docs/screenshots/warden-ai-desk-platform.png) |
 
-- **Codex CLI** — runnable only on the private service when the tmux/Codex runner flags are enabled
-- **Jules Remote** — connected for planning/status only; not executable yet
-- **Captain** — OpenRouter planning on the private service; supervised step loop is manual
-- **Assistant** — resident terminal assistant with server context: `./scripts/marius` ([docs](docs/marius_cli.md))
+The repository media uses a signed-out provider surface plus synthetic project, prompt, and run data. It contains no provider conversations, credentials, or browser-session data.
 
-## Safety model
+## Limitations and roadmap
 
-Warden is deliberately **not** an autonomous agent framework:
+- Codex is currently the only structured provider with a full Warden-controlled approval bridge.
+- Claude Code, Gemini CLI, and Grok client capabilities differ by installed version; Warden reports unavailable or unknown states rather than pretending dispatch is ready.
+- Terminal processes do not survive an app/host restart; their metadata restores as stopped sessions.
+- Linux x86-64 Debian packaging is the release target; other distributions and architectures are not yet release-proven.
+- Brain proof saving requires the separate private Warden service; local proof remains available when it is offline.
+- HyperAgent Remote Build Worker, webhook orchestration, and a public Warden worker/MCP protocol are deliberately deferred.
 
-- No arbitrary shell execution through the API
-- No auto-merge, no auto-deploy
-- No autonomous multi-step execution — the Captain plans; a human dispatches each step
-- Proof gates require operator action: approve / block / request more evidence
-- The public service mode runs with all runners disabled (read-mostly preview)
+See [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
 
-See [SECURITY.md](SECURITY.md).
+## Engineering case study
 
-## Testing
+Warden began as a local control room around a CLI/tmux dispatcher. The desktop work required replacing “prompt injection plus terminal scraping” with explicit capability boundaries: untrusted websites, local terminals, and provider-native structured adapters. The hard parts were not tab rendering—they were Chromium profile ownership, secure OAuth popup lifecycles, native-layer UI above `WebContentsView`, subscription-vs-API billing truth, restart-safe event normalization, and evidence that survives a provider handoff.
 
-```bash
-pytest tests --ignore=tests/e2e --ignore=tests/browser
-```
+The result demonstrates Electron security architecture, native/renderer IPC design, durable state recovery, PTY integration, protocol adapters, provider-neutral event modeling, subscription-aware authentication reporting, and testable failure honesty.
 
-**850+ passing tests** cover the memory store, MCP tools, ingest pipeline, mail connectors, brain vault, and the resident assistant. Playwright e2e specs live in `tests/e2e/`.
-
-## Repo layout
-
-```
-src/warden/         engine: FastAPI app, MCP server, memory, captain, gateway
-web/                control room UI
-scripts/            smoke tests, MCP launchers, assistant CLI
-tests/              850+ unit/integration tests + Playwright e2e
-docs/               architecture, runbooks, demo scripts
-browser-extension/  Chrome extension for page capture into memory
-```
-
-More: [docs/warden_repo_layout.md](docs/warden_repo_layout.md)
-
-## Docs
-
-- [Architecture](docs/architecture.md)
-- [Quickstart](docs/quickstart.md)
-- [Operator smoke runbook](docs/warden_operator_smoke.md)
-- [Mission Control API](docs/warden_mission_control_api.md)
-- [Demo script](docs/warden_demo_script.md)
-- [Memory model](docs/warden_memory.md)
+Built by **Matt McBride**. Repository: [matthewjmcbridejr-code/Warden](https://github.com/matthewjmcbridejr-code/Warden).
 
 ## License
 
-See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

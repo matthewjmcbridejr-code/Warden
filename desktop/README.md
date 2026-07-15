@@ -1,40 +1,59 @@
-# Warden AI Desk
+# Warden AI Desk desktop
 
-Warden AI Desk is a local Linux command center for project work. The Electron shell combines sandboxed, login-persistent AI websites, managed project terminals, and subscription-first structured agent runs without treating those three capability levels as interchangeable.
+The Electron application is Warden's project-centered Linux workstation. It combines persistent sandboxed AI websites, local PTYs, and subscription-first structured provider runs while keeping those trust levels separate.
 
-## Install, verify, and package
+## Run locally
 
 ```bash
-cd desktop
-npm install
-npm run check
-npm start
+npm ci
+npm run dev
+```
+
+`npm run dev` performs the same deterministic bundle used by production and opens Electron. Use a separate OS test account or named Warden browser profile for disposable authentication testing.
+
+## Verify and package
+
+```bash
+npm run typecheck
+npm test
+npm run build
 npm run package:deb
 ```
 
-The Debian artifact is written to `desktop/dist-electron/`. Packaging does not publish or release it. The package installs Electron Builder's normal Chromium sandbox/AppArmor support; Warden does not ship a permanent `--no-sandbox` workaround.
+`npm run check` combines typecheck, tests, and the production build. `package:deb` writes to `dist-electron/` and never publishes. Do not launch with a permanent `--no-sandbox` flag.
 
-## Custom AI platforms
+## Source map
 
-Chat uses editable `WebPlatform` definitions rather than hardcoded provider tabs. Claude, ChatGPT, Gemini, and Grok are initial ordinary definitions. HyperAgent, Perplexity, and Microsoft Copilot are available from the same starter-preset picker used to create any custom platform.
+```text
+src/main/       Electron lifecycle, IPC, WebContentsViews, PTYs, runs, adapters
+src/preload/    narrow typed renderer API; never attached to remote content
+src/renderer/   local application chrome and project/run UI
+src/shared/     provider-neutral state, platform, auth, event, and run contracts
+tests/          policy, persistence, OAuth, menu, adapter, evidence, and UI tests
+assets/         application icon
+```
 
-Each definition has a stable ID, category, start URL, icon, named browser profile, project associations, trusted first-party/authentication domains, main/split availability, navigation state, ordering, pinning, and enabled state. Definitions and last trusted URL restore after restart. Removed custom platforms go to a restorable list; removing one never deletes browser data.
+## Three boundaries
 
-Named profiles map to persistent `persist:warden-profile-*` Chromium partitions. Platforms assigned to one profile intentionally share that profile's login state; profiles never share a partition and Warden never imports Chrome cookies. A platform `WebContentsView` has no preload, Node integration, terminal, filesystem, Brain, token, or IPC access. Context isolation, Chromium sandboxing, web security, HTTPS validation, navigation constraints, popup handling, and deny-by-default permissions stay enabled.
+- A **Web Platform** is an untrusted website. Claude, ChatGPT, Gemini, Grok, HyperAgent, and custom URLs all use the same editable definition model.
+- A **Structured Provider** is a deliberate integration with an official local App Server, CLI, SDK, headless, MCP, or ACP interface.
+- A **Warden Extension** is a separately installed trusted adapter.
 
-Unknown OAuth/navigation domains open a native decision prompt with **Allow once**, **Trust for this platform**, **Open in system browser**, or **Cancel**. Approved OAuth popups remain visible, retain the originating named profile partition and opener relationship, and use the same locked-down remote-content preferences as the main platform view. Downloads pause for an explicit save approval. “Clear this site's data” is an origin-scoped troubleshooting action behind the overflow menu. Cookies may be stored at registrable-domain scope, so the confirmation honestly warns that related sites in the same named profile can also be affected.
+Remote views have no preload or privileged IPC. Adding a URL never grants Build access.
 
-The compact Chat overflow is an Electron native menu opened through sender-validated, coordinate-validated IPC. It renders above the provider `WebContentsView`, keeps GTK keyboard and Escape handling, clamps its anchor after resize/maximize, and only targets the active platform. Navigation, popup, permission, and menu diagnostics are written to a private rotating `diagnostics/platform-events.jsonl` file containing host/protocol and fingerprints only—not URL paths, queries, console text, cookies, headers, passwords, or tokens.
+## State and recovery
 
-## Projects and Build
+On Linux, Electron normally stores Warden data under `~/.config/Warden AI Desk/`:
 
-A project stores its repository directory, named browser profile, selected/split platforms, Chat/Build workspace, execution mode, terminals, and active run reference. Switching projects restores that desktop context. Terminal metadata survives restart as stopped sessions; Warden never claims the PTY process itself survived.
+- `desktop-state.json` — projects, platforms, profiles, layout, and stopped terminal metadata
+- `Partitions/` and Chromium data — named browser profile sessions
+- `runs/` — redacted durable run records, evidence, handoffs, and proof
+- `diagnostics/platform-events.jsonl` — privacy-filtered navigation/popup/menu events
 
-Structured Build is separate from web platforms:
+Writes use atomic replacement where appropriate. Corrupt state is preserved as a diagnostic backup before defaults are recovered. Removing a platform does not delete browser data. Clearing site data is separate, confirmed, and may affect related domains in the same profile.
 
-- Codex uses the installed Codex App Server with ChatGPT subscription login, streamed events, approvals, evidence, cancellation, and resume.
-- Claude uses the official Claude Code headless client and its Claude.ai subscription login.
-- Gemini uses the official Gemini CLI headless client and Google-account entitlement.
-- Grok uses the official Grok headless client and `grok login` state.
+## Provider development
 
-Provider authentication remains owned by those clients. API-key billing is an explicitly approved fallback and is never selected silently. Durable runs retain normalized/redacted events, provider session references, approvals, diffs, commands/tests, handoffs, and honest local/Brain proof state. The legacy tmux prompt-injection runner is not a desktop dependency.
+Structured runs use `BuildProvider` and normalized events while preserving redacted provider payloads. Subscription status is checked through the installed client; Warden never reads its token files. API fallback is unavailable unless explicitly configured and each run is approved in the UI.
+
+Read [architecture.md](architecture.md), [../docs/capability-matrix.md](../docs/capability-matrix.md), and [../SECURITY.md](../SECURITY.md).

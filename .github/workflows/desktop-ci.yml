@@ -1,0 +1,64 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [master, feat/warden-ai-desk]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Build Debian package without publishing
+        run: npx electron-builder --linux deb --publish never
+
+      - name: Validate Debian metadata and create checksum
+        run: |
+          package="$(find dist-electron -maxdepth 1 -name 'warden-ai-desk_*_amd64.deb' -print -quit)"
+          test -n "$package"
+          dpkg-deb --info "$package"
+          sha256sum "$package" > "$package.sha256"
+
+      - name: Upload release-candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: warden-ai-desk-debian-${{ github.sha }}
+          path: |
+            desktop/dist-electron/*.deb
+            desktop/dist-electron/*.sha256
+          if-no-files-found: error
+          retention-days: 14
