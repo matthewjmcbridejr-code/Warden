@@ -28,6 +28,8 @@ The Chat overflow is an Electron native `Menu`, not renderer HTML, because `WebC
 
 `StateStore` persists platforms, named profiles, projects, window bounds, and stopped terminal metadata with atomic JSON replacement. A project owns repository path, branch snapshot, profile, selected/split platforms, Chat/Build workspace, execution mode, terminal IDs, and active run. Corrupt definitions are skipped; corrupt state is preserved before safe defaults recover.
 
+Simple Build and Developer Mode are two views over that same project and run state. Simple Build starts Codex in an isolated `warden/task-*` worktree. On acceptance, Warden stages the complete isolated tree, synthesizes one commit parented to the recorded base, verifies that the real project is still clean and unchanged, and applies it through an abortable cherry-pick. This captures normal App Server working-tree edits without relying on agent-created commits or repository Git identity. Undo requires a clean project and records a separate revert commit; it never rewrites history.
+
 Browser data and run records stay separate from platform definitions. Removing a platform preserves profile data. Clearing configured site data is separately confirmed and warns that registrable-domain cookies may affect related sites in the same profile.
 
 ## Structured runs

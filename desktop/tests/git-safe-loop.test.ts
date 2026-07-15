@@ -84,6 +84,29 @@ describe('keepSafeWorkspace / discardSafeWorkspace / undoConsolidatedCommit', ()
     expect(worktrees).not.toContain(workspace.worktreePath);
   });
 
+  it('keep: captures normal uncommitted agent edits, untracked files, and deletions', async () => {
+    const workspace = await startSafeWorkspace(projectDir);
+    writeFileSync(join(workspace.worktreePath, 'README.md'), 'uncommitted agent edit\n');
+    writeFileSync(join(workspace.worktreePath, 'new-file.txt'), 'new\n');
+
+    const kept = await keepSafeWorkspace(projectDir, workspace, 'Warden update: working tree');
+    expect(kept.status).toBe('kept');
+    expect(readFileSync(join(projectDir, 'README.md'), 'utf8')).toBe('uncommitted agent edit\n');
+    expect(readFileSync(join(projectDir, 'new-file.txt'), 'utf8')).toBe('new\n');
+    expect(await git(projectDir, ['status', '--porcelain'])).toBe('');
+  });
+
+  it('keep: does not require Git identity in the project configuration', async () => {
+    const workspace = await startSafeWorkspace(projectDir);
+    writeFileSync(join(workspace.worktreePath, 'README.md'), 'identity-independent\n');
+    await git(projectDir, ['config', '--unset', 'user.email']);
+    await git(projectDir, ['config', '--unset', 'user.name']);
+
+    const kept = await keepSafeWorkspace(projectDir, workspace, 'Warden update without local identity');
+    expect(kept.status).toBe('kept');
+    expect(readFileSync(join(projectDir, 'README.md'), 'utf8')).toBe('identity-independent\n');
+  });
+
   it('keep: stops and explains instead of forcing when the original project changed underneath it (conflict, not force)', async () => {
     const workspace = await startSafeWorkspace(projectDir);
     writeFileSync(join(workspace.worktreePath, 'README.md'), 'agent change\n');
@@ -106,6 +129,7 @@ describe('keepSafeWorkspace / discardSafeWorkspace / undoConsolidatedCommit', ()
     const workspace = await startSafeWorkspace(projectDir);
     const result = await keepSafeWorkspace(projectDir, workspace, 'Warden update');
     expect(result.status).toBe('discarded');
+    expect(await git(projectDir, ['worktree', 'list'])).not.toContain(workspace.worktreePath);
   });
 
   it('discard: tears down the worktree only, leaves the real project byte-for-byte unchanged', async () => {
@@ -128,7 +152,9 @@ describe('keepSafeWorkspace / discardSafeWorkspace / undoConsolidatedCommit', ()
     await git(workspace.worktreePath, ['commit', '-q', '-m', 'agent change']);
     const kept = await keepSafeWorkspace(projectDir, workspace, 'Warden update');
 
-    await undoConsolidatedCommit(projectDir, kept);
+    const undone = await undoConsolidatedCommit(projectDir, kept);
+    expect(undone.status).toBe('undone');
+    expect(undone.undoCommit).toBeTruthy();
     expect(readFileSync(join(projectDir, 'README.md'), 'utf8')).toBe('hello\n');
 
     // history still contains both the update and its revert — not erased
@@ -141,5 +167,14 @@ describe('keepSafeWorkspace / discardSafeWorkspace / undoConsolidatedCommit', ()
     const workspace = await startSafeWorkspace(projectDir);
     await expect(undoConsolidatedCommit(projectDir, workspace)).rejects.toThrow(GitSafeLoopError);
     await discardSafeWorkspace(projectDir, workspace);
+  });
+
+  it('undo: refuses a dirty real project so unrelated user changes are never committed', async () => {
+    const workspace = await startSafeWorkspace(projectDir);
+    writeFileSync(join(workspace.worktreePath, 'README.md'), 'agent change\n');
+    const kept = await keepSafeWorkspace(projectDir, workspace, 'Warden update');
+    writeFileSync(join(projectDir, 'user-work.txt'), 'do not commit me\n');
+    await expect(undoConsolidatedCommit(projectDir, kept)).rejects.toThrow('Save or discard current project changes');
+    expect(await git(projectDir, ['status', '--porcelain'])).toContain('user-work.txt');
   });
 });

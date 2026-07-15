@@ -19,6 +19,8 @@
 #sb-task{display:block;width:100%;min-height:110px;margin:8px 0 10px;background:#101511;border:1px solid #344037;color:#e2ece0;border-radius:7px;padding:11px;resize:vertical}
 #sb-progress-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 #sb-progress-list .sb-step{font-size:12px;color:#c3d0c2;padding:6px 0;border-bottom:1px solid #202722}
+#sb-progress-list .sb-step-error,.sb-error{color:#ffb5ad;border-color:#6d3531;background:#2a1715}
+.sb-error{border:1px solid #6d3531;border-radius:7px;padding:10px;margin-bottom:12px;font-size:12px}
 #sb-approval{border:1px solid #66572e;background:#282315;padding:12px;border-radius:7px;margin:10px 0}
 #sb-approval p{color:#c9bd8f;font-size:12px;margin:4px 0 10px}
 #sb-technical{background:#090c0a;border:1px solid #29332b;border-radius:6px;padding:10px;white-space:pre-wrap;overflow:auto;font:11px/1.5 ui-monospace,monospace;max-height:220px;margin-top:8px}

@@ -1,6 +1,6 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Subscription-first Linux workstation for AI web workspaces, local terminals, and structured agent runs",

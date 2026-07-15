@@ -80,8 +80,8 @@ export interface ProviderAuthReport { provider: StructuredProviderId; state: Pro
 // worktree, never the real project directory. "Keep changes" consolidates
 // into one saved version (never touching a dirty original); "Undo this
 // update" reverts the consolidated commit (never `git reset --hard`).
-export type SafeWorkspaceStatus = 'active' | 'kept' | 'discarded' | 'conflict';
-export interface SafeWorkspace { worktreePath: string; branch: string; baseCommit: string; status: SafeWorkspaceStatus; consolidatedCommit?: string; conflictDetail?: string }
+export type SafeWorkspaceStatus = 'active' | 'kept' | 'undone' | 'discarded' | 'conflict';
+export interface SafeWorkspace { worktreePath: string; branch: string; baseCommit: string; status: SafeWorkspaceStatus; consolidatedCommit?: string; undoCommit?: string; conflictDetail?: string }
 
 export interface WardenRun { id: string; provider: string; model?: string; project: string; projectId?: string; cwd: string; projectCwd?: string; prompt: string; status: 'starting' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; auth?: ProviderAuthReport; threadId?: string; turnId?: string; createdAt: string; updatedAt: string; context?: ContextPack; events: NormalizedRunEvent[]; approvals: RunApproval[]; evidence: RunEvidence; proof: ProofState; error?: string; safeWorkspace?: SafeWorkspace }
 

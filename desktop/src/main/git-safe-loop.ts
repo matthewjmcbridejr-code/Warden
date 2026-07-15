@@ -20,6 +20,11 @@ async function git(cwd: string, args: string[]): Promise<{ stdout: string; stder
   }
 }
 
+async function cleanupWorkspace(projectCwd: string, workspace: SafeWorkspace): Promise<void> {
+  await git(projectCwd, ['worktree', 'remove', workspace.worktreePath, '--force']).catch(() => undefined);
+  await git(projectCwd, ['branch', '-D', workspace.branch]).catch(() => undefined);
+}
+
 /** Step 1 — Simple Mode only accepts a clean Git-backed project. Dirty/advanced repos stay in Developer Mode. */
 export async function isCleanGitProject(cwd: string): Promise<{ isGit: boolean; clean: boolean }> {
   try {
@@ -61,12 +66,20 @@ async function verifyUnchanged(projectCwd: string, baseCommit: string): Promise<
  * original project is unchanged. Never pushes remotely (step 7).
  */
 export async function keepSafeWorkspace(projectCwd: string, workspace: SafeWorkspace, summary: string): Promise<SafeWorkspace> {
-  if (workspace.status !== 'active') throw new GitSafeLoopError('This safe workspace is no longer active.');
-  const worktreeStatus = (await git(workspace.worktreePath, ['status', '--porcelain'])).stdout.trim();
-  if (worktreeStatus) throw new GitSafeLoopError('The task workspace has uncommitted changes — this should not happen; nothing was applied.');
+  if (!['active', 'conflict'].includes(workspace.status)) throw new GitSafeLoopError('This safe workspace is no longer available to keep.');
 
-  const workDiff = (await git(workspace.worktreePath, ['diff', workspace.baseCommit, 'HEAD'])).stdout;
-  if (!workDiff.trim()) return { ...workspace, status: 'discarded' }; // nothing to keep
+  // Structured agents normally leave working-tree edits rather than Git
+  // commits. Stage the complete isolated tree, including deletions and
+  // untracked files, then synthesize one commit whose parent is the version
+  // Warden started from. This never changes the real project or requires the
+  // agent/client to manage Git history.
+  await git(workspace.worktreePath, ['add', '--all']);
+  const tree = (await git(workspace.worktreePath, ['write-tree'])).stdout.trim();
+  const baseTree = (await git(workspace.worktreePath, ['rev-parse', `${workspace.baseCommit}^{tree}`])).stdout.trim();
+  if (tree === baseTree) {
+    await cleanupWorkspace(projectCwd, workspace);
+    return { ...workspace, status: 'discarded', conflictDetail: undefined };
+  }
 
   try {
     await verifyUnchanged(projectCwd, workspace.baseCommit);
@@ -75,23 +88,36 @@ export async function keepSafeWorkspace(projectCwd: string, workspace: SafeWorks
     return { ...workspace, status: 'conflict', conflictDetail };
   }
 
-  // Squash the task branch into one saved version on top of the project's
-  // current branch. Uses --squash so history stays a single clean commit;
-  // never a fast-forward merge of unreviewed intermediate commits.
-  await git(projectCwd, ['merge', '--squash', workspace.branch]);
-  await git(projectCwd, ['commit', '-m', summary.slice(0, 500) || 'Warden update']);
+  const message = summary.slice(0, 500) || 'Warden update';
+  const synthesized = (await git(workspace.worktreePath, [
+    '-c', 'user.name=Warden AI Desk',
+    '-c', 'user.email=noreply@warden.local',
+    'commit-tree', tree, '-p', workspace.baseCommit, '-m', message,
+  ])).stdout.trim();
+
+  // Cherry-pick is deliberately used as the transaction boundary. If a hook,
+  // filter, or unexpected conflict fails, --abort restores the clean original
+  // project instead of leaving a half-applied squash in its index.
+  try {
+    await git(projectCwd, [
+      '-c', 'user.name=Warden AI Desk',
+      '-c', 'user.email=noreply@warden.local',
+      'cherry-pick', synthesized,
+    ]);
+  } catch (error) {
+    await git(projectCwd, ['cherry-pick', '--abort']).catch(() => undefined);
+    return { ...workspace, status: 'conflict', conflictDetail: `Warden could not apply the saved update cleanly. The original project was restored. ${error instanceof Error ? error.message : String(error)}` };
+  }
   const consolidatedCommit = (await git(projectCwd, ['rev-parse', 'HEAD'])).stdout.trim();
 
-  await git(projectCwd, ['worktree', 'remove', workspace.worktreePath, '--force']).catch(() => undefined);
-  await git(projectCwd, ['branch', '-D', workspace.branch]).catch(() => undefined);
+  await cleanupWorkspace(projectCwd, workspace);
 
-  return { ...workspace, status: 'kept', consolidatedCommit };
+  return { ...workspace, status: 'kept', consolidatedCommit, conflictDetail: undefined };
 }
 
 /** Discard (pre-acceptance) — tears down the isolated worktree only; the original project is never touched. */
 export async function discardSafeWorkspace(projectCwd: string, workspace: SafeWorkspace): Promise<SafeWorkspace> {
-  await git(projectCwd, ['worktree', 'remove', workspace.worktreePath, '--force']).catch(() => undefined);
-  await git(projectCwd, ['branch', '-D', workspace.branch]).catch(() => undefined);
+  await cleanupWorkspace(projectCwd, workspace);
   return { ...workspace, status: 'discarded' };
 }
 
@@ -101,14 +127,18 @@ export async function discardSafeWorkspace(projectCwd: string, workspace: SafeWo
  * keeping, short of them touching the exact same lines (normal git-revert
  * conflict, surfaced rather than forced).
  */
-export async function undoConsolidatedCommit(projectCwd: string, workspace: SafeWorkspace): Promise<void> {
+export async function undoConsolidatedCommit(projectCwd: string, workspace: SafeWorkspace): Promise<SafeWorkspace> {
   if (workspace.status !== 'kept' || !workspace.consolidatedCommit) throw new GitSafeLoopError('There is no saved update to undo for this workspace.');
+  const { isGit, clean } = await isCleanGitProject(projectCwd);
+  if (!isGit || !clean) throw new GitSafeLoopError('Save or discard current project changes before undoing this Warden update. Nothing was changed.');
   try {
-    await git(projectCwd, ['revert', '--no-edit', workspace.consolidatedCommit]);
+    await git(projectCwd, ['-c', 'user.name=Warden AI Desk', '-c', 'user.email=noreply@warden.local', 'revert', '--no-edit', workspace.consolidatedCommit]);
   } catch (error) {
     await git(projectCwd, ['revert', '--abort']).catch(() => undefined);
     throw new GitSafeLoopError(`Undo could not be applied cleanly — the project has changed since then. ${error instanceof Error ? error.message : String(error)}`);
   }
+  const undoCommit = (await git(projectCwd, ['rev-parse', 'HEAD'])).stdout.trim();
+  return { ...workspace, status: 'undone', undoCommit };
 }
 
 export { GitSafeLoopError };

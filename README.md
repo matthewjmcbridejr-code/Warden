@@ -9,7 +9,7 @@
 
 Warden is more than a browser with AI tabs. A project restores its repository, browser profile, provider workspaces, split layout, terminal references, structured runs, context, approvals, evidence, and handoffs. Chat remains a safe web surface; Build uses official locally authenticated provider clients and records what happened.
 
-> **Release candidate:** 0.3.0 targets Debian/Ubuntu on x86-64. Provider subscriptions and local clients are not bundled.
+> **Release candidate:** 0.3.1 targets Debian/Ubuntu on x86-64. Provider subscriptions and local clients are not bundled.
 
 ![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.png)
 
@@ -31,6 +31,7 @@ Warden is more than a browser with AI tabs. A project restores its repository, b
 - Secure OAuth popup/redirect handling with visible domain-trust decisions.
 - Managed local project terminals with restartable metadata and private command history.
 - Codex App Server threads, streamed events, bidirectional approvals, cancellation, resume, evidence, and proof.
+- Simple Build runs Codex in an isolated Git worktree, restores the project’s active run, and applies ordinary uncommitted agent edits as one reviewable commit only after **Keep changes**. Undo creates a separate revert commit.
 - Subscription-first headless adapters for Claude Code, Gemini CLI, and Grok when their installed client and entitlement support it.
 - Compact cross-provider handoffs and repository context packs with instructions, skills, git state, scoped memories, and optional private Warden Brain context.
 - Crash-safe JSON persistence, corrupt-state recovery, a tray, keyboard navigation, and a native overflow menu that renders above remote content.
@@ -76,11 +77,11 @@ Read [desktop/architecture.md](desktop/architecture.md) and [SECURITY.md](SECURI
 
 ## Install on Debian or Ubuntu
 
-Download the 0.3.0 `.deb` and checksum from a future tagged release, then verify before installing:
+Download the 0.3.1 `.deb` and checksum from a future tagged release, then verify before installing:
 
 ```bash
-sha256sum --check warden-ai-desk_0.3.0_amd64.deb.sha256
-sudo apt install ./warden-ai-desk_0.3.0_amd64.deb
+sha256sum --check warden-ai-desk_0.3.1_amd64.deb.sha256
+sudo apt install ./warden-ai-desk_0.3.1_amd64.deb
 warden-ai-desk
 ```
 

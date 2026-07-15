@@ -6,6 +6,16 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 
 - No unreleased desktop changes recorded.
 
+## [0.3.1] - 2026-07-14
+
+### Fixed
+
+- Wired Simple Build approvals, denial, technical details, cancellation, follow-up submission, and visible operation errors.
+- Unified Simple and Developer Mode around the same active project and durable run, including project creation and restart restoration.
+- Made **Keep changes** capture ordinary uncommitted, untracked, deleted, and agent-committed worktree changes as one synthesized commit without requiring repository Git identity.
+- Made acceptance transactional through an abortable cherry-pick, guarded Discard against active runs, and persisted Undo as a separate revert commit with durable history.
+- Replaced the dead read-only control with an honest transition to Developer Mode.
+
 ## [0.3.0] - 2026-07-14
 
 ### Added
@@ -28,5 +38,6 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 - Codex is the only structured adapter with a Warden-controlled approval bridge.
 - Packaging is release-proven for Debian/Ubuntu x86-64 only.
 
-[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.1
 [0.3.0]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.0

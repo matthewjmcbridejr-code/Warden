@@ -28,7 +28,11 @@ export class RunManager {
 
   async providerStatus(): Promise<ProviderAuthReport[]> { return Promise.all((Object.keys(this.providers) as StructuredProviderId[]).map((id) => this.providers[id].authStatus())); }
   checkProject(cwd: string): Promise<{ isGit: boolean; clean: boolean }> { return isCleanGitProject(validateDirectory(cwd)); }
-  list(projectId?: string): WardenRun[] { const runs = this.store.list(); return projectId ? runs.filter((run) => run.projectId === projectId || (!run.projectId && run.cwd === projectId)) : runs; }
+  list(projectId?: string, projectCwd?: string): WardenRun[] {
+    const runs = this.store.list();
+    if (!projectId) return runs;
+    return runs.filter((run) => run.projectId === projectId || (!run.projectId && Boolean(projectCwd) && (run.projectCwd === projectCwd || run.cwd === projectCwd)));
+  }
   get(id: string): WardenRun { const run = this.store.get(id); if (!run) throw new Error('Run not found.'); return run; }
   private providerFor(run: WardenRun): BuildProvider { const provider = this.providers[run.provider as StructuredProviderId]; if (!provider) throw new Error(`No structured adapter for ${run.provider}.`); return provider; }
 
@@ -86,6 +90,8 @@ export class RunManager {
   async discard(id: string): Promise<WardenRun> {
     const run = this.get(id);
     if (!run.safeWorkspace || !run.projectCwd) throw new Error('This task has no safe workspace to discard.');
+    if (['starting', 'running', 'waiting_approval'].includes(run.status)) throw new Error('Cancel the active task and wait for it to stop before discarding its workspace.');
+    if (!['active', 'conflict'].includes(run.safeWorkspace.status)) throw new Error('This safe workspace is no longer available to discard.');
     const safeWorkspace = await discardSafeWorkspace(run.projectCwd, run.safeWorkspace);
     const updated = this.store.update(id, { safeWorkspace }); if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) this.window.webContents.send('runs:changed', updated); return updated;
   }
@@ -94,8 +100,10 @@ export class RunManager {
   async undoUpdate(id: string): Promise<WardenRun> {
     const run = this.get(id);
     if (!run.safeWorkspace || !run.projectCwd) throw new Error('This task has no saved update to undo.');
-    await undoConsolidatedCommit(run.projectCwd, run.safeWorkspace);
-    return run;
+    const safeWorkspace = await undoConsolidatedCommit(run.projectCwd, run.safeWorkspace);
+    const updated = this.store.update(id, { safeWorkspace });
+    if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) this.window.webContents.send('runs:changed', updated);
+    return updated;
   }
   async handoff(id: string): Promise<{ path: string; content: string }> { let run = this.get(id); run = this.store.update(id, { evidence: await collectEvidence(run) }); const content = createHandoff(run); return { path: this.store.saveArtifact(id, 'handoff.md', content), content }; }
 
