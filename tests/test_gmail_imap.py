@@ -270,7 +270,7 @@ def test_mail_search_no_token_in_response(tmp_path, monkeypatch):
     gmail_imap_mod.set_imap_factory(lambda h, p: fake)
     client = TestClient(app)
     resp = client.post("/api/mcharness/warden/connectors/gmail/connect/app-password",
-                       json={"email": "user@gmail.com", "app_password": "mysecretpass1234"})
+                       json={"email": "user@gmail.com", "app_password": "mysecretpass1234"})  # gitleaks:allow
     account_id = resp.json()["account_id"]
     resp2 = client.get(f"/api/mcharness/warden/mail/search?account_id={account_id}&q=test")
     assert "mysecretpass1234" not in resp2.text

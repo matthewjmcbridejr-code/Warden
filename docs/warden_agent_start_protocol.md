@@ -25,12 +25,12 @@ curl -sS -X POST http://127.0.0.1:6969/api/mcharness/warden/workspaces/bootstrap
 
 **Canonical repo for Warden:**
 ```
-/home/matt/workspaces/warden/mcharness-public-export
+/path/to/warden
 ```
 
 **Do not code here (scratch/clones):**
 ```
-/home/matt/Documents/Warden   ← scratch_or_clone — read-only reference only
+/path/to/legacy-warden   ← scratch_or_clone — read-only reference only
 ```
 
 ---
@@ -45,7 +45,7 @@ git log --oneline -3
 ```
 
 Expected output must show:
-- cwd = `/home/matt/workspaces/warden/mcharness-public-export`
+- cwd = `/path/to/warden`
 - branch = `feat/marius-resident-core` (or an approved feature branch)
 - no unexpected staged changes from other sessions
 

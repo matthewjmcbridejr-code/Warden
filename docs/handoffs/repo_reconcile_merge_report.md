@@ -10,7 +10,7 @@ Local state is clean, tests pass (737/737 non-skipped), and there are no secrets
 
 ## 2. Repo State
 
-- Repo path: `/home/matt/workspaces/warden/mcharness-public-export`
+- Repo path: `/path/to/warden`
 - Current branch: `feat/marius-resident-core`
 - Remote: `origin` → `https://github.com/matthewjmcbridejr-code/mcharness.git`
 - Base branch: `master`
@@ -183,8 +183,8 @@ Both blockers named in this session's instructions are fixed. Commit `982b3a5`.
 Root cause was broader than the literal `SAFE_REPO_PATHS` constant: three separate hardcoded-absolute-path spots contributed to the 33 original CI failures.
 
 1. **`src/warden/api.py` `SAFE_REPO_PATHS`.** Entries for Matt's sibling repos (`hybrid-agent-os`, `mcharness-public-export`) are literal `Path.home()/...` paths that don't exist on any other machine. Added `_effective_repo_path(path)`: returns the literal path if it exists, else falls back to the current checkout (`Path(__file__).resolve().parents[2]`), while `_repo_entries()` keeps the *intended* `repo_id` label (`path.name`) regardless of which physical directory it resolves to. Applied to `_repo_entries()`, `_validate_repo_path()`, and the two runner-intent/runner-start repo-id lookups. On Matt's machine, behavior is byte-for-byte unchanged (literal paths exist there, no fallback triggers).
-2. **`src/warden/workspace_authority.py` `_BUILTIN_REGISTRY`.** The "warden" project's `canonical_repo` and first `known_worktrees` entry were hardcoded to `/home/matt/workspaces/warden/mcharness-public-export`. This is what actually caused most of the 33 failures — `agent_dispatcher.py`'s `_workspace_preflight()` calls `detect_workspace_drift("warden", cwd=os.getcwd())` on every dispatch, and `os.getcwd()` during a CI pytest run is `/home/runner/work/mcharness/mcharness`, which never matched the hardcoded canonical string → every dispatch got blocked with `[WorkspaceAuthority] BLOCKED`. Changed the default to `Path(__file__).resolve().parents[2]` (same dynamic pattern as `api.py`), so it always matches wherever the repo actually lives. A `config/warden_projects.json` (not present, but the loader already supports it) still overrides this for anyone who wants an explicit value.
-3. **`tests/test_warden_workspace_authority.py`, `tests/test_warden_agent_dispatcher.py`.** Both hardcoded a `CANONICAL = "/home/matt/workspaces/warden/mcharness-public-export"` module constant. Changed both to compute the same dynamic path the source now uses, so the tests themselves are portable (not just the code they test).
+2. **`src/warden/workspace_authority.py` `_BUILTIN_REGISTRY`.** The "warden" project's `canonical_repo` and first `known_worktrees` entry were hardcoded to `/path/to/warden`. This is what actually caused most of the 33 failures — `agent_dispatcher.py`'s `_workspace_preflight()` calls `detect_workspace_drift("warden", cwd=os.getcwd())` on every dispatch, and `os.getcwd()` during a CI pytest run is `/home/runner/work/mcharness/mcharness`, which never matched the hardcoded canonical string → every dispatch got blocked with `[WorkspaceAuthority] BLOCKED`. Changed the default to `Path(__file__).resolve().parents[2]` (same dynamic pattern as `api.py`), so it always matches wherever the repo actually lives. A `config/warden_projects.json` (not present, but the loader already supports it) still overrides this for anyone who wants an explicit value.
+3. **`tests/test_warden_workspace_authority.py`, `tests/test_warden_agent_dispatcher.py`.** Both hardcoded a `CANONICAL = "/path/to/warden"` module constant. Changed both to compute the same dynamic path the source now uses, so the tests themselves are portable (not just the code they test).
 
 **Verification:** ran the full suite twice — once normally, once with `HOME=/tmp/fake-ci-home` (directly simulating the CI condition that broke `Path.home()`-based lookups). Both: **743 passed, 1 skipped, 0 failed.**
 

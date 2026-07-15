@@ -22,9 +22,9 @@ fi
 # - dry-run must not upload
 # - upload requires explicit --upload
 # - bucket creation requires explicit --create-bucket
-# - default bucket must be marius-brain-292003335586
+# - default bucket must be your-warden-brain-bucket
 
-BUCKET_NAME="marius-brain-292003335586"
+BUCKET_NAME="your-warden-brain-bucket"
 LOCATION="us-central1"
 
 # Handle arguments

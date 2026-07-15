@@ -11,8 +11,8 @@
 
 Agents were coding in scattered repos and losing source-of-truth context.
 
-- Codex worked in `/home/matt/Documents/Warden`
-- Claude worked in `/home/matt/workspaces/warden/mcharness-public-export`
+- Codex worked in `/path/to/legacy-warden`
+- Claude worked in `/path/to/warden`
 - Command Deck UI existed in Codex's repo; backend existed in Claude's repo
 - Codex reconciled them into the canonical repo (commit `16e131d`)
 
@@ -23,7 +23,7 @@ Warden Workspace Authority now prevents this by making the canonical workspace e
 ## Canonical Repo
 
 ```
-/home/matt/workspaces/warden/mcharness-public-export
+/path/to/warden
 ```
 
 Branch: `feat/marius-resident-core`  
@@ -35,7 +35,7 @@ Live service: `http://127.0.0.1:6969`
 
 | Path | Role | Safe to Edit |
 |------|------|-------------|
-| `/home/matt/Documents/Warden` | scratch_or_clone | ❌ No |
+| `/path/to/legacy-warden` | scratch_or_clone | ❌ No |
 
 ---
 
@@ -84,13 +84,13 @@ Command Deck Workspace Authority panel now visible in UI.
 ```bash
 # Canonical cwd — no warnings
 curl -X POST http://127.0.0.1:6969/api/mcharness/warden/workspaces/bootstrap \
-  -d '{"project_id":"warden","cwd":"/home/matt/workspaces/warden/mcharness-public-export"}'
+  -d '{"project_id":"warden","cwd":"/path/to/warden"}'
 # → warnings: []
 
 # Scratch cwd — WARNING shown
 curl -X POST http://127.0.0.1:6969/api/mcharness/warden/workspaces/bootstrap \
-  -d '{"project_id":"warden","cwd":"/home/matt/Documents/Warden"}'
-# → warnings: ["WARNING: You are in '/home/matt/Documents/Warden' which is NOT canonical. Use: /home/matt/workspaces/warden/mcharness-public-export"]
+  -d '{"project_id":"warden","cwd":"/path/to/legacy-warden"}'
+# → warnings: ["WARNING: You are in '/path/to/legacy-warden' which is NOT canonical. Use: /path/to/warden"]
 ```
 
 ---

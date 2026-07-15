@@ -42,7 +42,7 @@ Records are JSON-compatible and backward-compatible with the original Warden not
   "memory_id": "m-private-runner-abc123",
   "scope": "Warden",
   "project_id": "Warden",
-  "repo_path": "/home/matt/Documents/Warden",
+  "repo_path": "/path/to/legacy-warden",
   "title": "Private runner constraint",
   "summary": "Memory context is injected only after private runner gates pass.",
   "source": "warden",
@@ -104,7 +104,7 @@ Example:
 
 ## Project / Repo
 - Project: Warden
-- Repo: /home/matt/Documents/Warden
+- Repo: /path/to/legacy-warden
 - Branch: feat/example
 
 ## Relevant Decisions
@@ -177,7 +177,7 @@ curl -sS http://127.0.0.1:8125/api/mcharness/memory/context-pack \
   -H 'Content-Type: application/json' \
   -d '{
     "project_id": "Warden",
-    "repo_path": "/home/matt/Documents/Warden",
+    "repo_path": "/path/to/legacy-warden",
     "agent": "codex_cli",
     "prompt": "Fix the memory panel",
     "branch": "feat/example",

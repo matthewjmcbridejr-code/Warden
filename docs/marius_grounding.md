@@ -26,7 +26,7 @@
 
 ## Project: McHarness
 - McHarness is the Warden codebase/control-plane lineage.
-- Current repo is /home/matt/workspaces/warden/mcharness-public-export.
+- Current repo is /path/to/warden.
 
 ## Project: MCTable
 - MCTable is related to the earlier Warden/McHarness public/demo/control-table surface.

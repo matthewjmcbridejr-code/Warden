@@ -137,11 +137,11 @@ def test_google_provider_fallback_reason_visible(mock_getenv):
 def test_mctable_search_config_accepted():
     with patch.dict(os.environ, {
         "GOOGLE_AGENT_SEARCH_ENGINE_ID": "mctable-search",
-        "GOOGLE_AGENT_SEARCH_DATA_STORE_ID": "mctable-codebase",
+        "GOOGLE_AGENT_SEARCH_DATA_STORE_ID": "example-codebase",
         "GOOGLE_CLOUD_PROJECT": "test-project"
     }):
         with patch("google.cloud.discoveryengine_v1.SearchServiceClient"):
             provider = GoogleAgentSearchProvider()
             assert provider.engine_id == "mctable-search"
-            assert provider.data_store_id == "mctable-codebase"
+            assert provider.data_store_id == "example-codebase"
             assert provider.status()["ready"] is True

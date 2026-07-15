@@ -5,19 +5,19 @@ Wants=litellm-warden.service
 
 [Service]
 Type=simple
-User=matt
-Group=matt
-WorkingDirectory=/home/matt/workspaces/warden/mcharness-public-export
-Environment=PYTHONPATH=/home/matt/workspaces/warden/mcharness-public-export:/home/matt/workspaces/warden/mcharness-public-export/src
+User=warden
+Group=warden
+WorkingDirectory=/opt/warden
+Environment=PYTHONPATH=/opt/warden:/opt/warden/src
 Environment=PYTHONUNBUFFERED=1
-Environment=MCHARNESS_DATA_ROOT=/home/matt/workspaces/warden/mcharness-public-export/_mctable
+Environment=MCHARNESS_DATA_ROOT=/var/lib/warden/_mctable
 Environment=MCHARNESS_PUBLIC_WRITE_ENABLED=true
 Environment=OLLAMA_URL=http://127.0.0.1:11434
 Environment=LITELLM_PROXY_URL=http://127.0.0.1:4000
 Environment=MARIUS_ALLOW_CLOUD=1
 Environment=MARIUS_PROVIDER_MODE=auto
-EnvironmentFile=/home/matt/.config/warden/cloud_keys.env
-ExecStart=/home/matt/workspaces/warden/mcharness-public-export/.venv/bin/python -m uvicorn src.warden.app:app --host 0.0.0.0 --port 6969 --log-level warning
+EnvironmentFile=-/etc/warden/cloud_keys.env
+ExecStart=/opt/warden/.venv/bin/python -m uvicorn src.warden.app:app --host 127.0.0.1 --port 6969 --log-level warning
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

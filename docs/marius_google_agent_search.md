@@ -3,9 +3,9 @@
 Marius-Brain is the giant searchable memory layer for Marius, Warden, and GradeMy. It uses Google Agent Search (Vertex AI Search / Discovery Engine) as the backend for large-scale document and project-context recall.
 
 ## Current Setup Status (proven)
-- **Google Project**: `project-b11857c2-0ddb-4154-802` (McProject)
-- **Billing Account**: `01C341-7C5C1D-7452A3` (Google Credit Billing Account)
-- **GCS Bucket**: `gs://marius-brain-292003335586`
+- **Google Project**: `your-gcp-project-id` (McProject)
+- **Billing Account**: `your-billing-account-id` (Google Credit Billing Account)
+- **GCS Bucket**: `gs://your-warden-brain-bucket`
 - **Location**: `global`
 - **APIs Enabled**: Discovery Engine, Storage, AI Platform.
 
@@ -38,7 +38,7 @@ bash scripts/marius_brain_gcs_setup.sh
 
 ### 5. Discovery Engine Configuration
 Currently, infrastructure creation via API is manual or requires setup scripts. Captured resources:
-- **Data Store ID**: `marius-brain-warden`
+- **Data Store ID**: `your-data-store-id`
 - **Engine ID**: `marius-brain`
 - **Serving Config**: `default_config`
 
@@ -57,7 +57,7 @@ The following are NEVER indexed:
 ## Provider Configuration
 Configure the active search provider via environment variables:
 - `MARIUS_SEARCH_PROVIDER=local|google`
-- `GOOGLE_CLOUD_PROJECT=project-b11857c2-0ddb-4154-802`
+- `GOOGLE_CLOUD_PROJECT=your-gcp-project-id`
 - `GOOGLE_AGENT_SEARCH_ENGINE_ID=marius-brain`
 
 ## Troubleshooting

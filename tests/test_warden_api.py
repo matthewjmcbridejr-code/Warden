@@ -2858,7 +2858,7 @@ def test_connectors_callback_mocked_exchange_stores_account(tmp_path, monkeypatc
             "refresh_token": "mock-refresh-token",
             "expires_in": 3600,
             "token_type": "Bearer",
-            "id_token": "eyJhbGciOiJSUzI1NiJ9.eyJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.sig",
+            "id_token": "eyJhbGciOiJSUzI1NiJ9.eyJlbWFpbCI6InRlc3RAZ21haWwuY29tIn0.sig",  # gitleaks:allow
         }
 
     oauth_mod.set_token_exchanger(mock_exchange)

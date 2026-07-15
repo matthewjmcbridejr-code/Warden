@@ -3,7 +3,7 @@ import sys
 from google.cloud import discoveryengine_v1 as discoveryengine
 
 def probe_discovery_engine():
-    project_id = "project-b11857c2-0ddb-4154-802"
+    project_id = "your-gcp-project-id"
     locations = ["global", "us", "eu"]
     
     print(f"== Probing Discovery Engine for project: {project_id} ==")

@@ -18,7 +18,7 @@ def test_search_exporter_skips_secrets(tmp_path):
     
     # Secret file (by content)
     secret_file_content = repo_root / "config.py"
-    secret_file_content.write_text("API_KEY=sk-123456789")
+    secret_file_content.write_text("API_KEY=synthetic-secret-fixture")  # gitleaks:allow
     
     # Another secret file (by content)
     pem_file = repo_root / "key.pem"

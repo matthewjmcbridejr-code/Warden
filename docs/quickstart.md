@@ -16,7 +16,7 @@
 ## 1. Start Warden API
 
 ```bash
-cd /home/matt/workspaces/warden/mcharness-public-export
+cd /path/to/warden
 bash scripts/warden-up
 # or manually:
 # .venv/bin/python -m uvicorn src.warden.app:app --host 0.0.0.0 --port 6969 --log-level warning

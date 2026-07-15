@@ -17,7 +17,7 @@
   - `models.py` — BrainSource, BrainChunk, BrainCitation, BrainAnswer
 
 ### Google Brain (optional)
-- Wired to existing **mctable-codebase** Discovery Engine data store
+- Wired to existing **example-codebase** Discovery Engine data store
 - Engine: `mctable-search`, serving config: `default_search`
 - Uses Application Default Credentials (ADC) — no service account key needed
 - Config in `~/.config/warden/cloud_keys.env` (no secrets, only project IDs)

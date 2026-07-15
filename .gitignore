@@ -9,6 +9,20 @@ __pycache__/
 *.log
 playwright-report/
 
+# Warden AI Desk dependencies, packages, and local browser/run state
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+*.AppImage
+*.deb
+*.deb.sha256
+**/Partitions/
+**/Session Storage/
+**/Local Storage/
+**/IndexedDB/
+**/Network/Cookies
+**/Login Data
+
 .codegraph/
 _mctable/
 test-results/

@@ -1,17 +1,16 @@
 [Unit]
-Description=Warden Brain MCP HTTP Server (public)
+Description=Warden Brain MCP HTTP Server (local)
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=matt
-WorkingDirectory=/home/matt/workspaces/warden/mcharness-public-export
-Environment=PYTHONPATH=/home/matt/workspaces/warden/mcharness-public-export:/home/matt/workspaces/warden/mcharness-public-export/src
-Environment=MCHARNESS_DATA_ROOT=/home/matt/workspaces/warden/mcharness-public-export/_mctable
-Environment=MCTABLE_BOARD_ROOT=/home/matt/workspaces/marius-core/hybrid-agent-os/_mctable
-EnvironmentFile=/home/matt/.config/warden-brain/env
-ExecStart=/home/matt/workspaces/warden/mcharness-public-export/.venv/bin/python -m warden.brain_mcp_server --http --host 127.0.0.1 --port 8126
+User=warden
+WorkingDirectory=/opt/warden
+Environment=PYTHONPATH=/opt/warden:/opt/warden/src
+Environment=MCHARNESS_DATA_ROOT=/var/lib/warden/_mctable
+EnvironmentFile=-/etc/warden/brain.env
+ExecStart=/opt/warden/.venv/bin/python -m warden.brain_mcp_server --http --host 127.0.0.1 --port 8126
 Restart=always
 RestartSec=5
 StandardOutput=journal
