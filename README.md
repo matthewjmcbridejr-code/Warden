@@ -5,13 +5,13 @@
 [![Desktop CI](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/matthewjmcbridejr-code/Warden/actions/workflows/desktop-ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-789e78.svg)](LICENSE)
 
-![Warden AI Desk Build workspace](docs/screenshots/warden-ai-desk-build.png)
+![Warden AI Desk Build workspace](docs/screenshots/warden-ai-desk-build.jpg)
 
 Warden is more than a browser with AI tabs. A project restores its repository, browser profile, provider workspaces, split layout, terminal references, structured runs, context, approvals, evidence, and handoffs. Chat remains a safe web surface; Build uses official locally authenticated provider clients and records what happened.
 
-> **Release candidate:** 0.3.1 targets Debian/Ubuntu on x86-64. Provider subscriptions and local clients are not bundled.
+> **Release candidate:** 0.4.0 targets Debian/Ubuntu on x86-64. Provider subscriptions and local clients are not bundled.
 
-![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.png)
+![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.jpg)
 
 ## Two surfaces, one project
 
@@ -22,7 +22,7 @@ Warden is more than a browser with AI tabs. A project restores its repository, b
 | Sandboxed remote content with no Warden preload or privileged IPC | Durable events, approvals, cancellation, evidence, proof, and handoffs |
 | OAuth popups stay visible in the originating profile | API-key billing is an explicit per-run fallback, never a silent choice |
 
-![Add a custom AI platform](docs/screenshots/warden-ai-desk-platform.png)
+![Add a custom AI platform](docs/screenshots/warden-ai-desk-platform.jpg)
 
 ## What works today
 
@@ -31,7 +31,7 @@ Warden is more than a browser with AI tabs. A project restores its repository, b
 - Secure OAuth popup/redirect handling with visible domain-trust decisions.
 - Managed local project terminals with restartable metadata and private command history.
 - Codex App Server threads, streamed events, bidirectional approvals, cancellation, resume, evidence, and proof.
-- Simple Build runs Codex in an isolated Git worktree, restores the project’s active run, and applies ordinary uncommitted agent edits as one reviewable commit only after **Keep changes**. Undo creates a separate revert commit.
+- Simple Build is a project command center with a durable mission queue, explicit review criteria, live phase/activity supervision, approval interrupts, and file/check/proof inspection. Codex runs in an isolated Git worktree and applies ordinary uncommitted agent edits only after **Apply to project**. Undo creates a separate revert commit.
 - Subscription-first headless adapters for Claude Code, Gemini CLI, and Grok when their installed client and entitlement support it.
 - Compact cross-provider handoffs and repository context packs with instructions, skills, git state, scoped memories, and optional private Warden Brain context.
 - Crash-safe JSON persistence, corrupt-state recovery, a tray, keyboard navigation, and a native overflow menu that renders above remote content.
@@ -77,11 +77,11 @@ Read [desktop/architecture.md](desktop/architecture.md) and [SECURITY.md](SECURI
 
 ## Install on Debian or Ubuntu
 
-Download the 0.3.1 `.deb` and checksum from a future tagged release, then verify before installing:
+Download the 0.4.0 `.deb` and checksum from a future tagged release, then verify before installing:
 
 ```bash
-sha256sum --check warden-ai-desk_0.3.1_amd64.deb.sha256
-sudo apt install ./warden-ai-desk_0.3.1_amd64.deb
+sha256sum --check warden-ai-desk_0.4.0_amd64.deb.sha256
+sudo apt install ./warden-ai-desk_0.4.0_amd64.deb
 warden-ai-desk
 ```
 
@@ -110,7 +110,7 @@ Warden never copies OAuth tokens between providers, imports Chrome cookies, or c
 
 | Provider workspace | Project-centered Build | Custom platform boundary |
 |---|---|---|
-| ![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.png) | ![Structured Build run](docs/screenshots/warden-ai-desk-build.png) | ![Custom platform form](docs/screenshots/warden-ai-desk-platform.png) |
+| ![Sandboxed provider workspace](docs/screenshots/warden-ai-desk-provider.jpg) | ![Structured Build run](docs/screenshots/warden-ai-desk-build.jpg) | ![Custom platform form](docs/screenshots/warden-ai-desk-platform.jpg) |
 
 The repository media uses a signed-out provider surface plus synthetic project, prompt, and run data. It contains no provider conversations, credentials, or browser-session data.
 

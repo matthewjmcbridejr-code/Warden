@@ -6,6 +6,21 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 
 - No unreleased desktop changes recorded.
 
+## [0.4.0] - 2026-07-16
+
+### Changed
+
+- Rebuilt Simple Build as a project command center with a durable mission queue, outcome and review-criteria composer, provider/billing readiness, four-phase progress, visible approval interrupts, and a dedicated evidence inspector.
+- Added native file, diff, check, proof, handoff, and Brain-save views to the primary Build workflow while preserving isolated worktrees and explicit Apply, Discard, and Undo decisions.
+- Made Build visually project-first by hiding irrelevant Web Platform navigation while structured work is active and providing a direct terminal escape hatch.
+- Replaced the olive visual system with the neutral **Monochrome Alloy** theme: calm graphite work surfaces, restrained aubergine/copper identity, semantic violet focus, and locally bundled Sora/Epilogue variable fonts.
+- Rethemed Chat chrome, Developer Build, terminals, provider state, dialogs, onboarding, and public screenshots as one coherent desktop product.
+
+### Verification
+
+- Added focused workflow/theme tests for mission structure, review criteria, safe execution, handoffs, proof, offline fonts, terminal integration, and project-first navigation.
+- Visually verified composer and active-run states at 1600×960 and the supported 1024×700 minimum with no page overflow or clipped review controls.
+
 ## [0.3.1] - 2026-07-14
 
 ### Fixed
@@ -38,6 +53,7 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 - Codex is the only structured adapter with a Warden-controlled approval bridge.
 - Packaging is release-proven for Debian/Ubuntu x86-64 only.
 
-[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.4.0
 [0.3.1]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.1
 [0.3.0]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.0

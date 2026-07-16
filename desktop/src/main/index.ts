@@ -73,7 +73,7 @@ function registerIpc(): void {
 }
 function createWindow(): void {
   const bounds = store.state.windowBounds;
-  mainWindow = new BrowserWindow({ ...bounds, minWidth: 1024, minHeight: 700, backgroundColor: '#0d100e', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  mainWindow = new BrowserWindow({ ...bounds, minWidth: 1024, minHeight: 700, backgroundColor: '#0c0b0f', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   terminals = new TerminalManager(mainWindow, store);
   runs = new RunManager(app.getPath('userData'), mainWindow);
   platforms = new PlatformManager(mainWindow, store, app.getPath('userData'));

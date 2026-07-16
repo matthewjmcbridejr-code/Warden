@@ -24,7 +24,7 @@ describe('Simple Build product integration', () => {
 
   it('surfaces operation failures and routes unsafe projects to the real Developer Mode', () => {
     expect(html).toContain('role="alert"');
-    expect(html).toContain('Open in Developer Mode');
+    expect(html).toContain('Inspect in Advanced mode');
     expect(source).toContain('showError(error)');
     expect(source).toContain('options.openDeveloperMode');
   });

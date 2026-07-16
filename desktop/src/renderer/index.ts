@@ -1,5 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+import '@fontsource-variable/epilogue/wght.css';
+import '@fontsource-variable/sora/wght.css';
 import './styles.css';
 import type { AppInfo, BrowserProfile, ContextPack, ExecutionMode, InterfaceMode, PlatformMenuAction, PlatformPreset, PlatformStatus, ProjectWorkspace, ProviderAuthReport, StructuredProviderId, TerminalMetadata, WardenRun, WebPlatform, WorkspaceId } from '../shared/types';
 import { initSimpleBuild, onSimpleBuildRunsChanged, setMode, syncSimpleBuild } from './simple-build';
@@ -20,7 +22,7 @@ function applyMode(): void {
   const toggle = document.getElementById('mode-toggle') as HTMLInputElement | null; if (toggle) toggle.checked = developer;
 }
 async function selectWorkspace(workspace: WorkspaceId): Promise<void> {
-  ui.workspace = workspace; document.querySelectorAll<HTMLButtonElement>('[data-workspace]').forEach((button) => button.classList.toggle('active', button.dataset.workspace === workspace));
+  ui.workspace = workspace; document.body.dataset.workspace = workspace; document.querySelectorAll<HTMLButtonElement>('[data-workspace]').forEach((button) => button.classList.toggle('active', button.dataset.workspace === workspace));
   $('#provider-host').toggleAttribute('hidden', workspace !== 'chat'); $('#build-workspace').toggleAttribute('hidden', workspace !== 'build'); $('#browser-toolbar').toggleAttribute('hidden', workspace !== 'chat');
   applyMode();
   await window.wardenDesk.state.update({ workspace });
@@ -38,7 +40,7 @@ function activateTerminal(id: string): void { const target = ui.terminals.get(id
 function fitActiveTerminal(): void { const active = ui.activeTerminal ? ui.terminals.get(ui.activeTerminal) : undefined; if (!active || ui.workspace !== 'build') return; try { active.fit.fit(); window.wardenDesk.terminal.resize(active.metadata.id, active.terminal.cols, active.terminal.rows); } catch { /* not visible yet */ } }
 function attachTerminal(metadata: TerminalMetadata): void {
   const existing = ui.terminals.get(metadata.id); if (existing) { existing.metadata = metadata; renderTabs(); return; }
-  const terminal = new Terminal({ cursorBlink: true, convertEol: true, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', theme: { background: '#090c0a', foreground: '#dbe9d8', cursor: '#93bf90' }, scrollback: 10000 }); const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open($('#terminal-container')); terminal.element?.toggleAttribute('hidden', true);
+  const terminal = new Terminal({ cursorBlink: true, convertEol: true, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', theme: { background: '#0a0a0e', foreground: '#ece8ef', cursor: '#c88968', selectionBackground: '#765a8a66', black: '#17151c', red: '#ff7d86', green: '#78d6af', yellow: '#e4b86a', blue: '#8ca9ff', magenta: '#b998e7', cyan: '#76c7d1', white: '#eee9f0' }, scrollback: 10000 }); const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open($('#terminal-container')); terminal.element?.toggleAttribute('hidden', true);
   const entry: UiTerminal = { metadata, terminal, fit, lineBuffer: '' }; ui.terminals.set(metadata.id, entry);
   terminal.onData((data) => { window.wardenDesk.terminal.write(metadata.id, data); if (data === '\r') { const command = entry.lineBuffer.trim(); if (command) { entry.metadata.history.push(command); entry.metadata.history = entry.metadata.history.slice(-200); void window.wardenDesk.terminal.recordCommand(metadata.id, command); } entry.lineBuffer = ''; } else if (data === '\u007f') entry.lineBuffer = entry.lineBuffer.slice(0, -1); else if (!data.startsWith('\u001b') && data >= ' ') entry.lineBuffer += data; });
   activateTerminal(metadata.id);
@@ -97,7 +99,7 @@ async function chooseProjectDirectory(): Promise<void> { const cwd = await windo
 
 async function initialize(): Promise<void> {
   const [{ state, warning }, platforms, presets, profiles, projects, appInfo] = await Promise.all([window.wardenDesk.state.get(), window.wardenDesk.platform.list(), window.wardenDesk.platform.presets(), window.wardenDesk.platform.profiles(), window.wardenDesk.project.list(), window.wardenDesk.app.info()]); if (warning) notice(warning); ui.appInfo = appInfo; ui.mode = state.mode; setMode(ui.mode); ui.platforms = new Map(platforms.map((item) => [item.id, item])); ui.presets = presets; ui.profiles = profiles; ui.projects = projects; ui.platformId = state.selectedPlatformId && ui.platforms.has(state.selectedPlatformId) ? state.selectedPlatformId : platforms[0]?.id || ''; ui.activeProjectId = state.activeProjectId; const activeProject = projects.find((item) => item.id === ui.activeProjectId); ui.activeRun = activeProject?.activeRunId || null; ui.cwd = activeProject?.cwd || state.recentProjects[0] || ''; ui.splitPlatformId = activeProject?.splitPlatformId; $('#version-badge').textContent = `v${appInfo.version}`; $('#version-badge').title = `${appInfo.name} ${appInfo.version}`; $('#active-directory').textContent = ui.cwd || 'No project selected';
-  await initSimpleBuild({ projects, activeProjectId: activeProject?.id, activateProject, chooseProject: chooseProjectDirectory, openDeveloperMode: async () => { ui.mode = 'developer'; setMode(ui.mode); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, activateRun: (run, project) => { if (project) { ui.projects = ui.projects.map((item) => item.id === project.id ? project : item); renderProjects(); } ui.activeRun = run?.id || null; if (run) ui.runs.set(run.id, run); renderRuns(); }, notify: notice });
+  await initSimpleBuild({ projects, activeProjectId: activeProject?.id, activateProject, chooseProject: chooseProjectDirectory, openDeveloperMode: async () => { ui.mode = 'developer'; setMode(ui.mode); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, openTerminal: async () => { ui.mode = 'developer'; setMode(ui.mode); selectExecution('local'); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, activateRun: (run, project) => { if (project) { ui.projects = ui.projects.map((item) => item.id === project.id ? project : item); renderProjects(); } ui.activeRun = run?.id || null; if (run) ui.runs.set(run.id, run); renderRuns(); }, notify: notice });
   const modeToggle = document.getElementById('mode-toggle') as HTMLInputElement | null; if (modeToggle) modeToggle.checked = ui.mode === 'developer';
   document.getElementById('mode-toggle')?.addEventListener('change', (event) => { const checked = (event.target as HTMLInputElement).checked; ui.mode = checked ? 'developer' : 'simple'; setMode(ui.mode); applyMode(); void window.wardenDesk.state.update({ mode: ui.mode }); if (ui.mode === 'simple') void syncSimpleBuild(ui.projects, ui.activeProjectId); });
   $('#agent-directory').textContent = ui.cwd || 'No project selected'; renderProjects(); renderPlatforms();

@@ -1,12 +1,14 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Subscription-first Linux workstation for AI web workspaces, local terminals, and structured agent runs",
   "desktopName": "warden-ai-desk",
   "homepage": "https://github.com/matthewjmcbridejr-code/Warden",
-  "author": { "name": "Matt McBride" },
+  "author": {
+    "name": "Matt McBride"
+  },
   "main": "dist/main.cjs",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -24,6 +26,8 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@fontsource-variable/epilogue": "^5.2.8",
+    "@fontsource-variable/sora": "^5.2.8",
     "@types/node": "^24.0.0",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
@@ -34,9 +38,26 @@
   "build": {
     "appId": "com.usemarius.warden.desk",
     "productName": "Warden AI Desk",
-    "files": ["dist/**", "package.json"],
-    "directories": { "output": "dist-electron" },
-    "asarUnpack": ["node_modules/node-pty/**"],
-    "linux": { "target": ["AppImage", "deb"], "category": "Development", "executableName": "warden-ai-desk", "icon": "assets/icon.png", "syncDesktopName": true, "maintainer": "Warden contributors <noreply@users.noreply.github.com>" }
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist-electron"
+    },
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "executableName": "warden-ai-desk",
+      "icon": "assets/icon.png",
+      "syncDesktopName": true,
+      "maintainer": "Warden contributors <noreply@users.noreply.github.com>"
+    }
   }
 }
