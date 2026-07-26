@@ -99,7 +99,7 @@ def _save(name: str, data: dict) -> None:
 
 
 class OAuthProvider(OAuthAuthorizationServerProvider):
-    """Single-owner (subject is always "matt") OAuth 2.1 provider."""
+    """Single-owner OAuth 2.1 provider."""
 
     # -- clients --------------------------------------------------------------
 
@@ -199,7 +199,7 @@ class OAuthProvider(OAuthAuthorizationServerProvider):
                 "scopes": authorization_code.scopes,
                 "expires_at": now + ACCESS_TOKEN_TTL_SECONDS,
                 "paired_token_hash": refresh_hash,
-                "subject": authorization_code.subject or "matt",
+                "subject": authorization_code.subject or "operator",
             }
             tokens[refresh_hash] = {
                 "token_type": "refresh",
@@ -207,7 +207,7 @@ class OAuthProvider(OAuthAuthorizationServerProvider):
                 "scopes": authorization_code.scopes,
                 "expires_at": now + REFRESH_TOKEN_TTL_SECONDS,
                 "paired_token_hash": access_hash,
-                "subject": authorization_code.subject or "matt",
+                "subject": authorization_code.subject or "operator",
             }
             _save("tokens.json", tokens)
 
@@ -257,7 +257,7 @@ class OAuthProvider(OAuthAuthorizationServerProvider):
                 "scopes": scopes,
                 "expires_at": now + ACCESS_TOKEN_TTL_SECONDS,
                 "paired_token_hash": new_refresh_hash,
-                "subject": refresh_token.subject or "matt",
+                "subject": refresh_token.subject or "operator",
             }
             tokens[new_refresh_hash] = {
                 "token_type": "refresh",
@@ -265,7 +265,7 @@ class OAuthProvider(OAuthAuthorizationServerProvider):
                 "scopes": scopes,
                 "expires_at": now + REFRESH_TOKEN_TTL_SECONDS,
                 "paired_token_hash": new_access_hash,
-                "subject": refresh_token.subject or "matt",
+                "subject": refresh_token.subject or "operator",
             }
             _save("tokens.json", tokens)
 
@@ -306,14 +306,14 @@ class OAuthProvider(OAuthAuthorizationServerProvider):
                 client_id=client_record.get("client_id", "legacy-client"),
                 scopes=[DEFAULT_SCOPE],
                 expires_at=None,
-                subject="matt",
+                subject="operator",
             )
 
         # 3. Legacy shared token.
         legacy = os.getenv("WARDEN_BRAIN_TOKEN", "")
         if legacy and token == legacy:
             return AccessToken(
-                token=token, client_id="legacy-shared-token", scopes=[DEFAULT_SCOPE], expires_at=None, subject="matt",
+                token=token, client_id="legacy-shared-token", scopes=[DEFAULT_SCOPE], expires_at=None, subject="operator",
             )
 
         return None
@@ -375,7 +375,7 @@ def approve_pending_authorization(request_id: str, passphrase: str) -> Optional[
             "redirect_uri": record["redirect_uri"],
             "redirect_uri_provided_explicitly": record["redirect_uri_provided_explicitly"],
             "resource": record.get("resource"),
-            "subject": "matt",
+            "subject": "operator",
         }
         _save("auth_codes.json", codes)
 

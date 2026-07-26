@@ -119,9 +119,9 @@ def setup_discovery_engine(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Marius Brain Discovery Engine Setup")
-    parser.add_argument("--project", default="project-b11857c2-0ddb-4154-802")
+    parser.add_argument("--project", default="your-gcp-project-id")
     parser.add_argument("--location", default="global")
-    parser.add_argument("--data-store-id", default="marius-brain-warden")
+    parser.add_argument("--data-store-id", default="your-data-store-id")
     parser.add_argument("--engine-id", default="marius-brain")
     parser.add_argument("--bucket-uri", help="gs://bucket/path/to/warden.jsonl")
     parser.add_argument("--create", action="store_true", help="Create DS and Engine")

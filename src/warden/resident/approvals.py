@@ -2,7 +2,7 @@
 
 Anything that would send email, change DNS, deploy production, stop/run an
 agent, or touch a file goes through this queue rather than executing
-directly. Approve/deny are operator (Matt) actions; execute() only runs
+directly. Approve/deny are operator actions; execute() only runs
 when a safe executor exists for the action_type — otherwise it returns a
 dry-run "executor not implemented" response, same policy as warden_client.
 """

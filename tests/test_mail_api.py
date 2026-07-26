@@ -252,7 +252,7 @@ def test_mail_api_never_returns_app_password(tmp_path, monkeypatch):
 
     client = TestClient(app)
     client.post("/api/mcharness/warden/connectors/icloud/connect/app-password",
-                json={"email": "user@icloud.com", "app_password": "ultra-secret-xyz-987"})
+                json={"email": "user@icloud.com", "app_password": "ultra-secret-xyz-987"})  # gitleaks:allow
 
     # Accounts endpoint
     accounts_resp = client.get("/api/mcharness/warden/mail/accounts")

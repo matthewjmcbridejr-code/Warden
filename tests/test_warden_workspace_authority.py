@@ -14,7 +14,7 @@ from src.warden.workspace_authority import (
 # Matches the dynamic default in workspace_authority._CURRENT_CHECKOUT —
 # the actual checkout, wherever it lives on this machine.
 CANONICAL = str(Path(__file__).resolve().parents[1])
-SCRATCH = "/home/matt/Documents/Warden"
+SCRATCH = str(Path.home() / "Documents" / "Warden")
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def test_unknown_path_is_non_canonical():
 
 
 def test_classify_unknown_project():
-    result = classify_worktree("unknown-project-xyz", "/home/matt/anything")
+    result = classify_worktree("unknown-project-xyz", str(Path.home() / "anything"))
     assert result["safe_to_edit"] is False
     assert result["workspace_status"] == "unknown"
 

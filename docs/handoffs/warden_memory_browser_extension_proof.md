@@ -22,7 +22,7 @@ The full Warden memory pipeline was exercised end-to-end using a real Chrome ses
 ## Extension Path
 
 ```
-/home/matt/workspaces/warden/mcharness-public-export/browser-extension/
+/path/to/warden/browser-extension/
 ├── manifest.json   MV3, permissions: tabs, activeTab, webNavigation, storage, scripting, alarms, clipboardRead
 ├── background.js   Service worker — navigation capture, 15s flush queue
 ├── content.js      Injected on all pages — typing, selections, AI scrape, YouTube, GitHub, docs

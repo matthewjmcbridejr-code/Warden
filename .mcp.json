@@ -2,10 +2,10 @@
   "mcpServers": {
     "warden-brain": {
       "type": "stdio",
-      "command": "/home/matt/workspaces/warden/mcharness-public-export/scripts/warden-brain-mcp",
+      "command": "scripts/warden-brain-mcp",
       "args": [],
       "env": {
-        "MCHARNESS_DATA_ROOT": "/home/matt/workspaces/warden/mcharness-public-export/_mctable"
+        "MCHARNESS_DATA_ROOT": "_mctable"
       }
     }
   }

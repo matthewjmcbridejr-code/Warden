@@ -187,7 +187,7 @@ Sections:
 ## Running Tests
 
 ```bash
-cd /home/matt/workspaces/warden/mcharness-public-export
+cd /path/to/warden
 .venv/bin/pytest tests/test_warden_gateway.py -v
 ```
 

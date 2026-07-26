@@ -15,11 +15,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=matt
-WorkingDirectory=/home/matt/workspaces/warden/mcharness-public-export
-EnvironmentFile=/home/matt/workspaces/warden/mcharness-public-export/configs/warden_resident.env
-Environment=PYTHONPATH=/home/matt/workspaces/warden/mcharness-public-export:/home/matt/workspaces/warden/mcharness-public-export/src
-ExecStart=/home/matt/workspaces/warden/mcharness-public-export/.venv/bin/python -m warden.resident.telegram
+User=warden
+WorkingDirectory=/opt/warden
+EnvironmentFile=/etc/warden/resident.env
+Environment=PYTHONPATH=/opt/warden:/opt/warden/src
+ExecStart=/opt/warden/.venv/bin/python -m warden.resident.telegram
 Restart=on-failure
 RestartSec=5
 

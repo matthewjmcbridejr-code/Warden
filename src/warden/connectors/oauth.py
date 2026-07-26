@@ -25,7 +25,11 @@ _PROVIDER_CONFIG_SUPPORTED = {"gmail", "outlook"}
 
 
 def _provider_config_dir() -> pathlib.Path:
-    base = pathlib.Path(os.getenv("WARDEN_VAULT_ROOT", pathlib.Path.home() / ".local" / "share" / "warden" / "connectors"))
+    base = pathlib.Path(
+        os.getenv("WARDEN_VAULT_ROOT")
+        or os.getenv("WARDEN_CONNECTOR_VAULT_ROOT")
+        or pathlib.Path.home() / ".local" / "share" / "warden" / "connectors"
+    )
     d = base / "provider_configs"
     d.mkdir(parents=True, exist_ok=True)
     try:
@@ -53,12 +57,9 @@ def save_provider_config(provider: str, client_id: str, client_secret: str) -> N
     """Store provider OAuth config in local vault with 600 perms."""
     if provider not in _PROVIDER_CONFIG_SUPPORTED:
         raise ValueError(f"Unsupported provider: {provider}")
+    from .store import _atomic_write_text
     path = _provider_config_path(provider)
-    path.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}))
-    try:
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
-    except OSError:
-        pass
+    _atomic_write_text(path, json.dumps({"client_id": client_id, "client_secret": client_secret}))
 
 
 def clear_provider_config(provider: str) -> None:
@@ -170,9 +171,14 @@ def _extract_email_from_token(token_response: dict, provider: str) -> str:
             parts = id_token.split(".")
             if len(parts) >= 2:
                 import base64
-                padded = parts[1] + "=="
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
                 payload = json.loads(base64.urlsafe_b64decode(padded).decode())
-                return payload.get("email", "")
+                # Microsoft personal and M365 tokens commonly use
+                # preferred_username rather than email.
+                for claim in ("email", "preferred_username", "upn", "unique_name"):
+                    value = str(payload.get(claim, "")).strip()
+                    if "@" in value:
+                        return value.lower()
         except Exception:
             pass
     return ""

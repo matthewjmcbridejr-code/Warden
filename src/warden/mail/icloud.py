@@ -145,7 +145,9 @@ class ICloudMailProvider(MailProvider):
             status, data = imap.search(None, imap_query)
             if status != "OK":
                 return []
-            msg_ids = data[0].split()
+            # iCloud can return [None] for a successful search with no matches.
+            raw_ids = data[0] if data and data[0] else b""
+            msg_ids = raw_ids.split()
             msg_ids = msg_ids[-limit:]  # most recent
             summaries = []
             for mid in reversed(msg_ids):

@@ -1128,6 +1128,10 @@ textarea {
   font-size: 0.82rem;
 }
 .connector-account-email { flex: 1; color: var(--fg, #d4e4f5); }
+.connector-account-persistence {
+  color: var(--muted, #9cacbf);
+  font-size: 0.72rem;
+}
 /* Setup wizard */
 .connector-setup-wizard {
   border: 1px solid rgba(100,160,255,0.2);

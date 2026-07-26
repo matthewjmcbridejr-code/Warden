@@ -2,13 +2,13 @@
 
 ## Canonical repo
 
-`/home/matt/workspaces/warden/mcharness-public-export`
+`/path/to/warden`
 
 This is the active Warden working repo used for reconciliation. The scratch/source repo was not treated as canonical.
 
 ## Source repo used for UI
 
-`/home/matt/Documents/Warden`
+`/path/to/legacy-warden`
 
 Copied/ported from source:
 

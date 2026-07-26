@@ -981,7 +981,7 @@ class MariusCLI:
                 print(f"Inbox Files:            {inbox.get('file_count')}")
                 
                 # Check for sync bucket
-                bucket = os.getenv("GOOGLE_AGENT_SEARCH_BUCKET", f"marius-brain-292003335586")
+                bucket = os.getenv("GOOGLE_AGENT_SEARCH_BUCKET", f"your-warden-brain-bucket")
                 print(f"Google Sync Bucket:     gs://{bucket}")
                 
                 if inbox.get("files"):

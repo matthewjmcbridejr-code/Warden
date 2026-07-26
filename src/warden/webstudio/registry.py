@@ -25,7 +25,7 @@ DNS_STRATEGIES = {"vercel_nameservers", "external_dns_records", "namecheap_basic
 #   sandbox   — disposable/non-critical domain safe to migrate directly
 #   planned   — a migration has been scoped (inventory + parity checklist
 #               drafted) but not yet approved
-#   approved  — Matt has explicitly approved the cutover
+#   approved  — the operator has explicitly approved the cutover
 #   migrated  — cutover has been completed and verified
 MIGRATION_STATUSES = {"existing", "sandbox", "planned", "approved", "migrated"}
 

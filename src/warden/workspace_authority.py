@@ -24,11 +24,14 @@ from typing import Any, Dict, List, Literal, Optional
 _REPO_CONFIG = Path(__file__).resolve().parents[2] / "config" / "warden_projects.json"
 _USER_CONFIG = Path("~/.config/warden/projects.json").expanduser()
 
-# The current checkout, wherever it actually lives on this machine (Matt's
+# The current checkout, wherever it actually lives on this machine (the
 # box, CI, another dev's clone). Used as the default canonical repo for the
 # "warden" project so the registry doesn't hardcode a path that only exists
 # on one machine. A repo-owned or user config file can still override this.
 _CURRENT_CHECKOUT = str(Path(__file__).resolve().parents[2])
+_HOME = Path.home()
+_LEGACY_WARDEN_SCRATCH = str(_HOME / "Documents" / "Warden")
+_MARIUS_REPO = os.environ.get("MARIUS_REPO", str(_HOME / "workspaces" / "marius-core"))
 
 # ---------------------------------------------------------------------------
 # Built-in project registry (no config file needed)
@@ -46,7 +49,7 @@ _BUILTIN_REGISTRY: List[Dict[str, Any]] = [
                 "safe_to_edit": True,
             },
             {
-                "path": "/home/matt/Documents/Warden",
+                "path": _LEGACY_WARDEN_SCRATCH,
                 "role": "scratch_or_clone",
                 "safe_to_edit": False,
             },
@@ -80,10 +83,10 @@ _BUILTIN_REGISTRY: List[Dict[str, Any]] = [
     {
         "project_id": "marius",
         "display_name": "Marius Core",
-        "canonical_repo": "/home/matt/workspaces/marius-core",
+        "canonical_repo": _MARIUS_REPO,
         "known_worktrees": [
             {
-                "path": "/home/matt/workspaces/marius-core",
+                "path": _MARIUS_REPO,
                 "role": "canonical",
                 "safe_to_edit": True,
             }

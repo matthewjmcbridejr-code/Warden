@@ -120,7 +120,7 @@ def test_skips_task_outside_allowed_paths(tmp_board, monkeypatch):
             "poll_interval_seconds": 1,
             "default_timeout_seconds": 30,
             "log_dir": str(tmp_board.parent / "runs"),
-            "allowed_repo_roots": ["/home/matt/workspaces"],
+            "allowed_repo_roots": [str(Path.home() / "workspaces")],
             "agents": {"cl": {"enabled": True, "command_template": ["cl", "--prompt-file", "{prompt_file}"]}},
         },
         dry_run=True,
@@ -186,7 +186,7 @@ def test_command_not_found_returns_failure(tmp_board, monkeypatch):
 # Matches the dynamic default in workspace_authority._CURRENT_CHECKOUT —
 # the actual checkout, wherever it lives on this machine.
 CANONICAL = str(Path(__file__).resolve().parents[1])
-SCRATCH = "/home/matt/Documents/Warden"
+SCRATCH = str(Path.home() / "Documents" / "Warden")
 
 _WA_CFG = {
     "enabled": True,

@@ -21,7 +21,7 @@ async def test_grounding_injection():
         system_msg = next(m["content"] for m in messages if m["role"] == "system")
         
         assert "Marius Grounding Pack" in system_msg
-        assert "Warden is Matt’s terminal-agent control plane" in system_msg
+        assert "Warden is a local-first AI workspace" in system_msg
 
 @pytest.mark.anyio
 @pytest.mark.requires_ollama

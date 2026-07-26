@@ -157,7 +157,7 @@ SAFE_REPO_PATHS = [
 def _effective_repo_path(path: Path) -> Path:
     """Resolve a SAFE_REPO_PATHS entry to a real, existing path.
 
-    These entries are machine-specific labels for Matt's local sibling repos.
+    These entries are machine-specific labels for the operator's local sibling repos.
     On any other machine (CI, another dev box) where the literal path doesn't
     exist, fall back to the current checkout so the label still resolves to
     something real instead of a permanently-missing path.
@@ -5678,14 +5678,15 @@ def post_warden_gmail_imap_connect(body: GmailImapConnectRequest):
         updated_at=now,
     )
     store = ConnectorStore()
-    store.save_account(account, token=token_str)
+    stored = store.save_account(account, token=token_str)
     response = {
         "ok": True,
-        "account_id": account_id,
+        "account_id": stored["account_id"],
         "provider": "gmail",
         "auth_type": "imap_app_password",
         "display_email": email,
         "status": connection_status,
+        "credential_stored": stored.get("credential_stored", False),
     }
     if connection_note:
         response["note"] = connection_note
@@ -5709,7 +5710,7 @@ def post_warden_icloud_connect(body: ICloudConnectRequest):
     from datetime import datetime, timezone as _tz
     import json as _json
 
-    email = (body.email or "").strip()
+    email = (body.email or "").strip().lower()
     app_password = (body.app_password or "").strip()
 
     if not email or not _re.match(r"[^@]+@[^@]+\.[^@]+", email):
@@ -5736,9 +5737,10 @@ def post_warden_icloud_connect(body: ICloudConnectRequest):
         updated_at=now,
     )
     store = ConnectorStore()
-    store.save_account(account, token=token_str)
-    return {"ok": True, "account_id": account_id, "provider": "icloud",
+    stored = store.save_account(account, token=token_str)
+    return {"ok": True, "account_id": stored["account_id"], "provider": "icloud",
             "display_email": email, "status": "connected",
+            "credential_stored": stored.get("credential_stored", False),
             "note": "App password stored in local vault only. Use /warden/mail/search to test."}
 
 
