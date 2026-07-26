@@ -254,7 +254,7 @@ button:hover { border-color: #554b59; }
 .sb-error { margin-bottom: 14px; padding: 11px 13px; border: 1px solid #713f47; border-radius: 9px; color: #ffb3b9; background: #311b21; font-size: 10px; }
 
 .sb-result { border-left: 1px solid var(--line); overflow: auto; }
-.sb-result-head { justify-content: flex-start; }
+.sb-result-head { flex-direction: column; align-items: flex-start; justify-content: center; }
 .sb-result-tabs { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); background: #121116f2; backdrop-filter: blur(10px); }
 .sb-result-tabs button { min-height: 39px; padding: 8px 4px; border: 0; border-bottom: 2px solid transparent; color: #756d79; background: transparent; font-size: 8px; font-weight: 620; }
 .sb-result-tabs button:hover { color: #bfb6c2; }

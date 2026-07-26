@@ -93,13 +93,13 @@
     // For now read it from the workstream endpoint which has profile data
     try {
       const data = await api(`${MCH}/projects/`);
-      // Also check if we have a personal profile via a recall for it
-      const profileData = await api(`${MCH}/memories/recall?q=Matt+McBride&limit=1`).catch(() => null);
+      // Check for a profile memory without assuming the repository author's identity.
+      const profileData = await api(`${MCH}/memories/recall?q=operator+profile&limit=1`).catch(() => null);
 
       // Default profile (from the seed we know exists)
       const profile = {
-        name: "Matt McBride",
-        bio: "Software engineer & builder. Local-first agent OS.",
+        name: "Warden operator",
+        bio: "Personalize this profile so agents receive your context.",
         projects: data.map(p => p.name).filter(Boolean),
       };
 
@@ -116,13 +116,13 @@
       if (projsEl) {
         const tags = profile.projects.length
           ? profile.projects
-          : ["Warden", "Grademy", "Marius", "Hermes"];
+          : ["Add your first project"];
         projsEl.innerHTML = tags.slice(0, 6)
           .map(t => `<span class="mem-identity-project-tag">${t}</span>`)
           .join("");
       }
     } catch {
-      document.getElementById("mem-identity-name").textContent = "Matt McBride";
+      document.getElementById("mem-identity-name").textContent = "Warden operator";
     }
   }
 

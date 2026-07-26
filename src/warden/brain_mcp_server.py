@@ -50,8 +50,8 @@ _OAUTH_ISSUER_URL = os.getenv("MCP_OAUTH_ISSUER_URL", "https://mcp.mctable.onlin
 mcp = FastMCP(
     "warden-brain",
     instructions=(
-        "Warden Brain gives you access to Matt McBride's personal second brain. "
-        "Start every session by calling warden_me to learn who Matt is and what he's working on. "
+        "Warden Brain gives you access to the current operator's local second brain. "
+        "Start every session by calling warden_me to learn who the operator is and what they are working on. "
         "Use warden_recall to retrieve relevant memories before starting work. "
         "Use warden_remember to save important decisions, proofs, or failures when you're done. "
         "Use warden_workstream to see recent activity across all projects."
@@ -373,7 +373,7 @@ def warden_listening_ports() -> str:
 
 @mcp.tool()
 def warden_me() -> str:
-    """Return Matt's personal profile, current priorities, and active projects.
+    """Return the operator's personal profile, current priorities, and active projects.
     Call this first at the start of every session to get full context."""
     try:
         seed_if_missing()
@@ -407,7 +407,7 @@ def warden_workstream(limit: int = 10, project: str = "") -> str:
 
 @mcp.tool()
 def warden_update_me(field: str, value: str) -> str:
-    """Update Matt's personal profile. Agents call this to log new priorities or project changes.
+    """Update the operator's personal profile. Agents call this to log new priorities or project changes.
 
     Args:
         field: One of: priorities, projects, bio, preferences
@@ -897,7 +897,7 @@ def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
 @mcp.tool()
 def warden_bootstrap(task: str, project: str = "") -> str:
     """THE tool to call first. Returns a single agent-ready startup packet combining:
-    - Who Matt is and his current priorities
+    - Who the operator is and their current priorities
     - Active projects and preferences
     - Recent workstream (what was worked on last)
     - Relevant memories for this task

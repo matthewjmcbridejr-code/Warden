@@ -54,7 +54,7 @@
 
         <div class="sidebar-group-label">Resources</div>
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
-        <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-test-panel" data-testid="nav-mail">Mail</button>
+        <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-accounts-panel" data-testid="nav-mail">Mail Accounts</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
         <button type="button" class="nav-item" data-section="inbox" data-testid="nav-inbox">Brain Inbox</button>
         <button type="button" class="nav-item" data-section="brain-graph" data-testid="nav-brain-graph">Brain Graph</button>
@@ -610,9 +610,9 @@
         </header>
 
         <!-- Connectors -->
-        <div class="settings-section-header">
-          <h3 class="settings-section-title">Account Connectors</h3>
-          <p class="settings-section-sub">Connect mail accounts to let the assistant search your inbox. Credentials are stored locally — never sent to agents or included in API responses.</p>
+        <div class="settings-section-header" id="mail-accounts-panel">
+          <h3 class="settings-section-title">Mail Accounts</h3>
+          <p class="settings-section-sub">Add as many Google, Microsoft, or iCloud inboxes as you need. Credentials are saved persistently in Warden's private local vault and never included in API responses.</p>
         </div>
         <div id="connectors-provider-list" class="connectors-provider-list" data-testid="connectors-provider-list">
           <div class="connectors-loading">Loading providers…</div>

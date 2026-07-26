@@ -1,6 +1,6 @@
 {
   "name": "warden-ai-desk",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Subscription-first Linux workstation for AI web workspaces, local terminals, and structured agent runs",
@@ -34,6 +34,10 @@
     "esbuild": "^0.28.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.8",
+    "minimatch": "^10.2.4"
   },
   "build": {
     "appId": "com.usemarius.warden.desk",

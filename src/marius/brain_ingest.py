@@ -90,7 +90,7 @@ class BrainIngest:
 
     async def add_url(self, url: str, project: str = "research", tags: List[str] = None) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            headers = {"User-Agent": "MariusBrain/1.0 (Matt's McServer Assistant)"}
+            headers = {"User-Agent": "MariusBrain/1.0 (Warden local assistant)"}
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             

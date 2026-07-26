@@ -6,6 +6,19 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 
 - No unreleased desktop changes recorded.
 
+## [0.4.1] - 2026-07-26
+
+### Added
+
+- Added an independent-install guide covering Debian installation, source setup, website account sign-in, official Build-client authentication, local storage, updates, and troubleshooting.
+- Clarified first-run onboarding so a new operator can use only their own accounts without Matt's private Warden services.
+
+### Fixed
+
+- Removed hard-coded owner identity from Brain MCP instructions, OAuth subjects, project bootstrap context, and the legacy memory identity card.
+- Made connector credentials durable with private atomic writes, stable reconnect identifiers, backup recovery, and explicit credential status.
+- Restored the legacy `warden up` documentation contract used by the Python suite while keeping AI Desk as the recommended desktop entry point.
+
 ## [0.4.0] - 2026-07-16
 
 ### Changed
@@ -53,7 +66,8 @@ All notable changes to Warden AI Desk are documented here. The desktop follows s
 - Codex is the only structured adapter with a Warden-controlled approval bridge.
 - Packaging is release-proven for Debian/Ubuntu x86-64 only.
 
-[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/matthewjmcbridejr-code/Warden/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.4.1
 [0.4.0]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.4.0
 [0.3.1]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.1
 [0.3.0]: https://github.com/matthewjmcbridejr-code/Warden/releases/tag/v0.3.0

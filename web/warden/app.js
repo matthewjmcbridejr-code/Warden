@@ -2766,6 +2766,7 @@
   window.addEventListener("message", (evt) => {
     if (evt.data && evt.data.type === "warden_connector_connected") {
       loadConnectorsProviders().catch(() => {});
+      loadMailTestAccountOptions().catch(() => {});
     }
   });
 
@@ -2801,24 +2802,33 @@
         const statusPillClass = isConnected ? "status-connected" : (p.configured ? "status-ready" : "status-coming");
 
         // Connected accounts rows
-        const accountsHtml = connected.map((a) => `
-          <div class="connector-account-row" data-account-id="${escapeHtml(a.account_id)}">
-            <span class="connector-account-email">${escapeHtml(a.display_email || a.account_id)}</span>
-            <span class="status-pill status-connected" style="font-size:0.72rem;">Connected</span>
-            <button type="button" class="btn connector-disconnect-btn"
-              data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
-          </div>`).join("");
+        const accountsHtml = connected.map((a) => {
+          const accountStatus = a.status === "connected" ? "Connected"
+            : a.status === "needs_check" ? "Needs check"
+            : a.status === "needs_reauth" ? "Reconnect"
+            : (a.status || "Unknown");
+          const statusClass = a.status === "connected" ? "status-connected" : "status-ready";
+          const persistence = a.credential_stored ? "Saved locally" : "Credential missing";
+          return `
+            <div class="connector-account-row" data-account-id="${escapeHtml(a.account_id)}">
+              <span class="connector-account-email">${escapeHtml(a.display_email || a.account_id)}</span>
+              <span class="connector-account-persistence">${escapeHtml(persistence)}</span>
+              <span class="status-pill ${statusClass}" style="font-size:0.72rem;">${escapeHtml(accountStatus)}</span>
+              <button type="button" class="btn connector-disconnect-btn"
+                data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
+            </div>`;
+        }).join("");
 
         // Connect action area
         let connectAction = "";
-        if (p.provider_id === "gmail" && !isConnected) {
+        if (p.provider_id === "gmail") {
           // Gmail primary path: App Password (IMAP), no OAuth required
           const guideUrl = "https://console.cloud.google.com/apis/credentials";
           const redirectUri = `${location.origin}/api/mcharness/warden/connectors/gmail/callback`;
           connectAction = `
             <div class="connector-icloud-form" data-provider="gmail">
               <p class="connector-provider-note">
-                Connect Gmail using a <strong>Google App Password</strong> — no OAuth verification needed.
+                Add a Gmail or Google Workspace mailbox using a <strong>Google App Password</strong>.
                 <a href="#" class="connector-icloud-help-toggle" style="font-size:.8rem;">How to create one</a>
               </p>
               <div class="connector-icloud-help" style="display:none;">
@@ -2835,8 +2845,8 @@
                 </p>
               </div>
               <div class="connector-form-row">
-                <label class="connector-label">Gmail Address</label>
-                <input type="email" class="connector-input" placeholder="you@gmail.com"
+                <label class="connector-label">Google Email Address</label>
+                <input type="email" class="connector-input" placeholder="you@gmail.com or you@company.com"
                   id="gmail-imap-email-input" autocomplete="email" />
               </div>
               <div class="connector-form-row">
@@ -2846,7 +2856,7 @@
               </div>
               <div class="connector-setup-actions">
                 <button type="button" class="btn primary connector-gmail-imap-submit-btn">
-                  Connect Gmail
+                  ${isConnected ? "Add another Google mailbox" : "Connect Google mailbox"}
                 </button>
                 <span class="connector-setup-note">App password stored locally only. Never sent anywhere.</span>
               </div>
@@ -2893,7 +2903,8 @@
               </div>
             </details>`;
         } else if (p.auth_type === "oauth2_authorization_code" && p.provider_id !== "gmail") {
-          const connectBtnLabel = p.display_name.includes("Outlook") ? "Sign in with Microsoft"
+          const connectBtnLabel = p.display_name.includes("Outlook")
+            ? (isConnected ? "Add another Microsoft account" : "Sign in with Microsoft")
             : `Connect ${p.display_name}`;
           const signInNote = "Warden stores read-only access locally. Your Microsoft password is never shared.";
 
@@ -2949,7 +2960,6 @@
               </details>`;
           }
         } else if (p.auth_type === "app_password") {
-          if (!isConnected) {
             connectAction = `
               <div class="connector-icloud-form" data-provider="icloud">
                 <p class="connector-provider-note">
@@ -2978,13 +2988,12 @@
                 </div>
                 <div class="connector-setup-actions">
                   <button type="button" class="btn primary connector-icloud-submit-btn">
-                    Connect iCloud Mail
+                    ${isConnected ? "Add another iCloud mailbox" : "Connect iCloud Mail"}
                   </button>
                   <span class="connector-setup-note">Password stored locally only. Never sent anywhere.</span>
                 </div>
                 <div class="connector-icloud-status" id="icloud-connect-status"></div>
               </div>`;
-          }
         }
 
         return `<div class="connector-provider-card ${configuredClass}" data-provider-id="${escapeHtml(p.provider_id)}">
@@ -3091,6 +3100,7 @@
                 if (popup && popup.closed) {
                   clearInterval(pollTimer);
                   await loadConnectorsProviders();
+                  await loadMailTestAccountOptions();
                 }
               }, 800);
             } else {
@@ -3143,6 +3153,7 @@
               if (passInput) passInput.value = "";  // clear password from DOM immediately
               if (statusEl) statusEl.textContent = "";
               await loadConnectorsProviders();
+              await loadMailTestAccountOptions();
             } else {
               if (statusEl) statusEl.textContent = result.detail || "Connection failed.";
               btn.disabled = false;
@@ -3166,7 +3177,7 @@
           const appPassword = (passInput && passInput.value.trim()) || "";
 
           if (!email || !appPassword) {
-            if (statusEl) statusEl.textContent = "Gmail address and app password are required.";
+            if (statusEl) statusEl.textContent = "Google email address and app password are required.";
             return;
           }
           btn.disabled = true;
@@ -3180,6 +3191,7 @@
             if (result.ok) {
               if (statusEl) statusEl.textContent = "";
               await loadConnectorsProviders();
+              await loadMailTestAccountOptions();
             } else {
               if (statusEl) statusEl.textContent = result.detail || result.note || "Connection failed.";
               btn.disabled = false;
@@ -3202,6 +3214,7 @@
           try {
             await requestJson(`${MCH}/warden/connectors/accounts/${encodeURIComponent(accountId)}/disconnect`, {method: "POST"});
             await loadConnectorsProviders();
+            await loadMailTestAccountOptions();
           } catch (e) {
             btn.textContent = "Error";
             btn.disabled = false;
@@ -5040,7 +5053,7 @@
         break;
       case "goto-mail":
         setActiveSection("settings");
-        setTimeout(() => document.getElementById("mail-test-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        setTimeout(() => document.getElementById("mail-accounts-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
         break;
       case "goto-tasks":
         setActiveSection("evidence");

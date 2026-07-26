@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Literal, Optional
 _REPO_CONFIG = Path(__file__).resolve().parents[2] / "config" / "warden_projects.json"
 _USER_CONFIG = Path("~/.config/warden/projects.json").expanduser()
 
-# The current checkout, wherever it actually lives on this machine (Matt's
+# The current checkout, wherever it actually lives on this machine (the
 # box, CI, another dev's clone). Used as the default canonical repo for the
 # "warden" project so the registry doesn't hardcode a path that only exists
 # on one machine. A repo-owned or user config file can still override this.

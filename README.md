@@ -77,15 +77,28 @@ Read [desktop/architecture.md](desktop/architecture.md) and [SECURITY.md](SECURI
 
 ## Install on Debian or Ubuntu
 
-Download the 0.4.0 `.deb` and checksum from a future tagged release, then verify before installing:
+Download the `0.4.1` `.deb` and checksum from the
+[latest release](https://github.com/matthewjmcbridejr-code/Warden/releases/latest),
+then verify before installing:
 
 ```bash
-sha256sum --check warden-ai-desk_0.4.0_amd64.deb.sha256
-sudo apt install ./warden-ai-desk_0.4.0_amd64.deb
+sha256sum --check warden-ai-desk_0.4.1_amd64.deb.sha256
+sudo apt install ./warden-ai-desk_0.4.1_amd64.deb
 warden-ai-desk
 ```
 
-This branch prepares the artifact but does not publish it. Linux must support Electron's normal Chromium sandbox/AppArmor behavior; Warden does not install a permanent `--no-sandbox` workaround.
+Every installation starts without accounts or private data. Sign into AI
+websites normally inside Chat; structured Build missions use separately
+installed official provider clients signed into your own accounts. The private
+Brain, browser-memory extension, mail connectors, and older Python service are
+optional.
+
+Read [Get Warden running](docs/getting-started.md) for system requirements,
+provider sign-in, first-project safety, source installation, local-data
+locations, and removal.
+
+Linux must support Electron's normal Chromium sandbox/AppArmor behavior; Warden
+does not install a permanent `--no-sandbox` workaround.
 
 ## Develop and verify
 
@@ -97,6 +110,10 @@ npm run dev          # build and launch
 npm run check        # typecheck, tests, production build
 npm run package:deb  # local .deb; never publishes
 ```
+
+The repository also retains the earlier Python service for contributors. To
+bring legacy `warden up` locally, use its canonical quick-start command,
+`scripts/warden-up`; it is not required to run Warden AI Desk.
 
 The desktop suite covers state recovery, URL policy, profile assignment, OAuth popups, native navigation/menu boundaries, adapters, authentication reporting, events, runs, approvals, context, handoffs, and evidence. See [CONTRIBUTING.md](CONTRIBUTING.md) for the older Python services and contributor workflow.
 

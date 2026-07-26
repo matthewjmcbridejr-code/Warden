@@ -466,7 +466,7 @@ def _inject_bootstrap(worktree_path: str, project_id: str, prompt: str) -> None:
         "schema": "warden.bootstrap.v1",
         "project_id": project_id,
         "prompt": prompt,
-        "operator": profile.get("name", "Matt"),
+        "operator": profile.get("name", "operator"),
         "active_projects": profile.get("active_projects", []),
         "preferences": profile.get("preferences", {}),
         "injected_at": datetime.now(timezone.utc).isoformat(),
