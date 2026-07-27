@@ -7,10 +7,30 @@ type SimpleBuildOptions = {
   activeProjectId?: string;
   activateProject(id: string): Promise<void>;
   chooseProject(): Promise<void>;
+  createPlayground(): Promise<void>;
   openDeveloperMode(): Promise<void>;
   openTerminal(): Promise<void>;
   activateRun(run?: WardenRun, project?: ProjectWorkspace): void;
   notify(message?: string): void;
+};
+
+export const MISSION_TEMPLATES: Record<string, { outcome: string; acceptance: string }> = {
+  welcome: {
+    outcome: 'Create a WELCOME.md file introducing this repository, describing its purpose, and detailing how Warden AI Desk manages safe build missions.',
+    acceptance: 'The WELCOME.md file exists in the root directory, contains clean Markdown headings, and lists Warden safety principles.'
+  },
+  typos: {
+    outcome: 'Audit the project files for typos, spelling mistakes, and formatting inconsistencies, then apply necessary corrections.',
+    acceptance: 'All typos in Markdown and documentation files are fixed and no functional code structure is altered.'
+  },
+  web: {
+    outcome: 'Create an index.html web page showcasing the project with modern CSS styling, clear headings, and interactive elements.',
+    acceptance: 'index.html opens cleanly in a browser, uses valid HTML5 semantic tags, and has an embedded style block.'
+  },
+  testing: {
+    outcome: 'Add a sanity verification test to the project and run verification checks to confirm all tests pass.',
+    acceptance: 'A test script exists, execution returns exit code 0, and test output confirms success.'
+  }
 };
 
 const sb = {
@@ -217,6 +237,19 @@ export async function initSimpleBuild(options: SimpleBuildOptions): Promise<void
   $('#sb-choose-directory').addEventListener('click', () => void runAction('sb-choose-directory', options.chooseProject));
   $('#sb-empty-choose').addEventListener('click', () => void runAction('sb-empty-choose', options.chooseProject));
   $('#sb-choose-another').addEventListener('click', () => void runAction('sb-choose-another', options.chooseProject));
+  $('#sb-create-playground')?.addEventListener('click', () => void runAction('sb-create-playground', options.createPlayground));
+  $('#sb-create-playground-sidebar')?.addEventListener('click', () => void runAction('sb-create-playground-sidebar', options.createPlayground));
+  document.querySelectorAll<HTMLButtonElement>('[data-template]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.template;
+      const tpl = key ? MISSION_TEMPLATES[key] : undefined;
+      if (tpl) {
+        $<HTMLTextAreaElement>('#sb-task').value = tpl.outcome;
+        $<HTMLTextAreaElement>('#sb-acceptance').value = tpl.acceptance;
+        options.notify(`Pre-filled "${button.querySelector('strong')?.textContent || 'Mission'}" template.`);
+      }
+    });
+  });
   $('#sb-open-readonly').addEventListener('click', () => void runAction('sb-open-readonly', options.openDeveloperMode));
   $('#sb-connect-codex').addEventListener('click', () => void runAction('sb-connect-codex', refreshCodexOnboarding));
   $('#sb-open-terminal').addEventListener('click', () => void runAction('sb-open-terminal', options.openTerminal));

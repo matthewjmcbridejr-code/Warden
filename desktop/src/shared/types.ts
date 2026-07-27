@@ -96,6 +96,15 @@ export type RunEventListener = (event: NormalizedRunEvent) => void;
 export type Unsubscribe = () => void;
 export interface BuildProvider { readonly id: string; capabilities(): ProviderCapabilities; authStatus(): Promise<ProviderAuthReport>; startRun(input: StartRunInput): Promise<RunHandle>; resumeRun(input: ResumeRunInput): Promise<RunHandle>; cancelRun(runId: string): Promise<void>; respondToApproval(input: ApprovalResponse): Promise<void>; subscribe(runId: string, listener: RunEventListener): Unsubscribe }
 
+export interface MissionTemplate {
+  id: string;
+  title: string;
+  category: 'onboarding' | 'documentation' | 'formatting' | 'web' | 'testing';
+  outcome: string;
+  acceptanceCriteria: string;
+  icon: string;
+}
+
 export interface DesktopApi {
   app: { info(): Promise<AppInfo> };
   state: { get(): Promise<{ state: DesktopState; warning?: string }>; update(patch: Partial<Pick<DesktopState, 'workspace' | 'selectedProvider' | 'selectedPlatformId' | 'activeProjectId' | 'onboardingComplete' | 'mode'>>): Promise<DesktopState> };
@@ -114,7 +123,7 @@ export interface DesktopApi {
     onStatus(listener: (status: PlatformStatus) => void): () => void;
     onMenuAction(listener: (action: PlatformMenuAction) => void): () => void;
   };
-  project: { list(): Promise<ProjectWorkspace[]>; create(input: { name?: string; cwd: string; browserProfileId?: string }): Promise<ProjectWorkspace>; activate(id: string): Promise<ProjectWorkspace>; update(id: string, patch: Partial<ProjectWorkspace>): Promise<ProjectWorkspace> };
+  project: { list(): Promise<ProjectWorkspace[]>; create(input: { name?: string; cwd: string; browserProfileId?: string }): Promise<ProjectWorkspace>; createPlayground(): Promise<ProjectWorkspace>; activate(id: string): Promise<ProjectWorkspace>; update(id: string, patch: Partial<ProjectWorkspace>): Promise<ProjectWorkspace> };
   terminal: { list(): Promise<TerminalMetadata[]>; chooseDirectory(): Promise<string | null>; create(input: { name: string; cwd: string; restoreId?: string }): Promise<TerminalMetadata>; write(id: string, data: string): void; resize(id: string, cols: number, rows: number): void; kill(id: string): Promise<void>; clearHistory(id: string): Promise<void>; recordCommand(id: string, command: string): Promise<void>; onData(listener: (payload: { id: string; data: string }) => void): () => void; onState(listener: (terminal: TerminalMetadata) => void): () => void };
   runs: { providers(): Promise<ProviderAuthReport[]>; checkProject(cwd: string): Promise<{ isGit: boolean; clean: boolean }>; list(projectId?: string): Promise<WardenRun[]>; get(id: string): Promise<WardenRun>; previewContext(cwd: string): Promise<ContextPack>; start(input: { provider: StructuredProviderId; prompt: string; cwd: string; projectId?: string; attachContext: boolean; model?: string; authSource: 'subscription' | 'api_key'; apiFallbackApproved?: boolean; safe?: boolean }): Promise<WardenRun>; resume(id: string, prompt: string): Promise<WardenRun>; cancel(id: string): Promise<void>; approve(runId: string, approvalId: string, decision: 'approve' | 'deny', scope?: 'once' | 'session'): Promise<void>; handoff(id: string): Promise<{ path: string; content: string }>; saveProof(id: string): Promise<ProofState>; keep(id: string): Promise<WardenRun>; discard(id: string): Promise<WardenRun>; undoUpdate(id: string): Promise<WardenRun>; onChanged(listener: (run: WardenRun) => void): () => void };
 }

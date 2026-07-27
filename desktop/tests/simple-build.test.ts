@@ -28,4 +28,13 @@ describe('Simple Build product integration', () => {
     expect(source).toContain('showError(error)');
     expect(source).toContain('options.openDeveloperMode');
   });
+
+  it('supports Warden 0.5 beginner mission templates and 1-click playground creation', () => {
+    for (const id of ['sb-create-playground', 'provider-setup-button', 'handoff-to-build']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(source).toContain('MISSION_TEMPLATES');
+    expect(source).toContain('data-template');
+    expect(source).toContain('createPlayground');
+  });
 });

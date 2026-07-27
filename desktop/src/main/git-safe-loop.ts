@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -36,6 +36,35 @@ export async function isCleanGitProject(cwd: string): Promise<{ isGit: boolean; 
   const status = await exec('git', ['-C', cwd, 'status', '--porcelain'], { timeout: 5_000 });
   return { isGit: true, clean: status.stdout.trim().length === 0 };
 }
+
+/** Explicitly initializes a Git repository for a project upon operator confirmation, committing baseline files safely and handling errors without leaving a broken state. */
+export async function initializeGitRepository(cwd: string, options: { filesToCommit: string[] }): Promise<void> {
+  const { isGit } = await isCleanGitProject(cwd);
+  if (isGit) return;
+
+  if (!options?.filesToCommit || options.filesToCommit.length === 0) {
+    throw new GitSafeLoopError('Cannot initialize Git repository without an explicit, approved list of baseline files to commit.');
+  }
+
+  const gitignorePath = join(cwd, '.gitignore');
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, ".env\n.env.*\n!.env.*.example\nnode_modules/\n");
+  }
+
+  const gitDir = join(cwd, '.git');
+  try {
+    await git(cwd, ['init']);
+    await git(cwd, ['config', 'user.name', 'Warden']);
+    await git(cwd, ['config', 'user.email', 'warden@local']);
+    await git(cwd, ['add', ...options.filesToCommit]);
+    await git(cwd, ['commit', '-m', 'Initialize Git repository by Warden']);
+  } catch (error) {
+    rmSync(gitDir, { recursive: true, force: true });
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new GitSafeLoopError(`Failed to initialize Git repository in ${cwd}: ${detail}`);
+  }
+}
+
 
 /** Steps 2–3 — record the starting commit, create an isolated task worktree. */
 export async function startSafeWorkspace(projectCwd: string): Promise<SafeWorkspace> {
