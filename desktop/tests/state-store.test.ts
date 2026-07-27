@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StateStore } from '../src/main/state-store';
 import { presetInput } from '../src/main/web-platforms';
+import { discardSafeWorkspace, initializeGitRepository, isCleanGitProject, startSafeWorkspace } from '../src/main/git-safe-loop';
 
 describe('project, profile, and platform persistence', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -47,5 +48,42 @@ describe('project, profile, and platform persistence', () => {
   it('skips corrupted platform definitions while preserving valid definitions', () => {
     const root = mkdtempSync(join(tmpdir(), 'warden-invalid-platform-')); const initial = new StateStore(root); initial.save(); const file = initial.file; const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>; raw.platforms = [{ name: 'Unsafe', startUrl: 'javascript:alert(1)' }, initial.state.platforms[0]]; writeFileSync(file, JSON.stringify(raw)); const recovered = new StateStore(root);
     expect(recovered.state.platforms).toHaveLength(1); expect(recovered.state.platforms[0].name).toBe('Claude'); expect(recovered.warning).toContain('Skipped invalid platform');
+  });
+
+  it('creates sample playgrounds collision-free when folders already exist on disk', () => {
+    const root = mkdtempSync(join(tmpdir(), 'warden-playgrounds-'));
+    const store = new StateStore(root);
+    const p1 = store.preparePlayground(root);
+    expect(p1.name).toBe('Playground 1');
+    expect(existsSync(p1.cwd)).toBe(true);
+
+    const p2 = store.preparePlayground(root);
+    expect(p2.name).toBe('Playground 2');
+    expect(existsSync(p2.cwd)).toBe(true);
+    expect(p2.cwd).not.toBe(p1.cwd);
+  });
+
+  it('executes atomic playground creation creating baseline files, initializing git, resulting in clean: true and functional startSafeWorkspace', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'warden-playgrounds-e2e-'));
+    const store = new StateStore(root);
+    const { cwd, name, filesToCommit } = store.preparePlayground(root);
+
+    expect(existsSync(join(cwd, 'README.md'))).toBe(true);
+    expect(existsSync(join(cwd, 'WELCOME.md'))).toBe(true);
+    expect(existsSync(join(cwd, '.gitignore'))).toBe(true);
+
+    await initializeGitRepository(cwd, { filesToCommit });
+    const project = store.createProject(cwd, name);
+
+    expect(project.name).toBe('Playground 1');
+    expect(store.state.projects).toHaveLength(1);
+
+    const status = await isCleanGitProject(cwd);
+    expect(status.isGit).toBe(true);
+    expect(status.clean).toBe(true);
+
+    const workspace = await startSafeWorkspace(cwd);
+    expect(workspace.status).toBe('active');
+    await discardSafeWorkspace(cwd, workspace);
   });
 });

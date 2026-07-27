@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { discardSafeWorkspace, GitSafeLoopError, isCleanGitProject, keepSafeWorkspace, startSafeWorkspace, undoConsolidatedCommit } from '../src/main/git-safe-loop';
+import { discardSafeWorkspace, GitSafeLoopError, initializeGitRepository, isCleanGitProject, keepSafeWorkspace, startSafeWorkspace, undoConsolidatedCommit } from '../src/main/git-safe-loop';
 
 const exec = promisify(execFile);
 let projectDir: string;
@@ -25,14 +25,45 @@ async function initProject(): Promise<string> {
 beforeEach(async () => { projectDir = await initProject(); });
 afterEach(() => { rmSync(projectDir, { recursive: true, force: true }); });
 
-describe('isCleanGitProject', () => {
+describe('isCleanGitProject and initializeGitRepository', () => {
   it('reports clean for a fresh commit', async () => {
     expect(await isCleanGitProject(projectDir)).toEqual({ isGit: true, clean: true });
   });
-  it('reports not-git for a plain folder', async () => {
+  it('initializes a folder safely, resulting in clean: true, ls-tree baseline files, and a functional safe workspace', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'warden-plain-'));
-    try { expect(await isCleanGitProject(plain)).toEqual({ isGit: false, clean: false }); }
+    try {
+      writeFileSync(join(plain, 'README.md'), '# Sample Project\n');
+      writeFileSync(join(plain, 'WELCOME.md'), 'Welcome\n');
+      expect(await isCleanGitProject(plain)).toEqual({ isGit: false, clean: false });
+
+      await initializeGitRepository(plain, { filesToCommit: ['.gitignore', 'README.md', 'WELCOME.md'] });
+
+      const status = await isCleanGitProject(plain);
+      expect(status.isGit).toBe(true);
+      expect(status.clean).toBe(true);
+
+      const tree = await git(plain, ['ls-tree', '--name-only', 'HEAD']);
+      expect(tree).toContain('.gitignore');
+      expect(tree).toContain('README.md');
+      expect(tree).toContain('WELCOME.md');
+
+      const safe = await startSafeWorkspace(plain);
+      expect(safe.status).toBe('active');
+      await discardSafeWorkspace(plain, safe);
+    }
     finally { rmSync(plain, { recursive: true, force: true }); }
+  });
+  it('refuses to run git add -A or initialize Git without an explicit, approved filesToCommit list', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'warden-unvetted-'));
+    try {
+      writeFileSync(join(plain, 'unreviewed.txt'), 'secret');
+      // @ts-expect-error testing missing filesToCommit
+      await expect(initializeGitRepository(plain)).rejects.toThrow(GitSafeLoopError);
+      await expect(initializeGitRepository(plain, { filesToCommit: [] })).rejects.toThrow(GitSafeLoopError);
+      expect(await isCleanGitProject(plain)).toEqual({ isGit: false, clean: false });
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
   });
   it('reports dirty when there are uncommitted changes', async () => {
     writeFileSync(join(projectDir, 'README.md'), 'changed\n');

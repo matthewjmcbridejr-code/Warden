@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, globalShortcut, Menu, nativeImage, Tray, ipcMain } from 'electron';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { WebPlatform } from '../shared/types';
 import { StateStore } from './state-store';
 import { TerminalManager } from './terminal-manager';
 import { RunManager } from './run-manager';
 import { PlatformManager } from './platform-manager';
 import { PLATFORM_PRESETS, presetInput } from './web-platforms';
+import { initializeGitRepository } from './git-safe-loop';
 import { startOAuthSmokeFixture } from './oauth-smoke';
 
 let mainWindow: BrowserWindow | null = null;
@@ -44,8 +45,20 @@ function registerIpc(): void {
   ipcMain.handle('platform:clear-site-data', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid platform ID.'); return platforms.clearSiteData(id); });
   ipcMain.handle('platform:show-menu', (event, id: unknown, anchor: unknown) => { requireMainRenderer(event); if (!stringId(id) || !anchor || typeof anchor !== 'object') throw new Error('Invalid menu request.'); const value = anchor as Record<string, unknown>; if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) throw new Error('Invalid menu position.'); return platforms.showMenu(id, { x: Number(value.x), y: Number(value.y) }); });
   ipcMain.on('platform:set-bounds', (_event, bounds: unknown) => { if (!bounds || typeof bounds !== 'object') return; const b = bounds as Record<string, unknown>; if (![b.x, b.y, b.width, b.height].every(Number.isFinite)) return; platforms.setBounds({ x: Number(b.x), y: Number(b.y), width: Number(b.width), height: Number(b.height) }); });
+
   ipcMain.handle('project:list', () => store.state.projects);
   ipcMain.handle('project:create', (_event, input: unknown) => { if (!input || typeof input !== 'object') throw new Error('Invalid project request.'); const value = input as Record<string, unknown>; if (typeof value.cwd !== 'string' || (value.name !== undefined && typeof value.name !== 'string') || (value.browserProfileId !== undefined && typeof value.browserProfileId !== 'string')) throw new Error('Invalid project request.'); return store.createProject(value.cwd, value.name as string | undefined, value.browserProfileId as string | undefined); });
+  ipcMain.handle('project:create-playground', async () => {
+    const playgroundsDir = join(app.getPath('userData'), 'playgrounds');
+    const { cwd, name, filesToCommit } = store.preparePlayground(playgroundsDir);
+    try {
+      await initializeGitRepository(cwd, { filesToCommit });
+      return store.createProject(cwd, name);
+    } catch (error) {
+      rmSync(cwd, { recursive: true, force: true });
+      throw error;
+    }
+  });
   ipcMain.handle('project:activate', (_event, id: unknown) => { if (!stringId(id)) throw new Error('Invalid project ID.'); return store.activateProject(id); });
   ipcMain.handle('project:update', (_event, id: unknown, patch: unknown) => { if (!stringId(id) || !patch || typeof patch !== 'object') throw new Error('Invalid project update.'); return store.updateProject(id, patch as never); });
   ipcMain.handle('terminal:list', () => terminals.list());

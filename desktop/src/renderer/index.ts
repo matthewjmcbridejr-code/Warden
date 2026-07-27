@@ -87,9 +87,56 @@ async function openPlatformDialog(platform?: WebPlatform): Promise<void> {
     if (ui.workspace === 'chat' && ui.platformId) await selectPlatform(ui.platformId, ui.splitPlatformId);
   }
 }
+async function createPlaygroundProject(): Promise<ProjectWorkspace> {
+  const project = await window.wardenDesk.project.createPlayground();
+  ui.projects = await window.wardenDesk.project.list();
+  await activateProject(project.id);
+  notice(`Created playground project "${project.name}" with Git safety enabled.`);
+  return project;
+}
+
+async function openProviderSetupDialog(): Promise<void> {
+  const dialog = $('#provider-setup-dialog') as HTMLDialogElement;
+  if (dialog.open) return;
+  if (ui.workspace === 'chat') await window.wardenDesk.platform.hide();
+  const matrix = $('#provider-setup-matrix');
+  matrix.replaceChildren();
+  const reports = await window.wardenDesk.runs.providers();
+  for (const report of reports) {
+    const card = document.createElement('div');
+    card.className = 'provider-card-setup';
+    card.innerHTML = `<h4>${buildProviderNames[report.provider]} <span class="status-pill ${report.state === 'subscription_authenticated' ? 'success' : report.state === 'api_key_authenticated' ? 'quiet' : 'warning'}">${report.state.replaceAll('_', ' ')}</span></h4><p>${report.detail || 'Standard CLI provider.'}</p><div class="provider-caps"><span>Isolated Worktree</span><span>Approval Gate</span><span>Diff Review</span><span>Proof Signature</span></div>`;
+    matrix.append(card);
+  }
+  dialog.showModal();
+}
+
+async function openChatHandoffDialog(): Promise<void> {
+  const dialog = $('#chat-to-build-dialog') as HTMLDialogElement;
+  if (dialog.open) return;
+  if (ui.workspace === 'chat') await window.wardenDesk.platform.hide();
+  dialog.showModal();
+}
+
 async function openAboutDialog(): Promise<void> { const dialog = $('#about-dialog') as HTMLDialogElement; if (dialog.open) return; try { if (ui.workspace === 'chat') await window.wardenDesk.platform.hide(); $('#about-version').textContent = `Version ${ui.appInfo?.version || 'unknown'}`; $('#about-runtime').textContent = `${ui.appInfo?.platform || 'Linux'} · ${ui.appInfo?.arch || 'unknown architecture'}`; dialog.showModal(); queueMicrotask(() => ($('#about-done') as HTMLButtonElement).focus()); } catch (error) { notice(error instanceof Error ? error.message : String(error)); } }
 async function openOnboarding(): Promise<void> { const dialog = $('#onboarding-dialog') as HTMLDialogElement; if (dialog.open) return; if (ui.workspace === 'chat') await window.wardenDesk.platform.hide(); dialog.showModal(); queueMicrotask(() => ($('#onboarding-chat') as HTMLButtonElement).focus()); }
-async function completeOnboarding(next: 'chat' | 'project'): Promise<void> { await window.wardenDesk.state.update({ onboardingComplete: true }); ($('#onboarding-dialog') as HTMLDialogElement).close(); const previousProject = ui.activeProjectId; if (next === 'project') { await chooseProjectDirectory(); if (ui.activeProjectId === previousProject) await selectWorkspace('chat'); } else await selectWorkspace('chat'); }
+async function completeOnboarding(next: 'chat' | 'project' | 'sample'): Promise<void> {
+  await window.wardenDesk.state.update({ onboardingComplete: true });
+  ($('#onboarding-dialog') as HTMLDialogElement).close();
+  if (next === 'sample') {
+    const project = await createPlaygroundProject();
+    await selectWorkspace('build');
+    const taskInput = document.querySelector<HTMLTextAreaElement>('#sb-task');
+    const acceptanceInput = document.querySelector<HTMLTextAreaElement>('#sb-acceptance');
+    if (taskInput) taskInput.value = 'Create a WELCOME.md file introducing this repository, describing its purpose, and detailing how Warden AI Desk manages safe build missions.';
+    if (acceptanceInput) acceptanceInput.value = 'The WELCOME.md file exists in the root directory, contains clean Markdown headings, and lists Warden safety principles.';
+    notice(`Sample project "${project.name}" ready! Review the pre-filled mission brief below and click "Start mission".`);
+  } else if (next === 'project') {
+    const previousProject = ui.activeProjectId;
+    await chooseProjectDirectory();
+    if (ui.activeProjectId === previousProject) await selectWorkspace('chat');
+  } else await selectWorkspace('chat');
+}
 async function savePlatformForm(event: SubmitEvent): Promise<void> { event.preventDefault(); const iconValue = ($('#platform-icon') as HTMLInputElement).value.trim(); const input = { name: ($('#platform-name') as HTMLInputElement).value, startUrl: ($('#platform-url') as HTMLInputElement).value, icon: { kind: iconValue.startsWith('https://') ? 'url' as const : 'text' as const, value: iconValue }, category: ($('#platform-category') as HTMLSelectElement).value as WebPlatform['category'], browserProfileId: ($('#platform-profile') as HTMLSelectElement).value, trustedFirstPartyDomains: readDomainLines('#platform-domains'), trustedAuthDomains: readDomainLines('#platform-auth-domains'), enabled: ($('#platform-enabled') as HTMLInputElement).checked, pinned: ($('#platform-pinned') as HTMLInputElement).checked, allowMainView: ($('#platform-main') as HTMLInputElement).checked, allowSplitView: ($('#platform-split') as HTMLInputElement).checked }; try { const platform = ui.editingPlatformId ? await window.wardenDesk.platform.update(ui.editingPlatformId, input) : await window.wardenDesk.platform.create(input); ui.platforms.set(platform.id, platform); ui.platformId = platform.id; ($('#platform-dialog') as HTMLDialogElement).close(); renderPlatforms(); await selectPlatform(platform.id); notice(); } catch (error) { notice(error instanceof Error ? error.message : String(error)); } }
 function applyPreset(key: string): void { const preset = ui.presets.find((item) => item.key === key); if (!preset) return; ($('#platform-name') as HTMLInputElement).value = preset.name; ($('#platform-url') as HTMLInputElement).value = preset.startUrl; ($('#platform-icon') as HTMLInputElement).value = preset.icon.value; ($('#platform-category') as HTMLSelectElement).value = preset.category; ($('#platform-domains') as HTMLTextAreaElement).value = domainLines(preset.trustedFirstPartyDomains); ($('#platform-auth-domains') as HTMLTextAreaElement).value = domainLines(preset.trustedAuthDomains); }
 function openSplitDialog(): void { const select = $('#split-platform') as HTMLSelectElement; select.replaceChildren(); for (const platform of ui.platforms.values()) if (platform.id !== ui.platformId && platform.enabled && platform.allowSplitView) select.add(new Option(platform.name, platform.id)); if (!select.options.length) return notice('No other split-view platform is available.'); ($('#split-dialog') as HTMLDialogElement).showModal(); }
@@ -99,7 +146,8 @@ async function chooseProjectDirectory(): Promise<void> { const cwd = await windo
 
 async function initialize(): Promise<void> {
   const [{ state, warning }, platforms, presets, profiles, projects, appInfo] = await Promise.all([window.wardenDesk.state.get(), window.wardenDesk.platform.list(), window.wardenDesk.platform.presets(), window.wardenDesk.platform.profiles(), window.wardenDesk.project.list(), window.wardenDesk.app.info()]); if (warning) notice(warning); ui.appInfo = appInfo; ui.mode = state.mode; setMode(ui.mode); ui.platforms = new Map(platforms.map((item) => [item.id, item])); ui.presets = presets; ui.profiles = profiles; ui.projects = projects; ui.platformId = state.selectedPlatformId && ui.platforms.has(state.selectedPlatformId) ? state.selectedPlatformId : platforms[0]?.id || ''; ui.activeProjectId = state.activeProjectId; const activeProject = projects.find((item) => item.id === ui.activeProjectId); ui.activeRun = activeProject?.activeRunId || null; ui.cwd = activeProject?.cwd || state.recentProjects[0] || ''; ui.splitPlatformId = activeProject?.splitPlatformId; $('#version-badge').textContent = `v${appInfo.version}`; $('#version-badge').title = `${appInfo.name} ${appInfo.version}`; $('#active-directory').textContent = ui.cwd || 'No project selected';
-  await initSimpleBuild({ projects, activeProjectId: activeProject?.id, activateProject, chooseProject: chooseProjectDirectory, openDeveloperMode: async () => { ui.mode = 'developer'; setMode(ui.mode); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, openTerminal: async () => { ui.mode = 'developer'; setMode(ui.mode); selectExecution('local'); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, activateRun: (run, project) => { if (project) { ui.projects = ui.projects.map((item) => item.id === project.id ? project : item); renderProjects(); } ui.activeRun = run?.id || null; if (run) ui.runs.set(run.id, run); renderRuns(); }, notify: notice });
+  await initSimpleBuild({ projects, activeProjectId: activeProject?.id, activateProject, chooseProject: chooseProjectDirectory, createPlayground: async () => { await createPlaygroundProject(); }, openDeveloperMode: async () => { ui.mode = 'developer'; setMode(ui.mode); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, openTerminal: async () => { ui.mode = 'developer'; setMode(ui.mode); selectExecution('local'); applyMode(); await window.wardenDesk.state.update({ mode: ui.mode }); }, activateRun: (run, project) => { if (project) { ui.projects = ui.projects.map((item) => item.id === project.id ? project : item); renderProjects(); } ui.activeRun = run?.id || null; if (run) ui.runs.set(run.id, run); renderRuns(); }, notify: notice });
+
   const modeToggle = document.getElementById('mode-toggle') as HTMLInputElement | null; if (modeToggle) modeToggle.checked = ui.mode === 'developer';
   document.getElementById('mode-toggle')?.addEventListener('change', (event) => { const checked = (event.target as HTMLInputElement).checked; ui.mode = checked ? 'developer' : 'simple'; setMode(ui.mode); applyMode(); void window.wardenDesk.state.update({ mode: ui.mode }); if (ui.mode === 'simple') void syncSimpleBuild(ui.projects, ui.activeProjectId); });
   $('#agent-directory').textContent = ui.cwd || 'No project selected'; renderProjects(); renderPlatforms();
@@ -111,7 +159,30 @@ async function initialize(): Promise<void> {
   document.querySelectorAll<HTMLInputElement>('input[name="billing-source"]').forEach((input) => input.addEventListener('change', renderAuthStatus));
   $('#project-picker').addEventListener('change', () => void activateProject(($('#project-picker') as HTMLSelectElement).value)); $('#platform-search').addEventListener('input', renderPlatforms); $('#add-platform').addEventListener('click', () => void openPlatformDialog()); $('#empty-add-platform').addEventListener('click', () => void openPlatformDialog()); $('#restore-platform').addEventListener('click', async () => { const removed = await window.wardenDesk.platform.removed(); if (!removed.length) return notice('No removed platforms are available to restore.'); const choice = removed.length === 1 ? removed[0].name : prompt(`Enter the platform to restore:\n${removed.map((item) => item.name).join('\n')}`); const target = removed.find((item) => item.name.toLowerCase() === choice?.trim().toLowerCase()); if (!target) return choice && notice('No removed platform matched that name.'); const restored = await window.wardenDesk.platform.restore(target.id); ui.platforms.set(restored.id, restored); renderPlatforms(); await selectPlatform(restored.id); }); presetSelect.addEventListener('change', () => applyPreset(presetSelect.value)); const platformDialog = $('#platform-dialog') as HTMLDialogElement; ($('#platform-form') as HTMLFormElement).addEventListener('submit', (event) => void savePlatformForm(event)); platformDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId && ui.platforms.get(ui.platformId)?.enabled) void selectPlatform(ui.platformId, ui.splitPlatformId); }); ($('#split-dialog') as HTMLDialogElement).addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId && ui.platforms.get(ui.platformId)?.enabled) void selectPlatform(ui.platformId, ui.splitPlatformId); });
   const aboutDialog = $('#about-dialog') as HTMLDialogElement; $('#about-button').addEventListener('click', () => void openAboutDialog()); $('#about-close').addEventListener('click', () => aboutDialog.close()); $('#about-done').addEventListener('click', () => aboutDialog.close()); aboutDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId) void selectPlatform(ui.platformId, ui.splitPlatformId); });
-  const onboardingDialog = $('#onboarding-dialog') as HTMLDialogElement; $('#onboarding-chat').addEventListener('click', () => void completeOnboarding('chat')); $('#onboarding-project').addEventListener('click', () => void completeOnboarding('project')); onboardingDialog.addEventListener('cancel', (event) => { event.preventDefault(); void completeOnboarding('chat'); });
+  const providerSetupDialog = $('#provider-setup-dialog') as HTMLDialogElement; $('#provider-setup-button').addEventListener('click', () => void openProviderSetupDialog()); $('#provider-setup-close').addEventListener('click', () => providerSetupDialog.close()); $('#provider-setup-done').addEventListener('click', () => providerSetupDialog.close()); providerSetupDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId) void selectPlatform(ui.platformId, ui.splitPlatformId); });
+  const chatHandoffDialog = $('#chat-to-build-dialog') as HTMLDialogElement; $('#handoff-to-build').addEventListener('click', () => void openChatHandoffDialog()); $('#chat-handoff-close').addEventListener('click', () => chatHandoffDialog.close()); $('#chat-handoff-cancel').addEventListener('click', () => chatHandoffDialog.close());
+  $('#chat-handoff-preview-btn').addEventListener('click', async () => {
+    if (!ui.cwd) return notice('Select a project directory first.');
+    const prompt = ($('#chat-handoff-prompt') as HTMLTextAreaElement).value.trim();
+    const pack = await window.wardenDesk.runs.previewContext(ui.cwd);
+    const output = $('#chat-handoff-preview');
+    output.textContent = contextText(pack);
+    output.removeAttribute('hidden');
+  });
+  $('#chat-handoff-start').addEventListener('click', async () => {
+    const prompt = ($('#chat-handoff-prompt') as HTMLTextAreaElement).value.trim();
+    if (!prompt) return notice('Enter or paste a mission brief.');
+    chatHandoffDialog.close();
+    await selectWorkspace('build');
+    const taskInput = document.querySelector<HTMLTextAreaElement>('#sb-task');
+    if (taskInput) taskInput.value = prompt;
+    notice('Mission brief transferred to Build workspace. Click "Start mission" to launch.');
+  });
+  const onboardingDialog = $('#onboarding-dialog') as HTMLDialogElement;
+  $('#onboarding-create-sample')?.addEventListener('click', () => void completeOnboarding('sample'));
+  $('#onboarding-chat').addEventListener('click', () => void completeOnboarding('chat'));
+  $('#onboarding-project').addEventListener('click', () => void completeOnboarding('project'));
+  onboardingDialog.addEventListener('cancel', (event) => { event.preventDefault(); void completeOnboarding('chat'); });
   $('#new-profile').addEventListener('click', async () => { const name = prompt('Name this Warden browser profile. Profiles share cookies only with platforms assigned to the same profile.'); if (!name) return; try { const profile = await window.wardenDesk.platform.createProfile(name); ui.profiles.push(profile); profileSelect.add(new Option(profile.name, profile.id)); profileSelect.value = profile.id; } catch (error) { notice(error instanceof Error ? error.message : String(error)); } });
   $('#platform-overflow').addEventListener('click', async () => { if (!ui.platformId) return; const button = $('#platform-overflow') as HTMLButtonElement; const rect = button.getBoundingClientRect(); button.setAttribute('aria-expanded', 'true'); try { await window.wardenDesk.platform.showMenu(ui.platformId, { x: rect.left, y: rect.bottom }); } catch (error) { notice(error instanceof Error ? error.message : String(error)); } finally { button.setAttribute('aria-expanded', 'false'); } });
   $('#open-system').addEventListener('click', () => ui.platformId && void window.wardenDesk.platform.openExternal(ui.platformId));

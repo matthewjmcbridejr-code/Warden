@@ -200,10 +200,24 @@ button:hover { border-color: #554b59; }
 .sb-provider-card strong, .sb-provider-card span { display: block; }
 .sb-provider-card strong { font-size: 10px; }
 .sb-provider-line { max-width: 125px; margin-top: 3px; overflow: hidden; color: #837986; text-overflow: ellipsis; white-space: nowrap; font-size: 7px; }
-.sb-brief-card { padding: 18px; border: 1px solid #37313a; border-radius: 13px; background: #151419e8; box-shadow: inset 0 1px #ffffff05, 0 18px 45px #0003; }
-.sb-brief-card label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 8px; color: #c0b7c3; font-size: 9px; font-weight: 620; }
-.sb-brief-card label:not(:first-child) { margin-top: 16px; }
-.sb-brief-card label span { color: #6f6772; font-size: 8px; font-weight: 450; }
+.sb-template-section { margin-bottom: 16px; }
+.sb-template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; margin-top: 8px; }
+.sb-template-card { display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; border: 1px solid #332d37; border-radius: 9px; color: #dfd7e3; background: #17151c; text-align: left; transition: background 0.15s, border-color 0.15s; }
+.sb-template-card:hover { border-color: #64495c; background: #221d28; }
+.sb-template-card .template-icon { font-size: 14px; margin-bottom: 4px; }
+.sb-template-card strong { font-size: 10px; color: #ede5f1; }
+.sb-template-card small { font-size: 7px; color: #7f7684; margin-top: 2px; line-height: 1.3; }
+
+.handoff-btn { min-height: 28px; padding: 4px 10px; border: 1px solid #6b4d5f; border-radius: 6px; color: #eed7e6; background: #3b2837; font-size: 9px; font-weight: 600; margin-left: 8px; }
+.handoff-btn:hover { background: #51364c; }
+
+.provider-matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+.provider-card-setup { padding: 14px; border: 1px solid #342e39; border-radius: 10px; background: #16141a; }
+.provider-card-setup h4 { margin: 0 0 6px; color: #eee5f2; font-size: 11px; display: flex; align-items: center; justify-content: space-between; }
+.provider-card-setup p { margin: 0 0 10px; color: #8e8593; font-size: 9px; line-height: 1.45; }
+.provider-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.provider-caps span { padding: 2px 6px; border-radius: 4px; background: #26212b; color: #b7acc0; font-size: 7px; }
+
 #sb-task, #sb-acceptance, #sb-followup { display: block; width: 100%; resize: vertical; border: 1px solid #3b343e; border-radius: 9px; color: #f0eaf2; background: #0e0d11; }
 #sb-task { min-height: 130px; padding: 13px 14px; font-size: 13px; line-height: 1.55; }
 #sb-acceptance { min-height: 72px; padding: 11px 13px; font-size: 11px; line-height: 1.5; }

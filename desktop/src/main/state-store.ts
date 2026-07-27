@@ -55,6 +55,21 @@ export class StateStore {
   renameProfile(id: string, name: string): BrowserProfile { const profile = this.state.browserProfiles.find((item) => item.id === id); if (!profile) throw new Error('Browser profile not found.'); const clean = String(name || '').trim().slice(0, 60); if (!clean) throw new Error('A browser profile name is required.'); const updated = { ...profile, name: clean }; this.patch({ browserProfiles: this.state.browserProfiles.map((item) => item.id === id ? updated : item) }); return updated; }
   removeProfile(id: string): void { if (this.state.browserProfiles.length <= 1) throw new Error('At least one browser profile is required.'); if (this.state.platforms.some((item) => item.browserProfileId === id) || this.state.projects.some((item) => item.browserProfileId === id)) throw new Error('Move platforms and projects to another profile before removing this profile. Browser data is not deleted.'); this.patch({ browserProfiles: this.state.browserProfiles.filter((item) => item.id !== id) }); }
   createProject(cwd: string, name?: string, browserProfileId?: string): ProjectWorkspace { const existing = this.state.projects.find((project) => project.cwd === cwd); if (existing) return this.activateProject(existing.id); const profile = this.state.browserProfiles.find((item) => item.id === browserProfileId) || this.state.browserProfiles[0]; const project = { ...this.makeProject(cwd, profile.id, this.state.terminals), name: String(name || basename(cwd) || 'Project').trim().slice(0, 100) }; this.patch({ projects: [project, ...this.state.projects], activeProjectId: project.id, recentProjects: [cwd, ...this.state.recentProjects.filter((item) => item !== cwd)].slice(0, 20) }); return project; }
+  preparePlayground(playgroundsDir: string): { cwd: string; name: string; filesToCommit: string[] } {
+    mkdirSync(playgroundsDir, { recursive: true });
+    let count = 1;
+    let cwd = join(playgroundsDir, `playground-${count}`);
+    while (existsSync(cwd)) {
+      count++;
+      cwd = join(playgroundsDir, `playground-${count}`);
+    }
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(cwd, 'README.md'), `# Playground ${count}\n\nWelcome to Warden AI Desk! This safe local playground is ready for your AI missions.\n`);
+    writeFileSync(join(cwd, 'WELCOME.md'), `# Welcome Mission\n\nWelcome to Warden AI Desk! Try editing this file or adding a feature in Simple Mode.\n`);
+    writeFileSync(join(cwd, '.gitignore'), ".env\n.env.*\n!.env.*.example\nnode_modules/\n");
+    return { cwd, name: `Playground ${count}`, filesToCommit: ['.gitignore', 'README.md', 'WELCOME.md'] };
+  }
   activateProject(id: string): ProjectWorkspace { const project = this.state.projects.find((item) => item.id === id); if (!project) throw new Error('Project not found.'); this.patch({ activeProjectId: id, workspace: project.workspace, selectedPlatformId: project.selectedPlatformId, recentProjects: [project.cwd, ...this.state.recentProjects.filter((item) => item !== project.cwd)].slice(0, 20) }); return project; }
+
   updateProject(id: string, patch: Partial<ProjectWorkspace>): ProjectWorkspace { const current = this.state.projects.find((item) => item.id === id); if (!current) throw new Error('Project not found.'); const updated = this.cleanProject({ ...current, ...patch, id, cwd: current.cwd }, this.state.browserProfiles, this.state.platforms)[0]; if (!updated) throw new Error('Invalid project update.'); updated.updatedAt = new Date().toISOString(); this.patch({ projects: this.state.projects.map((item) => item.id === id ? updated : item) }); return updated; }
 }
