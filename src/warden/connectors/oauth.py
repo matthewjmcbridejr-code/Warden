@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 _STATES: dict[str, dict] = {}  # state -> {provider, redirect_uri, ...}
 
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "openid",
+    "email",
+]
+OUTLOOK_SCOPES = ["openid", "email", "offline_access", "Mail.Read"]
+
 # Injected in tests to skip real HTTP calls
 _token_exchanger = None  # callable(provider, code, redirect_uri) -> dict | None
 
@@ -197,10 +204,7 @@ def exchange_code_for_token(provider: str, code: str, redirect_uri: str) -> dict
 
 def _gmail_auth_url(state: str, redirect_uri: str) -> str:
     client_id, _ = get_provider_credentials("gmail")
-    scopes = " ".join([
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "openid", "email",
-    ])
+    scopes = " ".join(GMAIL_SCOPES)
     return (
         "https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={client_id}"
@@ -215,7 +219,7 @@ def _gmail_auth_url(state: str, redirect_uri: str) -> str:
 
 def _outlook_auth_url(state: str, redirect_uri: str) -> str:
     client_id, _ = get_provider_credentials("outlook")
-    scopes = " ".join(["openid", "email", "offline_access", "Mail.Read"])
+    scopes = " ".join(OUTLOOK_SCOPES)
     tenant = "common"
     return (
         f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
@@ -236,14 +240,22 @@ def start_oauth_flow(provider: str, base_url: str) -> dict:
         if not is_provider_configured("gmail"):
             return {"configured": False, "error": "Gmail OAuth app not configured. Use Warden Settings to add your Google OAuth client ID."}
         state = secrets.token_urlsafe(24)
-        _STATES[state] = {"provider": provider, "redirect_uri": redirect_uri}
+        _STATES[state] = {
+            "provider": provider,
+            "redirect_uri": redirect_uri,
+            "scopes": list(GMAIL_SCOPES),
+        }
         return {"auth_url": _gmail_auth_url(state, redirect_uri), "state": state, "provider": provider}
 
     if provider == "outlook":
         if not is_provider_configured("outlook"):
             return {"configured": False, "error": "Outlook OAuth app not configured. Use Warden Settings to add your Microsoft OAuth client ID."}
         state = secrets.token_urlsafe(24)
-        _STATES[state] = {"provider": provider, "redirect_uri": redirect_uri}
+        _STATES[state] = {
+            "provider": provider,
+            "redirect_uri": redirect_uri,
+            "scopes": list(OUTLOOK_SCOPES),
+        }
         return {"auth_url": _outlook_auth_url(state, redirect_uri), "state": state, "provider": provider}
 
     return {"configured": False, "error": f"Unknown provider: {provider}"}

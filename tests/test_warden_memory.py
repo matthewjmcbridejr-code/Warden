@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import shutil
 
 import pytest
 from fastapi import HTTPException
@@ -75,6 +76,29 @@ def test_warden_memory_create_and_list(isolated_workbench_root):
     assert list_resp["ok"] is True
     assert list_resp["count"] == 1
     assert list_resp["memories"][0]["memory_id"] == "warden-memory-one"
+
+
+def test_memory_history_survives_workbench_directory_loss(tmp_path):
+    root = tmp_path / "mctable" / "workbench"
+    store = workbench_mod.WorkbenchStore(root)
+    memory = store.remember_memory(
+        workbench_mod.WorkbenchMemoryRememberRequest(
+            memory_id="history-survival-proof",
+            scope="warden",
+            content="A durable memory version must survive loss of the mutable workbench directory.",
+            source="test",
+            kind="constraint",
+        )
+    )
+
+    history_root = tmp_path / "mctable" / "workbench-history" / "memories" / memory.memory_id
+    versions = list(history_root.glob("*.json"))
+    assert len(versions) == 1
+    assert workbench_mod.WorkbenchMemory.model_validate_json(versions[0].read_text()).memory_id == memory.memory_id
+
+    shutil.rmtree(root)
+    assert not root.exists()
+    assert workbench_mod.WorkbenchMemory.model_validate_json(versions[0].read_text()).summary == memory.summary
 
 
 def remember(store, *, scope: str, content: str, kind: str, **kwargs):

@@ -5747,15 +5747,34 @@ def post_warden_icloud_connect(body: ICloudConnectRequest):
 # ─── Mail endpoints ───────────────────────────────────────────────────────────
 
 @mcharness_router.get("/warden/mail/accounts")
-def get_warden_mail_accounts():
-    """List connected mail accounts (no tokens returned)."""
+def get_warden_mail_accounts(verify_live: bool = False):
+    """List mail accounts and optionally verify read-only provider access.
+
+    ``credential_stored`` means configured, not operational. When
+    ``verify_live`` is true each account receives a redacted ``health`` record
+    based on a bounded provider check. Tokens and passwords are never returned.
+    """
     from .connectors.store import ConnectorStore
-    from .connectors.registry import PROVIDERS
+    from .mail.health import check_mail_accounts
     all_accounts = ConnectorStore().list_accounts(redact=True)
     mail_providers = {"gmail", "outlook", "icloud"}
     mail_accounts = [a for a in all_accounts
                      if a.get("provider") in mail_providers]
-    return {"ok": True, "accounts": mail_accounts, "count": len(mail_accounts)}
+    health_records = check_mail_accounts(mail_accounts, verify_live=verify_live)
+    for account, health in zip(mail_accounts, health_records):
+        account["health"] = health
+    operational_count = sum(
+        1 for account in mail_accounts
+        if account.get("health", {}).get("operational") is True
+    )
+    return {
+        "ok": True,
+        "accounts": mail_accounts,
+        "count": len(mail_accounts),
+        "configured_count": sum(1 for account in mail_accounts if account.get("credential_stored")),
+        "operational_count": operational_count,
+        "verified_live": verify_live,
+    }
 
 
 @mcharness_router.get("/warden/mail/search")
@@ -5858,6 +5877,12 @@ class BrainMirrorRequest(BaseModel):
     dry_run: bool = True
     source_ids: list[str] = []
     limit: int = 50
+
+
+class NotebookLMMirrorRequest(BaseModel):
+    project_id: str
+    dry_run: bool = False
+    limit: int = 100
 
 
 class BrainProviderConfigSaveRequest(BaseModel):
@@ -6063,6 +6088,29 @@ def get_brain_mirror_status():
     """Return mirror sync status for all sources."""
     from .brain.mirror import mirror_status
     result = mirror_status()
+    return {"ok": True, **result}
+
+
+@mcharness_router.post("/warden/brain/notebooklm/mirror")
+def post_brain_notebooklm_mirror(body: NotebookLMMirrorRequest):
+    """Mirror project vault notes and memories into NotebookLM source bundle."""
+    from .brain.notebooklm_mirror import mirror_project_to_notebooklm
+    try:
+        result = mirror_project_to_notebooklm(
+            project_id=body.project_id,
+            dry_run=body.dry_run,
+            limit=body.limit,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        raise HTTPException(400, f"NotebookLM mirror failed: {exc}")
+
+
+@mcharness_router.get("/warden/brain/notebooklm/mirror-status")
+def get_brain_notebooklm_mirror_status(project_id: str = ""):
+    """Return NotebookLM mirror sync status."""
+    from .brain.notebooklm_mirror import notebooklm_mirror_status
+    result = notebooklm_mirror_status(project_id=project_id or None)
     return {"ok": True, **result}
 
 

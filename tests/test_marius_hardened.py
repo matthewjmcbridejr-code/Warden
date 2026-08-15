@@ -7,7 +7,6 @@ from pathlib import Path
 # Set up test environment before imports
 TEST_DATA_ROOT = Path("tests/marius_test_data")
 os.environ["MARIUS_DATA_ROOT"] = str(TEST_DATA_ROOT)
-os.environ["MCHARNESS_DATA_ROOT"] = str(TEST_DATA_ROOT)
 os.environ["MARIUS_TELEGRAM_ENABLED"] = "0"
 
 from src.warden.app import app

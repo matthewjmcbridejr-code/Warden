@@ -5,6 +5,7 @@ Or:       scripts/warden-brain-mcp
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.middleware.auth_context import get_access_token
 
 from src.marius.tools import get_git_status, get_service_status
 from src.warden import brain_embed, brain_vector_store, mcp_hub, personal_memory
@@ -43,16 +45,17 @@ REPO_CATALOG_MAX_DEPTH = 4
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 
-from .mcp_oauth import OAuthProvider
+from .mcp_oauth import OAuthProvider, get_client_summary
 
 _OAUTH_ISSUER_URL = os.getenv("MCP_OAUTH_ISSUER_URL", "https://mcp.mctable.online")
+_BOOTSTRAPPED_CALLERS: set[str] = set()
 
 mcp = FastMCP(
     "warden-brain",
     instructions=(
         "Warden Brain gives you access to the current operator's local second brain. "
-        "Start every session by calling warden_me to learn who the operator is and what they are working on. "
-        "Use warden_recall to retrieve relevant memories before starting work. "
+        "Start every session by calling warden_bootstrap, which accepts an empty task during cold start. "
+        "Read its constraints, recent decisions, active claims, and available service catalog before using connected services. "
         "Use warden_remember to save important decisions, proofs, or failures when you're done. "
         "Use warden_workstream to see recent activity across all projects."
     ),
@@ -105,6 +108,106 @@ def _store():
 def _brain_ingest():
     from src.marius.brain_ingest import BrainIngest
     return BrainIngest()
+
+
+def _safe_identity_slug(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9_.-]+", "-", value.strip().lower()).strip("-.")
+    return cleaned[:48] or "unknown-agent"
+
+
+def _current_caller_identity() -> dict[str, Any]:
+    """Identify the calling MCP client without exposing bearer credentials."""
+    token = get_access_token()
+    if token is None:
+        configured = os.getenv("WARDEN_AGENT_ID", "").strip()
+        name = configured or "local-stdio"
+        slug = _safe_identity_slug(name)
+        return {
+            "agent_id": slug,
+            "client_name": name,
+            "client_id_prefix": None,
+            "subject": None,
+            "transport_identity": "local",
+            "session_id": f"{SESSION_ID}:{slug}",
+        }
+
+    client_id = str(token.client_id or "oauth-client")
+    summary = get_client_summary(client_id)
+    if summary is not None:
+        name = summary["client_name"]
+    else:
+        try:
+            from .mcp_tokens import list_clients
+            record = next((row for row in list_clients() if row.get("client_id") == client_id), None)
+        except Exception:
+            record = None
+        name = str((record or {}).get("name") or client_id)
+    prefix = client_id[:8]
+    slug = _safe_identity_slug(name)
+    return {
+        "agent_id": f"{slug}:{prefix}",
+        "client_name": name,
+        "client_id_prefix": prefix,
+        "subject": token.subject,
+        "transport_identity": "authenticated_mcp",
+        "session_id": f"{SESSION_ID}:{prefix}",
+    }
+
+
+def _caller_key() -> str:
+    identity = _current_caller_identity()
+    try:
+        # FastMCP keeps one ServerSession object for the lifetime of a remote
+        # transport. Process-local identity makes bootstrap apply per MCP
+        # connection even when one OAuth client reuses its access token.
+        session = mcp.get_context().request_context.session
+        transport_key = f"session:{id(session):x}"
+    except (AttributeError, LookupError, ValueError):
+        token = get_access_token()
+        token_value = str(getattr(token, "token", "") or "")
+        if token_value:
+            transport_key = "token:" + hashlib.sha256(token_value.encode("utf-8")).hexdigest()[:16]
+        else:
+            transport_key = "local"
+    return f"{identity['agent_id']}:{transport_key}"
+
+
+def _caller_bootstrap_keys() -> set[str]:
+    """Return the transport and bearer-token identities for bootstrap state.
+
+    Some hosted MCP clients, including Gemini Spark, create a fresh HTTP MCP
+    transport for later tool calls in the same agent run. The authenticated
+    bearer token is the stable session boundary in that case. Keeping both
+    keys preserves transport isolation while allowing one explicit bootstrap
+    to cover stateless follow-up calls made with the same access token.
+    """
+    keys = {_caller_key()}
+    token = get_access_token()
+    token_value = str(getattr(token, "token", "") or "")
+    if token_value:
+        identity = _current_caller_identity()
+        token_hash = hashlib.sha256(token_value.encode("utf-8")).hexdigest()[:16]
+        keys.add(f"{identity['agent_id']}:token:{token_hash}")
+    return keys
+
+
+def _mark_caller_bootstrapped() -> None:
+    _BOOTSTRAPPED_CALLERS.update(_caller_bootstrap_keys())
+
+
+def _remote_bootstrap_error(tool_name: str) -> str | None:
+    """Require remote clients to load current Warden context before services."""
+    if os.getenv("WARDEN_MCP_REQUIRE_BOOTSTRAP", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    if get_access_token() is None:
+        return None
+    if _BOOTSTRAPPED_CALLERS.intersection(_caller_bootstrap_keys()):
+        return None
+    return (
+        f"{tool_name} is locked until this authenticated client calls warden_bootstrap. "
+        "Call warden_bootstrap with task='' for a cold start, read the returned constraints "
+        "and active claims, then retry."
+    )
 
 
 def _detect_project(text: str, path: str | None) -> str | None:
@@ -179,6 +282,7 @@ def warden_health() -> str:
             if p.exists()
         ]
 
+        caller = _current_caller_identity()
         return _ok("warden_health", {
             "warden_api_reachable": api_ok,
             "warden_url": WARDEN_URL,
@@ -188,7 +292,8 @@ def warden_health() -> str:
             "vector_count": vec_count,
             "embed_model": brain_embed.EMBED_MODEL,
             "ingest_paths_found": [str(p) for p in obsidian_paths],
-            "session_id": SESSION_ID,
+            "session_id": caller["session_id"],
+            "caller": caller,
             "profile_exists": personal_memory.PROFILE_PATH.exists(),
         })
     except Exception as exc:
@@ -212,9 +317,138 @@ def warden_mcp_hub_status() -> str:
             "native_tool_count": hs.native_tool_count,
             "hub_tool_names": hs.hub_tool_names,
             "skipped_collisions": hs.skipped_collisions,
+            "blocked_by_policy": hs.blocked_by_policy,
+            "upstreams": hs.upstreams,
         })
     except Exception as exc:
         return _err("warden_mcp_hub_status", str(exc))
+
+
+def _mail_accounts_status_data(verify_live: bool) -> dict[str, Any]:
+    """Fetch redacted mail readiness for MCP tools and bootstrap/catalog use."""
+    import urllib.request
+
+    query = "?verify_live=true" if verify_live else ""
+    url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts{query}"
+    with urllib.request.urlopen(url, timeout=15) as response:
+        data = json.loads(response.read())
+    accounts = data.get("accounts", [])
+    return {
+        "configured": data.get("configured_count", 0) > 0,
+        "operational": data.get("operational_count", 0) > 0,
+        "count": len(accounts),
+        "configured_count": data.get("configured_count", 0),
+        "operational_count": data.get("operational_count", 0),
+        "verified_live": data.get("verified_live", False),
+        "accounts": [
+            {
+                "account_id": account.get("account_id"),
+                "provider": account.get("provider"),
+                "display_email": account.get("display_email"),
+                "status": account.get("status"),
+                "capabilities": list(account.get("capabilities") or []),
+                "health": account.get("health"),
+            }
+            for account in accounts
+        ],
+    }
+
+
+def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
+    """Build a credential-free inventory of everything this Warden exposes."""
+    hub = mcp_hub.hub_status()
+    upstream_tool_names = set(hub.hub_tool_names)
+    native_tool_names = sorted(
+        name for name in mcp._tool_manager._tools
+        if name not in upstream_tool_names
+    )
+
+    try:
+        mail = _mail_accounts_status_data(verify_live_mail)
+        mail_error = None
+    except Exception as exc:
+        mail = {
+            "configured": False,
+            "operational": False,
+            "count": 0,
+            "configured_count": 0,
+            "operational_count": 0,
+            "verified_live": False,
+            "accounts": [],
+        }
+        mail_error = f"Mail readiness unavailable ({type(exc).__name__})."
+
+    services: list[dict[str, Any]] = [
+        {
+            "service_id": "warden",
+            "kind": "native",
+            "operational": True,
+            "authentication": "Warden MCP",
+            "tool_count": len(native_tool_names),
+            "tool_names": native_tool_names,
+        },
+        {
+            "service_id": "mail",
+            "kind": "warden_connector",
+            "operational": mail["operational"],
+            "configured_count": mail["configured_count"],
+            "operational_count": mail["operational_count"],
+            "verified_live": mail["verified_live"],
+            "accounts": mail["accounts"],
+            "tool_names": [
+                "warden_mail_accounts_status",
+                "warden_mail_search",
+                "warden_mail_read_message",
+            ],
+            "error": mail_error,
+        },
+    ]
+    for upstream in hub.upstreams:
+        services.append({
+            "service_id": f"upstream:{upstream.get('name', 'unknown')}",
+            "kind": "mcp_upstream",
+            "operational": bool(upstream.get("reachable") and upstream.get("tool_count", 0)),
+            "reachable": bool(upstream.get("reachable")),
+            "tool_count": int(upstream.get("tool_count", 0)),
+            "discovered_tool_count": int(upstream.get("discovered_tool_count", 0)),
+            "blocked_by_policy": int(upstream.get("blocked_by_policy", 0)),
+            "tool_names": list(upstream.get("tool_names") or []),
+            "error": upstream.get("error"),
+        })
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "credentials": "Provider credentials remain server-side and are never returned.",
+        "mail_selection_rule": "Use only an account whose health.operational is true.",
+        "summary": {
+            "service_count": len(services),
+            "operational_service_count": sum(1 for service in services if service["operational"]),
+            "native_tool_count": len(native_tool_names),
+            "upstream_tool_count": hub.hub_tool_count,
+            "mail_configured_count": mail["configured_count"],
+            "mail_operational_count": mail["operational_count"],
+        },
+        "services": services,
+    }
+
+
+@mcp.tool()
+def warden_service_catalog(verify_live_mail: bool = True) -> str:
+    """List Warden-native, mail, and upstream services available to this agent.
+
+    The catalog reports exposed tool names, policy-blocked counts, and redacted
+    per-account mail capabilities/health. Provider credentials are never
+    returned. Call after ``warden_bootstrap`` when service readiness changes.
+
+    Args:
+        verify_live_mail: Run bounded read-only checks for configured mail accounts.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_service_catalog"):
+            return _err("warden_service_catalog", error)
+        return _ok("warden_service_catalog", _service_catalog_data(verify_live_mail))
+    except Exception as exc:
+        return _err("warden_service_catalog", str(exc))
 
 
 def _read_meminfo() -> dict[str, Any]:
@@ -374,15 +608,17 @@ def warden_listening_ports() -> str:
 @mcp.tool()
 def warden_me() -> str:
     """Return the operator's personal profile, current priorities, and active projects.
-    Call this first at the start of every session to get full context."""
+    Prefer warden_bootstrap at session start; this is the profile-only view."""
     try:
         seed_if_missing()
         profile = load_profile()
         workstream = get_workstream(limit=5)
+        caller = _current_caller_identity()
         return _ok("warden_me", {
             "profile": profile,
             "recent_workstream": workstream,
-            "session_id": SESSION_ID,
+            "session_id": caller["session_id"],
+            "caller": caller,
             "tip": "Call warden_workstream for full recent activity, warden_recall for project memories.",
         })
     except Exception as exc:
@@ -414,6 +650,8 @@ def warden_update_me(field: str, value: str) -> str:
         value: New value (for lists, use comma-separated string or JSON array string)
     """
     try:
+        if error := _remote_bootstrap_error("warden_update_me"):
+            return _err("warden_update_me", error)
         # Parse list fields
         list_fields = {"priorities", "current_priorities", "projects", "active_projects"}
         if field in list_fields:
@@ -434,16 +672,21 @@ def warden_who_is_working() -> str:
     """Return which agent/session last wrote a memory and when. Lets agents detect concurrent activity."""
     try:
         store = _store()
+        caller = _current_caller_identity()
         memories = store.list_memories()
         if not memories:
-            return _ok("warden_who_is_working", {"last_activity": None})
+            return _ok("warden_who_is_working", {
+                "last_activity": None,
+                "current_caller": caller,
+            })
         recent = sorted(memories, key=lambda m: m.updated_at, reverse=True)[:1][0]
         return _ok("warden_who_is_working", {
             "last_memory_id": recent.memory_id,
             "last_agent": recent.agent_id,
             "last_project": recent.project_id or recent.scope,
             "last_updated": recent.updated_at.isoformat(),
-            "current_session_id": SESSION_ID,
+            "current_session_id": caller["session_id"],
+            "current_caller": caller,
         })
     except Exception as exc:
         return _err("warden_who_is_working", str(exc))
@@ -562,6 +805,8 @@ def warden_remember(
         title: Optional short title (auto-generated from text if omitted)
     """
     try:
+        if error := _remote_bootstrap_error("warden_remember"):
+            return _err("warden_remember", error)
         valid_kinds = {
             "decision", "constraint", "proof", "failure", "handoff",
             "user_note", "fact", "claim", "blocked_attempt", "test_result",
@@ -575,9 +820,10 @@ def warden_remember(
             kind = "user_note"
 
         project = project.strip()
+        caller = _current_caller_identity()
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         tag_list.append("agent_generated")
-        tag_list.append(f"session_{SESSION_ID}")
+        tag_list.append(f"session_{_safe_identity_slug(caller['session_id'])}")
 
         if not project:
             project = _detect_project(text, None) or "warden"
@@ -591,8 +837,13 @@ def warden_remember(
             tags=tag_list,
             kind=kind,
             project_id=project,
-            agent_id="warden-brain-mcp",
-            metadata={"agent_generated": True, "session_id": SESSION_ID},
+            agent_id=caller["agent_id"],
+            metadata={
+                "agent_generated": True,
+                "session_id": caller["session_id"],
+                "client_name": caller["client_name"],
+                "client_id_prefix": caller["client_id_prefix"],
+            },
         )
         store = _store()
         memory = store.remember_memory(payload)
@@ -660,6 +911,8 @@ def warden_ingest(
         tags: Comma-separated tags
     """
     try:
+        if error := _remote_bootstrap_error("warden_ingest"):
+            return _err("warden_ingest", error)
         if not content and not path:
             return _err("warden_ingest", "Provide content or path")
 
@@ -691,7 +944,7 @@ def warden_ingest(
             title = p.stem
         else:
             text = content
-            title = f"ingest-{SESSION_ID}"
+            title = f"ingest-{_safe_identity_slug(_current_caller_identity()['session_id'])}"
 
         if not project:
             project = _detect_project(text, path) or "personal"
@@ -742,6 +995,8 @@ def brain_import_obsidian(source_path: str = "") -> str:
             (or ~/Documents/Obsidian Vault if unset).
     """
     try:
+        if error := _remote_bootstrap_error("brain_import_obsidian"):
+            return _err("brain_import_obsidian", error)
         from src.warden.brain.ingest import import_obsidian_vault
         src = source_path.strip() or str(_obsidian_vault_root())
         result = import_obsidian_vault(src)
@@ -765,6 +1020,8 @@ def brain_promote_inbox(dry_run: bool = False) -> str:
         dry_run: If true, report what would move without moving anything.
     """
     try:
+        if error := _remote_bootstrap_error("brain_promote_inbox"):
+            return _err("brain_promote_inbox", error)
         from src.warden.brain.promote import promote_inbox
         result = promote_inbox(dry_run=dry_run)
         return _ok("brain_promote_inbox", result)
@@ -803,6 +1060,8 @@ def brain_distill_wiki(
         source_path: Vault-relative path of the raw source this was distilled from.
     """
     try:
+        if error := _remote_bootstrap_error("brain_distill_wiki"):
+            return _err("brain_distill_wiki", error)
         from src.warden.brain.wiki import distill_note
 
         def _split(raw: str) -> list[str]:
@@ -840,6 +1099,8 @@ async def brain_curate_wiki(limit: int = 5, dry_run: bool = False) -> str:
         dry_run: If true, report what would be distilled without calling the model.
     """
     try:
+        if error := _remote_bootstrap_error("brain_curate_wiki"):
+            return _err("brain_curate_wiki", error)
         from src.warden.brain.curator import curate_vault
         result = await curate_vault(limit=limit, dry_run=dry_run)
         return _ok("brain_curate_wiki", result)
@@ -895,7 +1156,7 @@ def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
 
 
 @mcp.tool()
-def warden_bootstrap(task: str, project: str = "") -> str:
+def warden_bootstrap(task: str = "", project: str = "") -> str:
     """THE tool to call first. Returns a single agent-ready startup packet combining:
     - Who the operator is and their current priorities
     - Active projects and preferences
@@ -907,13 +1168,19 @@ def warden_bootstrap(task: str, project: str = "") -> str:
     - Proof expectations
 
     Args:
-        task: What you're about to work on (be specific)
+        task: What you're about to work on. May be empty during cold start.
         project: Project name (e.g. 'Warden', 'Grademy') — auto-detected if omitted
     """
     try:
         import json as _json
 
+        task = task.strip()
         project = project.strip()
+        if not project and task:
+            project = _detect_project(task, None) or ""
+        orientation_query = task or (
+            "latest current priorities constraints decisions failures handoffs active work"
+        )
 
         # 1. Personal profile
         seed_if_missing()
@@ -922,13 +1189,15 @@ def warden_bootstrap(task: str, project: str = "") -> str:
         # 2. Workstream
         workstream = get_workstream(limit=8, project=project or None)
 
-        # 3. Recall — semantic + keyword
+        # 3. Recall — task relevance plus fresh operational guardrails. A
+        # decision made after a task was claimed must still reach the next
+        # worker even when its wording does not match the task exactly.
         limit = 10
-        recall_results = _semantic_recall(task, limit)
+        store = _store()
+        recall_results = _semantic_recall(orientation_query, limit)
         if not recall_results:
-            store = _store()
             scope = project or None
-            memories = store.search_memories(task, scope=scope, limit=limit)
+            memories = store.search_memories(orientation_query, scope=scope, limit=limit)
             recall_results = [
                 {
                     "memory_id": m.memory_id,
@@ -942,23 +1211,54 @@ def warden_bootstrap(task: str, project: str = "") -> str:
                 for m in memories
             ]
 
+        recent_guardrails = []
+        for memory in store.list_memories():
+            if memory.status != "active" or memory.kind not in {
+                "constraint", "decision", "failure", "blocked_attempt", "handoff",
+            }:
+                continue
+            memory_project = memory.project_id or memory.scope
+            if project and memory_project.lower() != project.lower():
+                continue
+            recent_guardrails.append({
+                "memory_id": memory.memory_id,
+                "title": memory.title or memory.summary[:60],
+                "summary": memory.summary[:300],
+                "kind": memory.kind,
+                "project": memory_project,
+                "tags": memory.tags,
+                "updated_at": memory.updated_at.isoformat(),
+            })
+            if len(recent_guardrails) >= 12:
+                break
+
+        merged_recall: list[dict[str, Any]] = []
+        seen_memory_ids: set[str] = set()
+        for row in recent_guardrails + recall_results:
+            memory_id = str(row.get("memory_id") or row.get("id") or "")
+            if memory_id and memory_id in seen_memory_ids:
+                continue
+            if memory_id:
+                seen_memory_ids.add(memory_id)
+            merged_recall.append(row)
+        recall_results = merged_recall[:20]
+
         # Pull out constraints and failures specifically
         constraints = [r for r in recall_results if r.get("kind") in ("constraint", "blocked_attempt")]
         failures = [r for r in recall_results if r.get("kind") == "failure"]
         other_memories = [r for r in recall_results if r.get("kind") not in ("constraint", "blocked_attempt", "failure")]
 
         # 4. Context pack (formatted text)
-        store = _store()
         pack = store.build_memory_context_pack(
             project_id=project or "warden",
-            user_prompt=task,
+            user_prompt=orientation_query,
             max_memories=8,
         )
 
         # 5. Relevant docs
         from src.marius.search_provider import LocalJsonlSearchProvider
         provider = LocalJsonlSearchProvider()
-        doc_results = provider.search(task, project=project or None, limit=5)
+        doc_results = provider.search(orientation_query, project=project or None, limit=5)
         docs = [
             {
                 "id": r.get("record_id"),
@@ -970,8 +1270,41 @@ def warden_bootstrap(task: str, project: str = "") -> str:
             if r.get("sensitivity") != "secret_excluded"
         ]
 
-        # 6. Recommended next action heuristic
-        if constraints:
+        # 6. Coordination state. Bootstrap is the one required call, so it
+        # must also reveal work already in flight rather than relying on the
+        # client to remember to call warden_board separately.
+        coordination: dict[str, Any] = {
+            "open_tasks": [], "active_claims": [], "stale_claims": [],
+            "recent_handoffs": [], "warnings": [],
+        }
+        try:
+            board_payload = _json.loads(warden_board())
+            if board_payload.get("ok"):
+                board_data = board_payload.get("data", {})
+                open_tasks = list(board_data.get("open_tasks", []))
+                if project:
+                    open_tasks = [
+                        row for row in open_tasks
+                        if str(row.get("project") or "").lower() == project.lower()
+                    ]
+                coordination.update({
+                    "open_tasks": open_tasks[:10],
+                    "active_claims": list(board_data.get("active_claims", []))[-10:],
+                    "stale_claims": list(board_data.get("stale_claims", []))[-10:],
+                    "recent_handoffs": list(board_data.get("recent_handoffs", []))[:5],
+                })
+            else:
+                coordination["warnings"].append(board_payload.get("error", "board unavailable"))
+        except Exception as exc:
+            coordination["warnings"].append(f"board unavailable: {exc}")
+
+        # 7. Recommended next action heuristic
+        if coordination["open_tasks"]:
+            next_action = (
+                f"Inspect {len(coordination['open_tasks'])} existing open task(s) and active claims "
+                "before starting or claiming overlapping work."
+            )
+        elif constraints:
             next_action = f"Review {len(constraints)} constraint(s) before starting. Check: " + "; ".join(c.get("title", "") for c in constraints[:2])
         elif failures:
             next_action = f"Note: {len(failures)} prior failure(s) logged for this area. Check before repeating approach."
@@ -981,7 +1314,7 @@ def warden_bootstrap(task: str, project: str = "") -> str:
         else:
             next_action = "No prior context found — this appears to be fresh ground."
 
-        # 7. Proof expectations from profile + memories
+        # 8. Proof expectations from profile + memories
         proof_expectations = [
             "Write warden_remember(kind='proof', ...) when task is verified working",
             "Write warden_remember(kind='failure', ...) if approach fails",
@@ -994,10 +1327,43 @@ def warden_bootstrap(task: str, project: str = "") -> str:
             for pm in scoped[:3]:
                 proof_expectations.append(f"Acceptance test: {pm.title or pm.summary[:80]}")
 
+        caller = _current_caller_identity()
+        all_memories = store.list_memories()
+        freshest_memory_at = all_memories[0].updated_at.isoformat() if all_memories else None
+        profile_updated_at = profile.get("last_updated") or profile.get("updated_at")
+        freshness_warning = None
+        if profile_updated_at and freshest_memory_at and str(profile_updated_at) < freshest_memory_at:
+            freshness_warning = (
+                "The profile predates current memory. Treat recent constraints and decisions as newer "
+                "operational truth where they conflict with profile fields."
+            )
+
+        # The bootstrap itself must be enough to orient a fresh agent. Include
+        # Warden's current service/account inventory so the operator does not
+        # need to repeat which integrations exist or which mailbox is usable.
+        service_catalog = _service_catalog_data(verify_live_mail=True)
+
+        _mark_caller_bootstrapped()
+
         return _ok("warden_bootstrap", {
             "task": task,
             "project": project or None,
-            "session_id": SESSION_ID,
+            "session_id": caller["session_id"],
+            "caller": caller,
+            "protocol": {
+                "required_order": [
+                    "warden_bootstrap",
+                    "review constraints, recent decisions, and active claims",
+                    "perform bounded work",
+                    "warden_remember with proof, decision, failure, or handoff",
+                ],
+                "connected_services_locked_until_bootstrap": True,
+            },
+            "freshness": {
+                "profile_updated_at": profile_updated_at,
+                "freshest_memory_at": freshest_memory_at,
+                "warning": freshness_warning,
+            },
 
             "who_is_matt": {
                 "name": profile.get("name"),
@@ -1019,6 +1385,10 @@ def warden_bootstrap(task: str, project: str = "") -> str:
             "context_memory_ids": pack.get("memory_ids", []),
 
             "relevant_docs": docs,
+
+            "coordination": coordination,
+
+            "available_services": service_catalog,
 
             "recommended_next_action": next_action,
             "proof_expectations": proof_expectations,
@@ -1059,7 +1429,6 @@ def warden_board(project: str = "") -> str:
         project: Optional project filter
     """
     try:
-        import re as _re
         board = BOARD_ROOT
         if not board.exists():
             return _err("warden_board", f"Board not found at {board}")
@@ -1081,6 +1450,11 @@ def warden_board(project: str = "") -> str:
                             open_tasks.append(data)
                         except Exception:
                             open_tasks.append({"_status": status, "_file": f.name})
+        if project:
+            open_tasks = [
+                row for row in open_tasks
+                if str(row.get("project") or "").lower() == project.strip().lower()
+            ]
 
         # Active claims
         claims = []
@@ -1101,6 +1475,33 @@ def warden_board(project: str = "") -> str:
                 except Exception:
                     pass
 
+        # active.jsonl and one-file-per-claim intentionally overlap on disk;
+        # deduplicate that representation and exclude claims whose task is no
+        # longer open. Preserve stale rows separately for auditability.
+        deduped_claims: list[dict[str, Any]] = []
+        seen_claims: set[tuple[str, str, str, str]] = set()
+        for claim in claims:
+            key = (
+                str(claim.get("agent") or ""),
+                str(claim.get("task") or ""),
+                str(claim.get("action") or ""),
+                str(claim.get("ts") or ""),
+            )
+            if key in seen_claims:
+                continue
+            seen_claims.add(key)
+            deduped_claims.append(claim)
+        deduped_claims.sort(key=lambda row: str(row.get("ts") or ""))
+        open_task_ids = {str(row.get("task_id") or "") for row in open_tasks}
+        active_claims = [
+            row for row in deduped_claims if str(row.get("task") or "") in open_task_ids
+        ]
+        stale_claims = [] if project else [
+            {**row, "reconciled_status": "stale_task_not_open"}
+            for row in deduped_claims
+            if str(row.get("task") or "") not in open_task_ids
+        ]
+
         # Recent handoffs
         handoffs = []
         handoffs_dir = board / "handoffs"
@@ -1118,7 +1519,8 @@ def warden_board(project: str = "") -> str:
         return _ok("warden_board", {
             "board_root": str(board),
             "open_tasks": open_tasks[:10],
-            "active_claims": claims[-10:],
+            "active_claims": active_claims[-10:],
+            "stale_claims": stale_claims[-10:],
             "recent_handoffs": handoffs,
             "pulse": pulse,
             "tip": "Use warden_post_task to add work, warden_claim_task to take ownership, warden_handoff to pass to another agent.",
@@ -1147,6 +1549,9 @@ def warden_post_task(
         files: Comma-separated list of relevant files/paths
     """
     try:
+        if error := _remote_bootstrap_error("warden_post_task"):
+            return _err("warden_post_task", error)
+        caller = _current_caller_identity()
         task_id = _task_id(title)
         if not project:
             project = _detect_project(description, None) or "warden"
@@ -1160,7 +1565,7 @@ def warden_post_task(
             "priority": priority,
             "files": file_list,
             "status": "assigned" if agent != "any" else "draft",
-            "posted_by": f"claude-session-{SESSION_ID}",
+            "posted_by": caller["agent_id"],
             "posted_at": _ts(),
         }
         status_dir = "assigned" if agent != "any" else "draft"
@@ -1168,9 +1573,15 @@ def warden_post_task(
         path.write_text(json.dumps(task, indent=2))
 
         # Log to activity
-        activity_path = _board_path("activity", datetime.now(timezone.utc).strftime("%Y-%m-%d"), "claude.jsonl")
+        activity_agent = _safe_identity_slug(caller["agent_id"])
+        activity_path = _board_path(
+            "activity", datetime.now(timezone.utc).strftime("%Y-%m-%d"), f"{activity_agent}.jsonl"
+        )
         with activity_path.open("a") as fp:
-            fp.write(json.dumps({"ts": _ts(), "agent": "claude", "action": "POST_TASK", "task": task_id, "note": title}) + "\n")
+            fp.write(json.dumps({
+                "ts": _ts(), "agent": caller["agent_id"], "action": "POST_TASK",
+                "task": task_id, "note": title,
+            }) + "\n")
 
         return _ok("warden_post_task", {
             "task_id": task_id,
@@ -1184,16 +1595,19 @@ def warden_post_task(
 
 
 @mcp.tool()
-def warden_claim_task(task_id: str, agent: str, note: str = "", branch: str = "") -> str:
+def warden_claim_task(task_id: str, agent: str = "", note: str = "", branch: str = "") -> str:
     """Claim a task from the bulletin board — marks it as yours so no other agent duplicates the work.
 
     Args:
         task_id: The task ID to claim
-        agent: Your agent name ('claude', 'codex', 'gemini', etc.)
+        agent: Optional agent name override. Defaults to the authenticated MCP client identity.
         note: What you plan to do
         branch: Git branch you'll work on (if applicable)
     """
     try:
+        if error := _remote_bootstrap_error("warden_claim_task"):
+            return _err("warden_claim_task", error)
+        agent = agent.strip() or _current_caller_identity()["agent_id"]
         # Find the task file
         task_file = None
         for status in ("draft", "assigned", "needs_review"):
@@ -1251,7 +1665,7 @@ def warden_handoff(
     to_agent: str,
     current_state: str,
     next_action: str,
-    from_agent: str = "claude",
+    from_agent: str = "",
     files_changed: str = "",
     files_to_inspect: str = "",
     known_blockers: str = "",
@@ -1265,7 +1679,7 @@ def warden_handoff(
         to_agent: Who to hand off to ('codex', 'gemini', 'claude', etc.)
         current_state: What has been done so far
         next_action: Exactly what the next agent should do first
-        from_agent: Your agent name
+        from_agent: Optional agent name override. Defaults to the authenticated MCP client identity.
         files_changed: Comma-separated files you changed
         files_to_inspect: Comma-separated files next agent should read
         known_blockers: Any known issues or blockers
@@ -1273,6 +1687,10 @@ def warden_handoff(
         branch: Git branch to continue on
     """
     try:
+        if error := _remote_bootstrap_error("warden_handoff"):
+            return _err("warden_handoff", error)
+        from_agent = from_agent.strip() or _current_caller_identity()["agent_id"]
+        caller = _current_caller_identity()
         now = datetime.now(timezone.utc)
         date_str = now.strftime("%Y%m%d")
         handoff = {
@@ -1290,7 +1708,11 @@ def warden_handoff(
             "commit": "",
             "pr": "",
             "safety_notes": "",
-            "metadata": {"session_id": SESSION_ID, "posted_at": _ts()},
+            "metadata": {
+                "session_id": caller["session_id"],
+                "client_id_prefix": caller["client_id_prefix"],
+                "posted_at": _ts(),
+            },
         }
 
         # Write markdown handoff (human-readable)
@@ -1343,7 +1765,9 @@ def warden_handoff(
                 break
 
         # Log activity
-        activity_path = _board_path("activity", now.strftime("%Y-%m-%d"), f"{from_agent}.jsonl")
+        activity_path = _board_path(
+            "activity", now.strftime("%Y-%m-%d"), f"{_safe_identity_slug(from_agent)}.jsonl"
+        )
         with activity_path.open("a") as fp:
             fp.write(json.dumps({"ts": _ts(), "agent": from_agent, "action": "HANDOFF", "task": task_id, "to": to_agent}) + "\n")
 
@@ -1358,7 +1782,10 @@ def warden_handoff(
                 tags=["handoff", f"to_{to_agent}", task_id, "agent_generated"],
                 kind="handoff",
                 agent_id=from_agent,
-                metadata={"session_id": SESSION_ID},
+                metadata={
+                    "session_id": caller["session_id"],
+                    "client_id_prefix": caller["client_id_prefix"],
+                },
             ))
         except Exception:
             pass
@@ -1394,6 +1821,8 @@ async def warden_agent(message: str, history_json: str = "[]") -> str:
         history_json: Optional JSON array of {role, content} prior turns for multi-turn use.
     """
     try:
+        if error := _remote_bootstrap_error("warden_agent"):
+            return _err("warden_agent", error)
         history = json.loads(history_json) if history_json and history_json.strip() != "[]" else []
         from src.warden.agent import run_agent
         result = await run_agent(message=message, history=history)
@@ -1422,6 +1851,8 @@ async def warden_ask_marius(message: str, profile: str = "balanced", brain_conte
         brain_context: Whether to include memory context (default True).
     """
     try:
+        if error := _remote_bootstrap_error("warden_ask_marius"):
+            return _err("warden_ask_marius", error)
         from src.marius.provider_gateway import ProviderGateway
         gw = ProviderGateway()
         gw.current_profile = profile
@@ -1483,6 +1914,8 @@ async def warden_captain_plan(goal: str, repo_id: str = "mcharness-public-export
         lane_id: Agent lane to use (default: codex_cli).
     """
     try:
+        if error := _remote_bootstrap_error("warden_captain_plan"):
+            return _err("warden_captain_plan", error)
         import asyncio as _asyncio
         from src.warden.api import McHarnessCaptainPlanRequest, create_mcharness_captain_plan
 
@@ -1545,6 +1978,8 @@ async def warden_captain_dispatch_step(plan_id: str, step_id: str) -> str:
         step_id: Step ID within the plan.
     """
     try:
+        if error := _remote_bootstrap_error("warden_captain_dispatch_step"):
+            return _err("warden_captain_dispatch_step", error)
         import asyncio as _asyncio
         from fastapi import HTTPException
         from src.warden.api import post_mcharness_captain_plan_step_dispatch
@@ -1639,6 +2074,8 @@ def warden_connectors_accounts() -> str:
     Tokens and secrets are never returned — only account status metadata.
     """
     try:
+        if error := _remote_bootstrap_error("warden_connectors_accounts"):
+            return _err("warden_connectors_accounts", error)
         from src.warden.connectors.store import list_accounts
         accounts = list_accounts()
         return _ok("warden_connectors_accounts", {"accounts": accounts})
@@ -1656,29 +2093,28 @@ def warden_connectors_accounts() -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def warden_mail_accounts_status() -> str:
+def warden_mail_accounts_status(verify_live: bool = True) -> str:
     """Check status of connected mail accounts (Gmail, iCloud, Outlook).
 
-    Returns a list of connected accounts with provider, email, and status.
+    Args:
+        verify_live: Perform bounded read-only provider checks (default true).
+
+    Returns configured and operational status separately. A saved credential
+    is never presented as proof that the mailbox is usable.
     Tokens and passwords are never returned.
     """
     try:
-        import urllib.request, json
-        url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts"
-        with urllib.request.urlopen(url, timeout=5) as r:
-            data = json.loads(r.read())
-        accounts = data.get("accounts", [])
-        if not accounts:
+        if error := _remote_bootstrap_error("warden_mail_accounts_status"):
+            return _err("warden_mail_accounts_status", error)
+        data = _mail_accounts_status_data(verify_live)
+        if not data["accounts"]:
             return _ok("warden_mail_accounts_status", {
                 "connected": False,
                 "note": "No mail accounts connected. Connect Gmail or iCloud in Warden Settings.",
             })
         return _ok("warden_mail_accounts_status", {
-            "connected": True,
-            "count": len(accounts),
-            "accounts": [{"account_id": a.get("account_id"), "provider": a.get("provider"),
-                           "display_email": a.get("display_email"), "status": a.get("status")}
-                          for a in accounts],
+            **data,
+            "connected": data["operational"],
         })
     except Exception as exc:
         return _err("warden_mail_accounts_status", str(exc))
@@ -1696,6 +2132,8 @@ def warden_mail_search(account_id: str, query: str, limit: int = 10) -> str:
     Never returns message body, tokens, or passwords.
     Always returns summaries only — use warden_mail_read_message to read full body.
     """
+    if error := _remote_bootstrap_error("warden_mail_search"):
+        return _err("warden_mail_search", error)
     if not account_id:
         return _err("warden_mail_search", "account_id is required")
     limit = max(1, min(limit, 20))
@@ -1726,6 +2164,8 @@ def warden_mail_read_message(account_id: str, message_id: str) -> str:
     Body text is sanitized (no scripts, control chars). HTML body is never returned.
     Ask the user before reading long bodies — prefer search summaries first.
     """
+    if error := _remote_bootstrap_error("warden_mail_read_message"):
+        return _err("warden_mail_read_message", error)
     if not account_id or not message_id:
         return _err("warden_mail_read_message", "account_id and message_id required")
     try:
@@ -1780,6 +2220,8 @@ def brain_status() -> str:
 def brain_init_vault() -> str:
     """Initialize the local Obsidian-compatible Markdown vault."""
     try:
+        if error := _remote_bootstrap_error("brain_init_vault"):
+            return _err("brain_init_vault", error)
         from src.warden.brain.vault import init_vault
         return _ok("brain_init_vault", init_vault())
     except Exception as e:
@@ -1790,6 +2232,8 @@ def brain_init_vault() -> str:
 def brain_reindex() -> str:
     """Scan local vault and reindex all Markdown sources into SQLite FTS."""
     try:
+        if error := _remote_bootstrap_error("brain_reindex"):
+            return _err("brain_reindex", error)
         from src.warden.brain import local_provider
         return _ok("brain_reindex", local_provider.reindex())
     except Exception as e:
@@ -1832,6 +2276,8 @@ def brain_ask(question: str, limit: int = 6) -> str:
 def brain_write_note(title: str, body: str, tags: str = "warden,auto") -> str:
     """Write a new Markdown note to the vault inbox. Never overwrites existing files."""
     try:
+        if error := _remote_bootstrap_error("brain_write_note"):
+            return _err("brain_write_note", error)
         from src.warden.brain.vault import write_note
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         result = write_note(title=title, body=body, tags=tag_list)
@@ -1858,6 +2304,8 @@ def brain_google_status() -> str:
 def brain_google_mirror(dry_run: bool = True, limit: int = 50) -> str:
     """Mirror local vault sources to Google Discovery Engine."""
     try:
+        if error := _remote_bootstrap_error("brain_google_mirror"):
+            return _err("brain_google_mirror", error)
         from src.warden.brain import google_provider
         from src.warden.brain.mirror import mirror_sources
         if not google_provider.is_enabled():
@@ -1876,6 +2324,31 @@ def brain_mirror_status() -> str:
         return _ok("brain_mirror_status", mirror_status())
     except Exception as e:
         return _err("brain_mirror_status", str(e))
+
+
+@mcp.tool()
+def brain_notebooklm_mirror(project_id: str, dry_run: bool = False, limit: int = 100) -> str:
+    """Mirror project vault notes and workbench memories to NotebookLM source bundle."""
+    try:
+        from src.warden.brain.notebooklm_mirror import mirror_project_to_notebooklm
+        result = mirror_project_to_notebooklm(
+            project_id=project_id,
+            dry_run=dry_run,
+            limit=limit,
+        )
+        return _ok("brain_notebooklm_mirror", result)
+    except Exception as e:
+        return _err("brain_notebooklm_mirror", str(e))
+
+
+@mcp.tool()
+def brain_notebooklm_mirror_status(project_id: str = "") -> str:
+    """Return NotebookLM mirror sync status."""
+    try:
+        from src.warden.brain.notebooklm_mirror import notebooklm_mirror_status
+        return _ok("brain_notebooklm_mirror_status", notebooklm_mirror_status(project_id=project_id or None))
+    except Exception as e:
+        return _err("brain_notebooklm_mirror_status", str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -1988,6 +2461,7 @@ def main():
     seed_if_missing()
     logging.basicConfig(level=logging.WARNING)
 
+    mcp_hub.set_call_guard(_remote_bootstrap_error)
     hub_status = mcp_hub.bootstrap_hub(mcp)
     log.warning(
         "mcp_hub: reachable_at_boot=%s hub_tools=%d native_tools=%d",

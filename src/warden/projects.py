@@ -384,7 +384,24 @@ def context_for_project(project_id: str, limit: int = 10) -> Dict[str, Any]:
         ][:limit]
     except Exception as e:
         out["warnings"].append(f"workbench: {e}")
+    try:
+        from src.warden.brain.notebooklm_mirror import notebooklm_mirror_status
+        out["notebooklm_mirror"] = notebooklm_mirror_status(project_id=project_id)
+    except Exception as e:
+        out["warnings"].append(f"notebooklm_mirror: {e}")
     return out
+
+
+@router.post("/{project_id}/notebooklm-mirror")
+def notebooklm_mirror_project_endpoint(project_id: str, dry_run: bool = False, limit: int = 100) -> Dict[str, Any]:
+    """Trigger NotebookLM mirror for a specific project."""
+    _load_project(project_id)
+    try:
+        from src.warden.brain.notebooklm_mirror import mirror_project_to_notebooklm
+        result = mirror_project_to_notebooklm(project_id=project_id, dry_run=dry_run, limit=limit)
+        return {"ok": True, **result}
+    except Exception as e:
+        raise HTTPException(400, f"NotebookLM mirror failed for project {project_id}: {e}")
 
 
 @router.get("/{project_id}/recall")

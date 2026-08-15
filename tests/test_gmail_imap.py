@@ -2,12 +2,14 @@
 import email as _email
 import imaplib
 import json
+import threading
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from src.warden.app import app
 import src.warden.connectors.store as store_mod
 import src.warden.mail.gmail_imap as gmail_imap_mod
+import src.warden.mail.health as mail_health_mod
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
@@ -16,8 +18,10 @@ import src.warden.mail.gmail_imap as gmail_imap_mod
 def reset_imap_factory():
     """Reset injected IMAP factory after each test."""
     gmail_imap_mod.set_imap_factory(None)
+    mail_health_mod.clear_mail_health_cache()
     yield
     gmail_imap_mod.set_imap_factory(None)
+    mail_health_mod.clear_mail_health_cache()
 
 
 def _make_fake_imap(search_ids: list[bytes] | None = None, message_raw: bytes | None = None):
@@ -109,6 +113,112 @@ def test_gmail_imap_connect_bad_password_friendly_error(tmp_path, monkeypatch):
     assert resp.status_code == 422
     assert "app password" in resp.json()["detail"].lower() or "gmail" in resp.json()["detail"].lower()
     assert "[AUTHENTICATIONFAILED]" not in resp.json()["detail"]
+
+
+def test_mail_accounts_default_distinguishes_saved_from_operational(tmp_path, monkeypatch):
+    fake = _make_fake_imap()
+    gmail_imap_mod.set_imap_factory(lambda h, p: fake)
+    client = _make_client(tmp_path, monkeypatch)
+    connect = client.post(
+        "/api/mcharness/warden/connectors/gmail/connect/app-password",
+        json={"email": "user@gmail.com", "app_password": "abcdefghijklmnop"},
+    )
+    assert connect.status_code == 200
+
+    response = client.get("/api/mcharness/warden/mail/accounts")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured_count"] == 1
+    assert data["operational_count"] == 0
+    assert data["verified_live"] is False
+    assert data["accounts"][0]["health"]["state"] == "unchecked"
+    assert data["accounts"][0]["health"]["operational"] is None
+
+
+def test_mail_accounts_live_health_reports_operational(tmp_path, monkeypatch):
+    fake = _make_fake_imap()
+    gmail_imap_mod.set_imap_factory(lambda h, p: fake)
+    client = _make_client(tmp_path, monkeypatch)
+    connect = client.post(
+        "/api/mcharness/warden/connectors/gmail/connect/app-password",
+        json={"email": "user@gmail.com", "app_password": "abcdefghijklmnop"},
+    )
+    assert connect.status_code == 200
+
+    response = client.get("/api/mcharness/warden/mail/accounts?verify_live=true")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured_count"] == 1
+    assert data["operational_count"] == 1
+    assert data["verified_live"] is True
+    assert data["accounts"][0]["health"]["state"] == "operational"
+    assert data["accounts"][0]["health"]["operational"] is True
+
+
+def test_mail_accounts_live_health_reports_reauth_without_secret(tmp_path, monkeypatch):
+    def bad_login(h, p):
+        imap = MagicMock()
+        imap.login = MagicMock(
+            side_effect=imaplib.IMAP4.error("[AUTHENTICATIONFAILED] Invalid credentials (Failure)")
+        )
+        return imap
+
+    gmail_imap_mod.set_imap_factory(bad_login)
+    client = _make_client(tmp_path, monkeypatch)
+    from src.warden.connectors.models import ConnectedAccount
+    from src.warden.connectors.store import ConnectorStore
+
+    account = ConnectedAccount(
+        account_id="gmail-health-bad",
+        user_id="local",
+        provider="gmail",
+        display_email="user@gmail.com",
+        status="connected",
+    )
+    ConnectorStore().save_account(
+        account,
+        token=json.dumps({
+            "email": "user@gmail.com",
+            "app_password": "never-return-this-password",
+            "auth_type": "imap_app_password",
+        }),
+    )
+
+    response = client.get("/api/mcharness/warden/mail/accounts?verify_live=true")
+
+    assert response.status_code == 200
+    assert "never-return-this-password" not in response.text
+    assert "[AUTHENTICATIONFAILED]" not in response.text
+    data = response.json()
+    assert data["configured_count"] == 1
+    assert data["operational_count"] == 0
+    assert data["accounts"][0]["health"]["state"] == "needs_reauth"
+    assert "app password" in data["accounts"][0]["health"]["message"].lower()
+
+
+def test_multiple_live_mail_health_checks_run_in_parallel_and_preserve_order(monkeypatch):
+    accounts = [
+        {"account_id": f"gmail-{index}", "provider": "gmail", "credential_stored": True}
+        for index in range(3)
+    ]
+    barrier = threading.Barrier(len(accounts))
+    worker_names = set()
+
+    def fake_check(account, *, verify_live):
+        assert verify_live is True
+        worker_names.add(threading.current_thread().name)
+        barrier.wait(timeout=2)
+        return {"state": "operational", "operational": True, "account_id": account["account_id"]}
+
+    monkeypatch.setenv("WARDEN_MAIL_HEALTH_MAX_WORKERS", "8")
+    monkeypatch.setattr(mail_health_mod, "check_mail_account", fake_check)
+
+    health = mail_health_mod.check_mail_accounts(accounts, verify_live=True)
+
+    assert [row["account_id"] for row in health] == ["gmail-0", "gmail-1", "gmail-2"]
+    assert len(worker_names) == 3
 
 
 # ─── Gmail IMAP Provider unit tests ───────────────────────────────────────────

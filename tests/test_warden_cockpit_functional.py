@@ -1,5 +1,6 @@
 from pathlib import Path
 import shutil
+import tempfile
 
 from fastapi.testclient import TestClient
 
@@ -10,7 +11,11 @@ from src.server.api import app
 
 
 def _reset_runtime_state() -> None:
+    temp_root = Path(tempfile.gettempdir()).resolve()
     for directory in [WORKBENCH_ROOT, CAPTAIN_ROOT, ARTIFACT_BODY_ROOT]:
+        resolved = directory.resolve()
+        if not resolved.is_relative_to(temp_root):
+            raise RuntimeError(f"refusing to reset non-temporary Warden state: {resolved}")
         if directory.exists():
             shutil.rmtree(directory)
 

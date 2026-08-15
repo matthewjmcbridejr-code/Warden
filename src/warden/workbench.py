@@ -672,6 +672,24 @@ class WorkbenchStore:
     def _path(self, kind: str, item_id: str) -> Path:
         return self.root / kind / f"{item_id}.json"
 
+    def _archive_memory(self, memory: WorkbenchMemory) -> Path:
+        """Keep an immutable memory version outside the mutable workbench.
+
+        The history root deliberately lives beside ``workbench/`` so recovery
+        remains possible if that whole directory is removed or replaced.
+        """
+
+        archived_at = _now().strftime("%Y%m%dT%H%M%S.%fZ")
+        history_path = (
+            self.root.parent
+            / "workbench-history"
+            / "memories"
+            / memory.memory_id
+            / f"{archived_at}-{uuid.uuid4().hex[:8]}.json"
+        )
+        _atomic_write_json(history_path, memory.model_dump(mode="json"))
+        return history_path
+
     def _generate_thread_id(self, title: str) -> str:
         prefix = re.sub(r"[^A-Za-z0-9_-]+", "-", title.lower()).strip("-_")
         prefix = prefix[:24] or "thread"
@@ -1428,6 +1446,7 @@ class WorkbenchStore:
             created_at=_now(),
             updated_at=_now(),
         )
+        self._archive_memory(memory)
         _atomic_write_json(self._path("memories", memory.memory_id), memory.model_dump(mode="json"))
         return memory
 
@@ -1480,6 +1499,7 @@ class WorkbenchStore:
         if source_ref is not None:
             memory.source_ref = _bounded_memory_text(source_ref, 500)
         memory.updated_at = _now()
+        self._archive_memory(memory)
         _atomic_write_json(self._path("memories", memory.memory_id), memory.model_dump(mode="json"))
         return memory
 
