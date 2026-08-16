@@ -194,3 +194,304 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Captain Desk — Operator Command Center Styles
+   --------------------------------------------------------------------------- */
+
+.captain-desk-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.captain-desk-header {
+  background: var(--bg-2, #161b22);
+  border: 1px solid var(--line, #30363d);
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.captain-desk-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.captain-desk-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.captain-desk-title-group h2 {
+  margin: 0;
+  font-size: 1.4em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text, #f0f6fc);
+}
+
+.captain-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.captain-pill-success {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950;
+  border: 1px solid rgba(46, 160, 67, 0.3);
+}
+
+.captain-pill-warning {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  border: 1px solid rgba(210, 153, 34, 0.3);
+}
+
+.captain-pill-info {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.captain-desk-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.85em;
+  color: var(--muted, #8b949e);
+  flex-wrap: wrap;
+}
+
+.captain-desk-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.captain-ask-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.captain-ask-input {
+  flex: 1;
+  padding: 10px 14px;
+  background: var(--bg, #0d1117);
+  border: 1px solid var(--line, #30363d);
+  border-radius: 8px;
+  color: var(--text, #f0f6fc);
+  font-size: 0.9em;
+}
+
+.captain-ask-input:focus {
+  outline: none;
+  border-color: var(--accent, #58a6ff);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.captain-desk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 4-Grid Dashboard Layout */
+.captain-desk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.captain-desk-card {
+  background: var(--bg-2, #161b22);
+  border: 1px solid var(--line, #30363d);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+}
+
+.captain-desk-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line, #30363d);
+}
+
+.captain-desk-card-title {
+  font-weight: 700;
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
+  color: var(--text, #f0f6fc);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.captain-desk-card-badge {
+  font-size: 0.75em;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--bg, #0d1117);
+  color: var(--muted, #8b949e);
+  border: 1px solid var(--line, #30363d);
+}
+
+.captain-desk-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 360px;
+}
+
+.captain-item-card {
+  background: var(--bg, #0d1117);
+  border: 1px solid var(--line, #30363d);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s ease;
+}
+
+.captain-item-card:hover {
+  border-color: var(--accent, #58a6ff);
+}
+
+.captain-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.captain-item-title {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text, #f0f6fc);
+}
+
+.captain-item-sub {
+  font-size: 0.82em;
+  color: var(--muted, #8b949e);
+  line-height: 1.4;
+}
+
+.captain-item-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.captain-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 16px;
+  gap: 8px;
+  color: var(--muted, #8b949e);
+  flex: 1;
+}
+
+.captain-empty-icon {
+  font-size: 2em;
+  color: var(--good, #3fb950);
+}
+
+.captain-empty-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  color: var(--text, #f0f6fc);
+}
+
+.captain-empty-message {
+  font-size: 0.85em;
+  max-width: 320px;
+}
+
+.captain-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.captain-agent-card {
+  background: var(--bg, #0d1117);
+  border: 1px solid var(--line, #30363d);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.captain-agent-name {
+  font-weight: 600;
+  font-size: 0.88em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.captain-agent-role {
+  font-size: 0.78em;
+  color: var(--muted, #8b949e);
+}
+
+.captain-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.captain-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg, #0d1117);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent, #58a6ff);
+  font-size: 0.85em;
+}
+
+.captain-activity-time {
+  color: var(--muted, #8b949e);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .captain-desk-grid {
+    grid-template-columns: 1fr;
+  }
+}

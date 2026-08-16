@@ -2533,6 +2533,7 @@
     if (stage) stage.classList.toggle("inspector-visible", showInspector);
     const titles = {
       mission: "Command Center",
+      "captain-desk": "Captain Desk",
       tasks: "Tasks",
       agents: "Agent Library",
       runs: "Runs",
@@ -2551,7 +2552,9 @@
     if (window.WardenControlRoom && window.WardenControlRoom.onSectionChange) {
       window.WardenControlRoom.onSectionChange(state.activeSection);
     }
-    if (state.activeSection === "mission") {
+    if (state.activeSection === "captain-desk") {
+      loadCaptainDeskData().catch((e) => console.error(e));
+    } else if (state.activeSection === "mission") {
       Promise.all([loadActiveCaptainPlan(), loadMissionWorklog()]).catch((e) => console.error(e));
       if (window.WardenControlRoom && window.WardenControlRoom.isInitialized && window.WardenControlRoom.isInitialized() && window.WardenControlRoom.refresh) {
         window.WardenControlRoom.refresh({ quiet: true }).catch((e) => console.error(e));
@@ -5411,31 +5414,301 @@
       });
     }
 
-    wireSimpleUI();
-    wireMariusEvents(); // Initialize Marius UI bindings
-    wireMailTestPanel();
-    wireBrainVaultSettings();
-    wireCommandCenter();
-    wireSidebarExtras();
+  // ---------------------------------------------------------------------------
+  // Captain Desk — Operator Command Center Frontend Logic
+  // ---------------------------------------------------------------------------
+
+  let captainDeskState = {
+    data: null,
+    activityFilter: "all"
+  };
+
+  async function loadCaptainDeskData() {
+    try {
+      const projSelect = document.getElementById("captain-project-select");
+      const proj = projSelect ? projSelect.value : "";
+      const res = await fetch(`/api/mcharness/captain/desk?project=${encodeURIComponent(proj)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.ok) return;
+
+      captainDeskState.data = data;
+      renderCaptainDesk(data);
+    } catch (err) {
+      console.error("Failed to load Captain Desk data:", err);
+    }
+  }
+
+  function renderCaptainDesk(data) {
+    const cap = data.captain || {};
+
+    const statusPill = document.getElementById("captain-desk-status-pill");
+    if (statusPill) {
+      statusPill.textContent = `● ${cap.status_text || "OPERATIONAL"}`;
+      statusPill.className = `captain-pill captain-pill-${cap.status_pill || "success"}`;
+    }
+
+    const modelEl = document.getElementById("captain-desk-model");
+    if (modelEl) modelEl.textContent = cap.model || "Gemini 2.5 Flash";
+
+    const locEl = document.getElementById("captain-desk-location");
+    if (locEl) locEl.textContent = cap.location || "global";
+
+    const fallEl = document.getElementById("captain-desk-fallback");
+    if (fallEl) fallEl.textContent = cap.local_fallback_ready ? "Ready" : "Disabled";
+
+    const recEl = document.getElementById("captain-desk-last-reconcile");
+    if (recEl) recEl.textContent = cap.last_reconcile_at ? new Date(cap.last_reconcile_at).toLocaleTimeString() : "Just now";
+
+    // 1. WHAT I NOTICED
+    const noticedBody = document.getElementById("captain-noticed-body");
+    const noticedCount = document.getElementById("captain-noticed-count");
+    const noticed = data.noticed || [];
+    if (noticedCount) noticedCount.textContent = `${noticed.length} Observations`;
+
+    if (noticedBody) {
+      if (noticed.length === 0) {
+        noticedBody.innerHTML = `
+          <div class="captain-empty-state">
+            <div class="captain-empty-icon">✓</div>
+            <div class="captain-empty-title">No active issues detected</div>
+            <div class="captain-empty-message">Captain is actively watching tasks, claims, decisions, and service health.</div>
+          </div>`;
+      } else {
+        noticedBody.innerHTML = noticed.map(item => `
+          <div class="captain-item-card">
+            <div class="captain-item-top">
+              <span class="captain-item-title">${escapeHtml(item.summary || item.kind)}</span>
+              <span class="captain-pill captain-pill-${item.severity === 'high' || item.severity === 'critical' ? 'warning' : 'info'}">${item.severity}</span>
+            </div>
+            <div class="captain-item-sub">${escapeHtml(item.explanation || item.recommended_action || '')}</div>
+            <div class="captain-item-actions">
+              <button type="button" class="btn small" onclick="openIssueModal('${item.issue_id}')">Inspect Issue</button>
+            </div>
+          </div>`).join("");
+      }
+    }
+
+    // 2. WHAT I FIXED
+    const fixedBody = document.getElementById("captain-fixed-body");
+    const fixedCount = document.getElementById("captain-fixed-count");
+    const fixed = data.fixed || [];
+    if (fixedCount) fixedCount.textContent = `${fixed.length} Resolutions`;
+
+    if (fixedBody) {
+      if (fixed.length === 0) {
+        fixedBody.innerHTML = `
+          <div class="captain-empty-state">
+            <div class="captain-empty-icon">⚡</div>
+            <div class="captain-empty-title">All reconciliations current</div>
+            <div class="captain-empty-message">Past autonomous fixes and decision reconciliations will appear here.</div>
+          </div>`;
+      } else {
+        fixedBody.innerHTML = fixed.map(item => `
+          <div class="captain-item-card">
+            <div class="captain-item-top">
+              <span class="captain-item-title">Resolved: ${escapeHtml(item.summary || item.kind)}</span>
+              <span class="captain-pill captain-pill-success">Fixed</span>
+            </div>
+            <div class="captain-item-sub">${escapeHtml(item.resolution || item.recommended_action || "Autonomous reconciliation complete.")}</div>
+          </div>`).join("");
+      }
+    }
+
+    // 3. NEEDS YOU
+    const needsYouBody = document.getElementById("captain-needs-you-body");
+    const needsYouCount = document.getElementById("captain-needs-you-count");
+    const needsYou = data.needs_you || {};
+    const needsYouItems = needsYou.items || [];
+    if (needsYouCount) needsYouCount.textContent = `${needsYouItems.length} Items`;
+
+    if (needsYouBody) {
+      if (needsYou.empty || needsYouItems.length === 0) {
+        needsYouBody.innerHTML = `
+          <div class="captain-empty-state">
+            <div class="captain-empty-icon">✓</div>
+            <div class="captain-empty-title">Nothing needs you.</div>
+            <div class="captain-empty-message">Captain is handling routine reconciliation automatically.</div>
+          </div>`;
+      } else {
+        needsYouBody.innerHTML = needsYouItems.map(item => `
+          <div class="captain-item-card">
+            <div class="captain-item-top">
+              <span class="captain-item-title">${escapeHtml(item.summary || item.kind)}</span>
+              <span class="captain-pill captain-pill-warning">Requires Decision</span>
+            </div>
+            <div class="captain-item-sub">${escapeHtml(item.explanation || item.recommended_action || '')}</div>
+            <div class="captain-item-actions">
+              <button type="button" class="btn primary small" onclick="resolveCaptainIssue('${item.issue_id}')">Approve / Resolve</button>
+              <button type="button" class="btn small" onclick="openIssueModal('${item.issue_id}')">Review Detail</button>
+            </div>
+          </div>`).join("");
+      }
+    }
+
+    // 4. AGENTS
+    const agentsBody = document.getElementById("captain-agents-body");
+    const agentsCount = document.getElementById("captain-agents-count");
+    const agents = data.agents || [];
+    if (agentsCount) agentsCount.textContent = `${agents.length} Available`;
+
+    if (agentsBody) {
+      agentsBody.innerHTML = `<div class="captain-agent-grid">` + agents.map(agent => `
+        <div class="captain-agent-card">
+          <div class="captain-agent-name">
+            <span>${escapeHtml(agent.name)}</span>
+            <span class="captain-pill captain-pill-${agent.status === 'Working' ? 'info' : (agent.status === 'Ready' ? 'success' : 'warning')}">${agent.status}</span>
+          </div>
+          <div class="captain-agent-role">${escapeHtml(agent.role)} · ${escapeHtml(agent.provider)}</div>
+        </div>`).join("") + `</div>`;
+    }
+
+    // 5. LIVE ACTIVITY FEED
+    renderCaptainActivity(data.activity || []);
+  }
+
+  function renderCaptainActivity(activity) {
+    const activityBody = document.getElementById("captain-activity-body");
+    if (!activityBody) return;
+
+    const filter = captainDeskState.activityFilter;
+    const filtered = filter === "all" ? activity : activity.filter(a => a.category === filter);
+
+    if (filtered.length === 0) {
+      activityBody.innerHTML = `<div class="captain-fine-print" style="padding:8px;">No activity matching filter "${escapeHtml(filter)}".</div>`;
+      return;
+    }
+
+    activityBody.innerHTML = filtered.map(act => `
+      <div class="captain-activity-row">
+        <span class="captain-activity-time">${act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : "Just now"}</span>
+        <span class="captain-pill captain-pill-info">${escapeHtml(act.category || "Captain")}</span>
+        <span style="flex:1;">${escapeHtml(act.title)}</span>
+      </div>`).join("");
+  }
+
+  async function askCaptain() {
+    const input = document.getElementById("captain-ask-input");
+    const responseEl = document.getElementById("captain-ask-response");
+    if (!input || !input.value.trim()) return;
+
+    const prompt = input.value.trim();
+    if (responseEl) {
+      responseEl.style.display = "block";
+      responseEl.innerHTML = "<em>Captain is assessing query via Gemini 2.5 Flash...</em>";
+    }
+
+    try {
+      const projSelect = document.getElementById("captain-project-select");
+      const proj = projSelect ? projSelect.value : "";
+      const res = await fetch("/api/mcharness/captain/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, project: proj })
+      });
+      const data = await res.json();
+      if (data.ok && responseEl) {
+        responseEl.innerHTML = `<strong>Captain Response:</strong><br/>${escapeHtml(data.answer)}`;
+      } else if (responseEl) {
+        responseEl.innerHTML = `<span style="color:var(--bad);">Error asking Captain: ${escapeHtml(data.error || "Unknown error")}</span>`;
+      }
+    } catch (err) {
+      if (responseEl) responseEl.innerHTML = `<span style="color:var(--bad);">Error: ${escapeHtml(err.message)}</span>`;
+    }
+  }
+
+  async function reconcileCaptainDesk() {
+    try {
+      const projSelect = document.getElementById("captain-project-select");
+      const proj = projSelect ? projSelect.value : "";
+      await fetch("/api/mcharness/warden/orchestrator/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: proj, trigger: "manual_desk" })
+      });
+      await loadCaptainDeskData();
+    } catch (err) {
+      console.error("Reconcile error:", err);
+    }
+  }
+
+  async function resolveCaptainIssue(issueId) {
+    try {
+      await fetch(`/api/mcharness/warden/orchestrator/issues/${encodeURIComponent(issueId)}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution: "Approved by operator via Captain Desk", actor: "operator" })
+      });
+      await loadCaptainDeskData();
+    } catch (err) {
+      console.error("Resolve issue error:", err);
+    }
+  }
+
+  function openIssueModal(issueId) {
+    const data = captainDeskState.data;
+    if (!data) return;
+    const allIssues = [...(data.noticed || []), ...(data.fixed || [])];
+    const issue = allIssues.find(i => i.issue_id === issueId);
+    if (!issue) return;
+
+    alert(`CAPTAIN ISSUE DETAIL\n--------------------\nID: ${issue.issue_id}\nKind: ${issue.kind}\nSeverity: ${issue.severity}\nSummary: ${issue.summary}\nExplanation: ${issue.explanation || 'N/A'}\nRecommended Action: ${issue.recommended_action}`);
+  }
+
+  function wireCaptainDeskListeners() {
+    const recBtn = document.getElementById("captain-desk-reconcile-btn");
+    if (recBtn) recBtn.addEventListener("click", reconcileCaptainDesk);
+
+    const refBtn = document.getElementById("captain-desk-refresh-btn");
+    if (refBtn) refBtn.addEventListener("click", loadCaptainDeskData);
+
+    const projSel = document.getElementById("captain-project-select");
+    if (projSel) projSel.addEventListener("change", loadCaptainDeskData);
+
+    const askBtn = document.getElementById("captain-ask-btn");
+    if (askBtn) askBtn.addEventListener("click", askCaptain);
+
+    const askInput = document.getElementById("captain-ask-input");
+    if (askInput) {
+      askInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") askCaptain();
+      });
+    }
+
+    document.querySelectorAll("[data-activity-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-activity-filter]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        captainDeskState.activityFilter = btn.getAttribute("data-activity-filter") || "all";
+        if (captainDeskState.data) {
+          renderCaptainActivity(captainDeskState.data.activity || []);
+        }
+      });
+    });
+  }
+
+  // Expose global helpers for inline onclick handlers
+  window.resolveCaptainIssue = resolveCaptainIssue;
+  window.openIssueModal = openIssueModal;
+
+  async function init() {
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
+    wireCaptainDeskListeners();
     setActiveSection("mission");
-    await Promise.all([loadLibraryStatus(), loadCaptainDeckStatus(), loadRecentRuns(), loadRecentEvidence(), loadActiveCaptainPlan(), loadMissionWorklog(), loadRecentGates()]);
+    await Promise.all([loadLibraryStatus(), loadCaptainDeckStatus(), loadRecentRuns(), loadRecentEvidence(), loadActiveCaptainPlan(), loadMissionWorklog(), loadRecentGates(), loadCaptainDeskData()]);
     if (window.WardenControlRoom && window.WardenControlRoom.refresh) {
       await window.WardenControlRoom.refresh({ quiet: true });
     }
     loadCommandCenter().catch((e) => console.error("command center load error", e));
     loadBrainVaultSettings().catch((e) => console.error("brain vault settings load error", e));
     loadSidebarAgentsAndTasks().catch((e) => console.error("sidebar agents/tasks load error", e));
-
-    // initial status check for disabled note etc is handled in deploy
-    // If user has runner flags in this process (e.g. private), card will reflect Ready
   }
 
   // expose a couple for console/manual if needed
   window.McHarnessSimple = { deployPrompt, openUseAgentModal, openLiveCLIMonitor, refreshLiveMonitor };
-  window.WardenApp = { setActiveSection, openCaptainDeckModal, openLiveCLIMonitor };
+  window.WardenApp = { setActiveSection, openCaptainDeckModal, openLiveCLIMonitor, loadCaptainDeskData };
 
   // boot
   init().catch((e) => console.error("init error", e));

@@ -34,6 +34,9 @@
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
         <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command Center</button>
+        <button type="button" class="nav-item nav-item-agent" data-section="captain-desk" data-testid="nav-captain-desk">
+          <span class="nav-item-dot nav-item-dot-good" id="nav-dot-captain"></span>Captain Desk <span class="nav-item-tag">control plane</span>
+        </button>
 
         <div class="sidebar-group-label">Agents</div>
         <button type="button" class="nav-item nav-item-agent" data-section="agent" data-testid="nav-agent">
@@ -70,6 +73,97 @@
     <main class="warden-workspace" data-testid="warden-workspace">
       <div class="warden-stage">
         <div class="warden-stage-main">
+
+      <section id="warden-section-captain-desk" class="workspace-section cmd-section" data-section="captain-desk" data-testid="warden-section-captain-desk">
+        <div class="captain-desk-container">
+          <!-- Header -->
+          <div class="captain-desk-header">
+            <div class="captain-desk-top">
+              <div class="captain-desk-title-group">
+                <h2>CAPTAIN DESK</h2>
+                <span id="captain-desk-status-pill" class="captain-pill captain-pill-success">● OPERATIONAL</span>
+              </div>
+              <div class="captain-desk-toolbar">
+                <select id="captain-project-select" class="btn" style="background:var(--bg); color:inherit;">
+                  <option value="">All Projects</option>
+                  <option value="warden">warden</option>
+                  <option value="mcharness">mcharness</option>
+                  <option value="marius">marius</option>
+                  <option value="grademy">grademy</option>
+                </select>
+                <button type="button" id="captain-desk-reconcile-btn" class="btn primary">Reconcile Now</button>
+                <button type="button" id="captain-desk-refresh-btn" class="btn">Refresh Desk</button>
+              </div>
+            </div>
+            <div class="captain-desk-meta-row">
+              <span class="captain-desk-meta-item">🤖 Model: <strong id="captain-desk-model">Gemini 2.5 Flash</strong></span>
+              <span class="captain-desk-meta-item">🌐 Location: <strong id="captain-desk-location">global</strong></span>
+              <span class="captain-desk-meta-item">🛡️ Fallback: <strong id="captain-desk-fallback">Ready</strong></span>
+              <span class="captain-desk-meta-item">⏱️ Reconciled: <span id="captain-desk-last-reconcile">Just now</span></span>
+            </div>
+            <div class="captain-ask-bar">
+              <input type="text" id="captain-ask-input" class="captain-ask-input" placeholder="Ask Captain about Warden... (e.g. What changed? What needs me? Is Vertex healthy?)" />
+              <button type="button" id="captain-ask-btn" class="btn primary">Ask Captain</button>
+            </div>
+            <div id="captain-ask-response" style="display:none; padding:10px; background:var(--bg); border:1px solid var(--line); border-radius:8px; font-size:0.9em; line-height:1.4;"></div>
+          </div>
+
+          <!-- 4 Core Questions Grid -->
+          <div class="captain-desk-grid">
+            <!-- WHAT I NOTICED -->
+            <div class="captain-desk-card" id="captain-noticed-card">
+              <div class="captain-desk-card-header">
+                <span class="captain-desk-card-title">🔍 WHAT I NOTICED</span>
+                <span id="captain-noticed-count" class="captain-desk-card-badge">0 Observations</span>
+              </div>
+              <div id="captain-noticed-body" class="captain-desk-card-body"></div>
+            </div>
+
+            <!-- WHAT I FIXED -->
+            <div class="captain-desk-card" id="captain-fixed-card">
+              <div class="captain-desk-card-header">
+                <span class="captain-desk-card-title">⚡ WHAT I FIXED</span>
+                <span id="captain-fixed-count" class="captain-desk-card-badge">0 Resolutions</span>
+              </div>
+              <div id="captain-fixed-body" class="captain-desk-card-body"></div>
+            </div>
+
+            <!-- NEEDS YOU -->
+            <div class="captain-desk-card" id="captain-needs-you-card">
+              <div class="captain-desk-card-header">
+                <span class="captain-desk-card-title">🚨 NEEDS YOU</span>
+                <span id="captain-needs-you-count" class="captain-desk-card-badge">0 Items</span>
+              </div>
+              <div id="captain-needs-you-body" class="captain-desk-card-body"></div>
+            </div>
+
+            <!-- AGENTS -->
+            <div class="captain-desk-card" id="captain-agents-card">
+              <div class="captain-desk-card-header">
+                <span class="captain-desk-card-title">🤖 AGENTS</span>
+                <span id="captain-agents-count" class="captain-desk-card-badge">6 Available</span>
+              </div>
+              <div id="captain-agents-body" class="captain-desk-card-body"></div>
+            </div>
+          </div>
+
+          <!-- LIVE ACTIVITY FEED -->
+          <div class="captain-desk-card">
+            <div class="captain-desk-card-header">
+              <span class="captain-desk-card-title">📜 LIVE ACTIVITY FEED</span>
+              <div class="captain-card-actions">
+                <button type="button" class="btn active" data-activity-filter="all">All</button>
+                <button type="button" class="btn" data-activity-filter="Captain">Captain</button>
+                <button type="button" class="btn" data-activity-filter="Agents">Agents</button>
+                <button type="button" class="btn" data-activity-filter="Decisions">Decisions</button>
+                <button type="button" class="btn" data-activity-filter="Services">Services</button>
+              </div>
+            </div>
+            <div id="captain-activity-body" class="captain-activity-list"></div>
+          </div>
+        </div>
+      </section>
+
       <section id="warden-section-mission" class="workspace-section active cmd-section" data-section="mission" data-testid="warden-section-mission">
 
         <!-- Thread header -->
