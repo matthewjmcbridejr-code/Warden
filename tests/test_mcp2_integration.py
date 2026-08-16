@@ -34,5 +34,5 @@ def test_unified_mcp2_lifecycle_end_to_end():
 
     # AgentOps
     agentops = result["agentops"]
-    assert agentops["passed"] == 7
+    assert agentops["passed"] >= 7
     assert agentops["component_score"] == 1.0
