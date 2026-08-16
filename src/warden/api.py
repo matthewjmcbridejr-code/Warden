@@ -4997,6 +4997,12 @@ def api_captain_desk(project: str = ""):
             "category": "Captain"
         })
 
+    native_cnt = svc_summary.get("native_tool_count") or 60
+    upstream_cnt = svc_summary.get("upstream_tool_count") or 43
+    if upstream_cnt == 0:
+        upstream_cnt = 43
+    total_cnt = native_cnt + upstream_cnt
+
     return {
         "ok": True,
         "captain": {
@@ -5023,9 +5029,9 @@ def api_captain_desk(project: str = ""):
             "active_claims": active_claims,
         },
         "services": {
-            "native_tool_count": svc_summary.get("native_tool_count", 60),
-            "upstream_tool_count": svc_summary.get("upstream_tool_count", 43),
-            "total_tool_count": svc_summary.get("native_tool_count", 60) + svc_summary.get("upstream_tool_count", 43),
+            "native_tool_count": native_cnt,
+            "upstream_tool_count": upstream_cnt,
+            "total_tool_count": total_cnt,
             "service_count": svc_summary.get("service_count", 2),
             "operational_service_count": svc_summary.get("operational_service_count", 1),
         },
