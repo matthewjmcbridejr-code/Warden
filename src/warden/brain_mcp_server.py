@@ -853,6 +853,16 @@ def warden_remember(
         if embedding:
             brain_vector_store.upsert(memory.memory_id, embedding, {"kind": kind, "project": project})
 
+        try:
+            from src.warden.captain_orchestrator import on_state_event
+            if kind == "proof":
+                event = "proof.rejected" if "fail" in text.lower() or "reject" in text.lower() else "proof.submitted"
+                on_state_event(event, project=project or "warden")
+            elif kind == "decision":
+                on_state_event("decision.created", project=project or "warden")
+        except Exception:
+            pass
+
         return _ok("warden_remember", {
             "memory_id": memory.memory_id,
             "kind": memory.kind,
@@ -1304,10 +1314,19 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         _mark_caller_bootstrapped()
 
         # Tool revision metadata
+        native_count = len(mcp._tool_manager._tools)
+        hub = mcp_hub.hub_status()
+        total_count = native_count + getattr(hub, "hub_tool_count", 0)
+        rev_seed = f"{native_count}:{total_count}:{freshest_memory_at or '0'}"
+        import hashlib
+        rev_hash = "cat_rev_" + hashlib.sha256(rev_seed.encode("utf-8")).hexdigest()[:12]
+
         tool_catalog_revision = {
             "version": "1.0.0",
-            "tool_count": 30,
-            "revision_hash": "cat_rev_" + freshest_memory_at[:10] if freshest_memory_at else "cat_rev_0",
+            "native_tool_count": native_count,
+            "total_tool_count": total_count,
+            "tool_count": native_count,  # Backwards-compatible field reflecting native served tools
+            "revision_hash": rev_hash,
         }
 
         if detail_mode == "minimal":

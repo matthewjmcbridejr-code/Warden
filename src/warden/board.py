@@ -214,6 +214,69 @@ def supersede_task(
     return clean_task
 
 
+def complete_task(task_id: str, actor: str = "", note: str = "") -> Dict[str, Any]:
+    """Mark a task completed, moving it to tasks/completed while preserving full history."""
+    task, path = find_task(task_id)
+    if not task or not path:
+        raise FileNotFoundError(f"Task {task_id} not found.")
+
+    now = _now_iso()
+    task["status"] = "completed"
+    task["completed_at"] = now
+    task["completed_by"] = actor or "warden"
+    if note:
+        task["completion_note"] = note
+    task["updated_at"] = now
+
+    dest_dir = _task_dir("completed")
+    dest_path = dest_dir / f"{task_id}.json"
+
+    clean_task = {k: v for k, v in task.items() if not k.startswith("_")}
+    dest_path.write_text(json.dumps(clean_task, indent=2), encoding="utf-8")
+    if dest_path != path:
+        path.unlink(missing_ok=True)
+
+    clean_task["_status"] = "completed"
+    clean_task["_path"] = str(dest_path)
+    try:
+        from src.warden.captain_orchestrator import on_state_event
+        on_state_event("task.completed", project=clean_task.get("project") or "warden")
+    except Exception:
+        pass
+    return clean_task
+
+
+def fail_task(task_id: str, reason: str, actor: str = "") -> Dict[str, Any]:
+    """Mark a task failed, moving it to tasks/failed while preserving full history."""
+    task, path = find_task(task_id)
+    if not task or not path:
+        raise FileNotFoundError(f"Task {task_id} not found.")
+
+    now = _now_iso()
+    task["status"] = "failed"
+    task["failed_at"] = now
+    task["failed_by"] = actor or "warden"
+    task["failure_reason"] = reason
+    task["updated_at"] = now
+
+    dest_dir = _task_dir("failed")
+    dest_path = dest_dir / f"{task_id}.json"
+
+    clean_task = {k: v for k, v in task.items() if not k.startswith("_")}
+    dest_path.write_text(json.dumps(clean_task, indent=2), encoding="utf-8")
+    if dest_path != path:
+        path.unlink(missing_ok=True)
+
+    clean_task["_status"] = "failed"
+    clean_task["_path"] = str(dest_path)
+    try:
+        from src.warden.captain_orchestrator import on_state_event
+        on_state_event("task.failed", project=clean_task.get("project") or "warden")
+    except Exception:
+        pass
+    return clean_task
+
+
 def revalidate_task_or_claim(task_id: str) -> Dict[str, Any]:
     """Revalidate whether a task or claim remains valid active work."""
     task, path = find_task(task_id)

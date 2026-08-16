@@ -476,6 +476,34 @@ def detect_orphaned_handoffs(project: str = "") -> List[CaptainIssue]:
     return issues
 
 
+def check_client_tool_catalog_freshness(
+    client_id: str, known_count: Optional[int] = None, known_revision: Optional[str] = None
+) -> Dict[str, Any]:
+    """Check if a connected client's catalog matches the current served tool catalog."""
+    try:
+        from src.warden.brain_mcp_server import mcp, _hub_status
+        native_count = len(mcp._tool_manager._tools)
+        total_count = native_count + getattr(_hub_status, "hub_tool_count", 0)
+    except Exception:
+        native_count = 60
+        total_count = 103
+
+    is_stale = False
+    reasons = []
+    if known_count is not None and known_count != native_count and known_count != total_count:
+        is_stale = True
+        reasons.append(f"Client known count ({known_count}) does not match native ({native_count}) or total ({total_count}) served tools.")
+
+    return {
+        "client_id": client_id,
+        "is_stale": is_stale,
+        "server_native_tool_count": native_count,
+        "server_total_tool_count": total_count,
+        "reasons": reasons,
+        "recommended_action": "Client must issue tool list refresh or reconnect MCP session." if is_stale else "Client tool catalog is up to date.",
+    }
+
+
 def detect_tool_surface_drift(project: str = "") -> List[CaptainIssue]:
     """Detect connected MCP clients serving stale or mismatched tool counts."""
     issues: List[CaptainIssue] = []

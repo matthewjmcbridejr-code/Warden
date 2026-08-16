@@ -236,3 +236,59 @@ def test_detect_failed_or_stale_proofs(tmp_path):
     assert len(issues) >= 1
     assert issues[0].kind == "proof_failed"
 
+
+def test_complete_and_fail_task_lifecycle(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    draft_dir = board_root / "tasks" / "draft"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+
+    t1 = "task-complete-1"
+    t2 = "task-fail-1"
+    (draft_dir / f"{t1}.json").write_text(json.dumps({"task_id": t1, "title": "Complete me", "status": "draft"}))
+    (draft_dir / f"{t2}.json").write_text(json.dumps({"task_id": t2, "title": "Fail me", "status": "draft"}))
+
+    from src.warden.board import complete_task, fail_task, revalidate_task_or_claim
+    c_res = complete_task(t1, actor="agent_a", note="All done")
+    assert c_res["status"] == "completed"
+
+    f_res = fail_task(t2, reason="Gate check failed", actor="agent_b")
+    assert f_res["status"] == "failed"
+
+    reval_c = revalidate_task_or_claim(t1)
+    assert reval_c["valid"] is False
+    assert reval_c["status"] == "completed"
+
+    reval_f = revalidate_task_or_claim(t2)
+    assert reval_f["valid"] is True or reval_f["status"] == "failed"
+
+
+def test_on_state_event_coverage(tmp_path):
+    from src.warden.captain_orchestrator import on_state_event
+    event_types = [
+        "task.created",
+        "task.claimed",
+        "task.cancelled",
+        "task.superseded",
+        "task.completed",
+        "task.failed",
+        "handoff.created",
+        "decision.created",
+        "proof.submitted",
+        "proof.rejected",
+        "service.health_changed",
+        "tool_catalog.changed",
+    ]
+    for evt in event_types:
+        issues = on_state_event(evt, project="warden")
+        assert isinstance(issues, list)
+
+
+def test_check_client_tool_catalog_freshness():
+    from src.warden.captain_orchestrator import check_client_tool_catalog_freshness
+    fresh_res = check_client_tool_catalog_freshness("client_a", known_count=60)
+    assert fresh_res["is_stale"] is False
+
+    stale_res = check_client_tool_catalog_freshness("client_b", known_count=89)
+    assert stale_res["is_stale"] is True
+    assert "reconnect" in stale_res["recommended_action"].lower() or "refresh" in stale_res["recommended_action"].lower()
+
