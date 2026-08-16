@@ -1321,12 +1321,21 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
             except Exception:
                 pass
         upstream_tool_names = set(hub.hub_tool_names)
-        native_count = len([name for name in mcp._tool_manager._tools if name not in upstream_tool_names])
-        upstream_count = hub.hub_tool_count
+        native_tool_names = sorted(name for name in mcp._tool_manager._tools if name not in upstream_tool_names)
+        upstream_tool_names_sorted = sorted(hub.hub_tool_names)
+        native_count = len(native_tool_names)
+        upstream_count = len(upstream_tool_names_sorted)
         total_count = native_count + upstream_count
-        rev_seed = f"{native_count}:{total_count}:{freshest_memory_at or '0'}"
+
+        rev_payload = json.dumps({
+            "version": "1.0.0",
+            "native": native_tool_names,
+            "upstream": upstream_tool_names_sorted,
+            "native_count": native_count,
+            "upstream_count": upstream_count,
+        }, sort_keys=True)
         import hashlib
-        rev_hash = "cat_rev_" + hashlib.sha256(rev_seed.encode("utf-8")).hexdigest()[:12]
+        rev_hash = "cat_rev_" + hashlib.sha256(rev_payload.encode("utf-8")).hexdigest()[:12]
 
         tool_catalog_revision = {
             "version": "1.0.0",

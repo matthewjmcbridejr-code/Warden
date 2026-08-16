@@ -274,3 +274,47 @@ def test_board_reconciles_duplicate_and_closed_task_claims(tmp_path, monkeypatch
     assert payload["data"]["stale_claims"] == [
         {**closed_claim, "reconciled_status": "stale_task_not_open"},
     ]
+
+
+def test_tool_catalog_revision_stability(tmp_path, monkeypatch):
+    data_dir = tmp_path / "warden_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("WARDEN_DATA_ROOT", str(data_dir))
+
+    res1_str = server.warden_bootstrap(task="Test 1", project="warden", detail="minimal")
+    res1 = json.loads(res1_str)
+    rev1 = res1["data"]["tool_catalog_revision"]
+
+    # 1. Adding a memory must NOT change revision_hash
+    server.warden_remember(kind="decision", text="Added a random decision memory", project="warden")
+    res2_str = server.warden_bootstrap(task="Test 2", project="warden", detail="minimal")
+    res2 = json.loads(res2_str)
+    rev2 = res2["data"]["tool_catalog_revision"]
+
+    assert rev1["revision_hash"] == rev2["revision_hash"], "Adding a memory must not alter tool catalog revision!"
+    assert rev1["native_tool_count"] == rev2["native_tool_count"]
+    assert rev1["total_tool_count"] == rev2["total_tool_count"]
+
+    # 2. Changing health/time timestamps must NOT change revision_hash
+    monkeypatch.setenv("DUMMY_TIMESTAMP", "2026-08-16T12:34:56Z")
+    res3_str = server.warden_bootstrap(task="Test 3", project="warden", detail="minimal")
+    res3 = json.loads(res3_str)
+    rev3 = res3["data"]["tool_catalog_revision"]
+
+    assert rev1["revision_hash"] == rev3["revision_hash"], "Timestamp shifts must not alter tool catalog revision!"
+
+    # 3. Adding a new tool MUST change revision_hash
+    @server.mcp.tool()
+    def temporary_dummy_tool_for_test() -> str:
+        return "dummy"
+
+    try:
+        res4_str = server.warden_bootstrap(task="Test 4", project="warden", detail="minimal")
+        res4 = json.loads(res4_str)
+        rev4 = res4["data"]["tool_catalog_revision"]
+
+        assert rev4["revision_hash"] != rev1["revision_hash"], "Adding a tool MUST change tool catalog revision!"
+        assert rev4["native_tool_count"] == rev1["native_tool_count"] + 1
+    finally:
+        server.mcp._tool_manager._tools.pop("temporary_dummy_tool_for_test", None)
+
