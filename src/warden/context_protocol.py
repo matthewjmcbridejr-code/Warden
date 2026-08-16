@@ -28,12 +28,13 @@ def compute_context_revision(
     changes. Must NOT change due to timestamps, health checks, or unrelated project state.
     """
     items: list[str] = []
+    proj_lower = (project or "").lower()
 
     if memories:
         for m in memories:
-            p = m.get("project") or ""
+            p = (m.get("project") or m.get("project_id") or "").lower()
             kind = m.get("kind") or ""
-            if (not project or p == project or p == "all") and kind in ("decision", "constraint", "proof"):
+            if (not proj_lower or p == proj_lower or p == "all") and kind in ("decision", "constraint", "proof"):
                 mem_id = m.get("memory_id") or m.get("title") or ""
                 text = m.get("title") or m.get("summary") or m.get("text") or ""
                 items.append(f"mem:{mem_id}:{kind}:{text}")

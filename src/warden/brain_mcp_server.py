@@ -1346,10 +1346,14 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         }
 
         from src.warden.context_protocol import compute_context_revision
+        all_mem_dicts = [
+            {"memory_id": m.memory_id, "title": m.title or m.summary[:60], "summary": m.summary[:300], "kind": m.kind, "project": m.project_id or m.scope}
+            for m in all_memories
+        ]
         context_revision = compute_context_revision(
             project=project or "warden",
             tasks=coordination["open_tasks"],
-            memories=recall_results,
+            memories=all_mem_dicts,
         )
 
         if detail_mode == "minimal":
