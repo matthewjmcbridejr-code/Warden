@@ -4121,6 +4121,18 @@ def get_mcharness_session_artifacts(session_id: str):
     }
 
 
+@mcharness_router.get("/artifacts/{artifact_id}")
+def api_get_artifact(artifact_id: str):
+    """Retrieves artifact metadata and content bytes with SHA-256 integrity verification."""
+    from src.warden.artifacts_protocol import read_artifact_content
+    result = read_artifact_content(artifact_id)
+    if not result:
+        raise HTTPException(404, f"Artifact {artifact_id} not found.")
+    ref, content_bytes = result
+    from fastapi.responses import Response
+    return Response(content=content_bytes, media_type=ref.mime_type)
+
+
 @mcharness_router.get("/sessions/{session_id}/git-status")
 def get_mcharness_session_git_status(session_id: str):
     thread = _thread_for_session(session_id)
