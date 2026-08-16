@@ -641,9 +641,8 @@ class VertexGeminiInferenceProvider(CaptainInferenceProvider):
         self.model = os.getenv("VERTEX_MODEL", model)
 
     async def assess(
-        self, issue: CaptainIssue, context: Dict[str, Any]
+        self, issue: CaptainIssue, context: Dict[str, Any], fallback_enabled: bool = True
     ) -> CaptainAssessment:
-        # Fallback cleanly if google.auth or credentials not configured
         try:
             import google.auth
             from google.auth.transport.requests import Request
@@ -698,6 +697,8 @@ class VertexGeminiInferenceProvider(CaptainInferenceProvider):
                 return CaptainAssessment.model_validate(parsed)
 
         except Exception as exc:
+            if not fallback_enabled:
+                raise RuntimeError(f"Vertex inference failed with fallback_enabled=False: {exc}") from exc
             log.warning(
                 f"VertexGeminiInferenceProvider fallback to local: {exc}"
             )

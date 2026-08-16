@@ -1316,6 +1316,11 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         # Tool revision metadata
         native_count = len(mcp._tool_manager._tools)
         hub = mcp_hub.hub_status()
+        if hub.enabled and getattr(hub, "hub_tool_count", 0) == 0 and not getattr(hub, "last_discovery_at", None):
+            try:
+                hub = mcp_hub.bootstrap_hub(mcp)
+            except Exception:
+                pass
         total_count = native_count + getattr(hub, "hub_tool_count", 0)
         rev_seed = f"{native_count}:{total_count}:{freshest_memory_at or '0'}"
         import hashlib
