@@ -6466,6 +6466,130 @@ def post_brain_google_verify():
     from .brain import google_provider
     result = google_provider.verify_config()
     return {"ok": result["ok"], **result}
+# ---------------------------------------------------------------------------
+# AGENTIC GROUP CHAT REST & SSE ENDPOINTS
+# ---------------------------------------------------------------------------
+
+class CreateConversationPayload(BaseModel):
+    title: str
+    project: str = "Warden"
+    room_policy: str = "supervised"
+    is_demo: bool = False
+
+
+class PostMessagePayload(BaseModel):
+    text: str
+    actor_id: str = "matt"
+
+
+@mcharness_router.get("/chat/conversations")
+def api_list_conversations(project: str = "Warden"):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+    rooms = store.list_conversations(project=project)
+    return {
+        "ok": True,
+        "count": len(rooms),
+        "conversations": [r.model_dump(mode="json") for r in rooms],
+    }
+
+
+@mcharness_router.post("/chat/conversations")
+def api_create_conversation(body: CreateConversationPayload):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+    conv_id = f"conv_{int(time.time() * 1000)}"
+    room = store.get_or_create_conversation(
+        conversation_id=conv_id,
+        title=body.title,
+        project=body.project,
+        room_policy=body.room_policy, # type: ignore
+        is_demo=body.is_demo,
+    )
+    return {
+        "ok": True,
+        "conversation": room.model_dump(mode="json"),
+    }
+
+
+@mcharness_router.get("/chat/conversations/{conversation_id}")
+def api_get_conversation(conversation_id: str):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+    rooms = store.list_conversations()
+    room = next((r for r in rooms if r.conversation_id == conversation_id), None)
+    if not room:
+        raise HTTPException(status_code=404, detail="Conversation room not found")
+    return {
+        "ok": True,
+        "conversation": room.model_dump(mode="json"),
+    }
+
+
+@mcharness_router.get("/chat/conversations/{conversation_id}/events")
+def api_get_chat_events(conversation_id: str, since_seq: int = 0, limit: int = 100):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+    events = store.list_events(conversation_id=conversation_id, since_seq=since_seq, limit=limit)
+    return {
+        "ok": True,
+        "conversation_id": conversation_id,
+        "since_seq": since_seq,
+        "count": len(events),
+        "events": [e.model_dump(mode="json") for e in events],
+    }
+
+
+@mcharness_router.post("/chat/conversations/{conversation_id}/messages")
+def api_post_chat_message(conversation_id: str, body: PostMessagePayload):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+    human_event, responses = store.process_human_message(
+        text=body.text,
+        conversation_id=conversation_id,
+        actor_id=body.actor_id,
+    )
+    return {
+        "ok": True,
+        "human_event": human_event.model_dump(mode="json"),
+        "responses": [r.model_dump(mode="json") for r in responses],
+    }
+
+
+@mcharness_router.get("/chat/conversations/{conversation_id}/stream")
+async def api_stream_chat_events(conversation_id: str, request: Request, last_event_id: str | None = None):
+    from src.warden.group_chat import GroupChatStore
+    store = GroupChatStore()
+
+    since_seq = 0
+    if last_event_id and last_event_id.isdigit():
+        since_seq = int(last_event_id)
+
+    async def sse_generator():
+        # 1. Replay past events since cursor
+        initial_events = store.list_events(conversation_id=conversation_id, since_seq=since_seq)
+        for evt in initial_events:
+            payload = json.dumps(evt.model_dump(mode="json"))
+            yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+
+        # 2. Subscribe to live events stream
+        q = store.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    evt = await asyncio.wait_for(q.get(), timeout=15.0)
+                    if evt.conversation_id == conversation_id:
+                        payload = json.dumps(evt.model_dump(mode="json"))
+                        yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    # Heartbeat keepalive
+                    yield f": heartbeat {int(time.time())}\n\n"
+        finally:
+            store.unsubscribe(q)
+
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
 CAPTAIN_WATCHER_POLL_SECONDS = int(os.getenv("MCHARNESS_CAPTAIN_WATCHER_POLL_SECONDS", "30"))

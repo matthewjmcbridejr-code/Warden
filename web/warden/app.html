@@ -33,7 +33,10 @@
       <div id="sidebar-search-results" class="sidebar-search-results" style="display:none;" data-testid="sidebar-search-results"></div>
 
       <nav class="sidebar-nav" data-testid="warden-nav" aria-label="Warden sections">
-        <button type="button" class="nav-item active" data-section="mission" data-testid="nav-mission">Command Center</button>
+        <button type="button" class="nav-item active" data-section="group-chat" data-testid="nav-group-chat">
+          <span class="nav-item-dot nav-item-dot-good" id="nav-dot-chat"></span>Team Chat <span class="nav-item-tag">group chat</span>
+        </button>
+        <button type="button" class="nav-item" data-section="mission" data-testid="nav-mission">Command Center</button>
         <button type="button" class="nav-item nav-item-agent" data-section="captain-desk" data-testid="nav-captain-desk">
           <span class="nav-item-dot nav-item-dot-good" id="nav-dot-captain"></span>Captain Desk <span class="nav-item-tag">control plane</span>
         </button>
@@ -73,6 +76,105 @@
     <main class="warden-workspace" data-testid="warden-workspace">
       <div class="warden-stage">
         <div class="warden-stage-main">
+
+      <!-- SECTION: AGENTIC GROUP CHAT -->
+      <section id="warden-section-group-chat" class="workspace-section cmd-section active" data-section="group-chat" data-testid="warden-section-group-chat">
+        <div class="group-chat-container">
+          <!-- Rooms Rail -->
+          <div class="chat-rooms-sidebar">
+            <div class="chat-sidebar-header">
+              <h3>TEAMS & ROOMS</h3>
+              <button type="button" id="chat-new-room-btn" class="btn small">+ New</button>
+            </div>
+            <div id="chat-rooms-list" class="chat-rooms-list">
+              <!-- Dynamically populated -->
+            </div>
+            <div class="chat-policy-card">
+              <span class="chat-policy-title">Room Policy:</span>
+              <select id="chat-policy-select" class="chat-policy-select">
+                <option value="supervised">Supervised (Default)</option>
+                <option value="keep_working">Keep working</option>
+                <option value="paused">Paused</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Main Chat Panel -->
+          <div class="chat-main-panel">
+            <!-- Chat Header -->
+            <div class="chat-header">
+              <div class="chat-header-info">
+                <h2 id="chat-room-title">Warden Team</h2>
+                <div class="chat-header-participants" id="chat-header-participants">
+                  <span class="p-badge online"><span class="dot">●</span> Claude UX</span>
+                  <span class="p-badge online"><span class="dot">●</span> Codex Builder</span>
+                  <span class="p-badge online"><span class="dot">●</span> Spark Research</span>
+                  <span class="p-badge warden"><span class="dot">●</span> Warden</span>
+                </div>
+              </div>
+              <div class="chat-header-actions">
+                <span id="chat-stream-status" class="chat-status-pill">● LIVE SSE</span>
+                <button type="button" id="chat-toggle-team-panel-btn" class="btn small">Team & Tasks</button>
+              </div>
+            </div>
+
+            <!-- Messages Stream -->
+            <div class="chat-messages-stream" id="chat-messages-stream">
+              <!-- Event Bubbles & Cards -->
+            </div>
+
+            <!-- Composer & Autocomplete -->
+            <div class="chat-composer-container">
+              <div id="mention-autocomplete-menu" class="mention-autocomplete-menu" style="display:none;">
+                <div class="mention-item" data-mention="Claude"><strong>@Claude</strong> — UX & Frontend</div>
+                <div class="mention-item" data-mention="Codex"><strong>@Codex</strong> — Builder & Verification</div>
+                <div class="mention-item" data-mention="Spark"><strong>@Spark</strong> — Research & Specs</div>
+                <div class="mention-item" data-mention="Warden"><strong>@Warden</strong> — Orchestrator</div>
+                <div class="mention-item" data-mention="team"><strong>@team</strong> — All Agents</div>
+              </div>
+              <div class="chat-composer-input-row">
+                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Talk to your team... (e.g. Finish the settings screen, @Claude UX, @Codex verify)"></textarea>
+                <button type="button" id="chat-send-btn" class="btn primary chat-send-btn">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Rail: Team & Active Tasks -->
+          <div class="chat-team-panel" id="chat-team-panel">
+            <div class="chat-panel-section">
+              <h4>ACTIVE TEAM</h4>
+              <div class="team-agent-card">
+                <span class="team-agent-name">Claude UX</span>
+                <span class="team-agent-status status-working">Working</span>
+              </div>
+              <div class="team-agent-card">
+                <span class="team-agent-name">Codex Builder</span>
+                <span class="team-agent-status status-waiting">Waiting</span>
+              </div>
+              <div class="team-agent-card">
+                <span class="team-agent-name">Spark Research</span>
+                <span class="team-agent-status status-working">Working</span>
+              </div>
+              <div class="team-agent-card">
+                <span class="team-agent-name">Warden</span>
+                <span class="team-agent-status status-online">Online</span>
+              </div>
+            </div>
+            <div class="chat-panel-section">
+              <h4>ACTIVE TASKS</h4>
+              <div id="chat-active-tasks-list" class="chat-side-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+            <div class="chat-panel-section">
+              <h4>PENDING APPROVALS</h4>
+              <div id="chat-approvals-list" class="chat-side-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section id="warden-section-captain-desk" class="workspace-section cmd-section" data-section="captain-desk" data-testid="warden-section-captain-desk">
         <div class="captain-desk-container">

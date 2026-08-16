@@ -5694,12 +5694,267 @@
   window.resolveCaptainIssue = resolveCaptainIssue;
   window.openIssueModal = openIssueModal;
 
+  // ---------------------------------------------------------------------------
+  // AGENTIC GROUP CHAT FRONTEND CONTROLLER
+  // ---------------------------------------------------------------------------
+  let currentChatRoomId = "conv_warden_team";
+  let sseEventSource = null;
+
+  async function initGroupChat() {
+    wireGroupChatListeners();
+    await loadGroupChatRooms();
+    await loadGroupChatEvents(currentChatRoomId);
+    connectGroupChatSSE(currentChatRoomId);
+  }
+
+  function wireGroupChatListeners() {
+    const sendBtn = document.getElementById("chat-send-btn");
+    const textarea = document.getElementById("chat-input-textarea");
+    const policySelect = document.getElementById("chat-policy-select");
+    const newRoomBtn = document.getElementById("chat-new-room-btn");
+
+    if (sendBtn) {
+      sendBtn.addEventListener("click", sendHumanChatMessage);
+    }
+    if (textarea) {
+      textarea.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendHumanChatMessage();
+        }
+        handleMentionAutocomplete(e);
+      });
+    }
+    if (policySelect) {
+      policySelect.addEventListener("change", (e) => {
+        console.log("Room policy changed to:", e.target.value);
+      });
+    }
+    if (newRoomBtn) {
+      newRoomBtn.addEventListener("click", async () => {
+        const title = prompt("Enter new Team Room name:");
+        if (title) {
+          try {
+            const resp = await fetch("/api/mcharness/chat/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title, project: "Warden" }),
+            });
+            const res = await resp.json();
+            if (res.ok) {
+              await loadGroupChatRooms();
+            }
+          } catch (err) {
+            console.error("failed to create room", err);
+          }
+        }
+      });
+    }
+
+    // Mention item selection
+    document.querySelectorAll(".mention-item").forEach(item => {
+      item.addEventListener("click", () => {
+        const mentionText = item.getAttribute("data-mention");
+        if (textarea && mentionText) {
+          const val = textarea.value;
+          const lastAt = val.lastIndexOf("@");
+          if (lastAt >= 0) {
+            textarea.value = val.substring(0, lastAt) + "@" + mentionText + " ";
+          } else {
+            textarea.value += " @" + mentionText + " ";
+          }
+          textarea.focus();
+          hideMentionMenu();
+        }
+      });
+    });
+  }
+
+  function handleMentionAutocomplete(e) {
+    const textarea = e.target;
+    const menu = document.getElementById("mention-autocomplete-menu");
+    if (!menu) return;
+
+    if (e.key === "@") {
+      menu.style.display = "block";
+    } else if (e.key === "Escape" || e.key === " ") {
+      menu.style.display = "none";
+    }
+  }
+
+  function hideMentionMenu() {
+    const menu = document.getElementById("mention-autocomplete-menu");
+    if (menu) menu.style.display = "none";
+  }
+
+  async function loadGroupChatRooms() {
+    try {
+      const resp = await fetch("/api/mcharness/chat/conversations?project=Warden");
+      const res = await resp.json();
+      if (res.ok && res.conversations) {
+        renderGroupChatRooms(res.conversations);
+      }
+    } catch (err) {
+      console.error("load rooms error", err);
+    }
+  }
+
+  function renderGroupChatRooms(rooms) {
+    const list = document.getElementById("chat-rooms-list");
+    if (!list) return;
+    list.innerHTML = rooms.map(r => `
+      <div class="chat-room-item ${r.conversation_id === currentChatRoomId ? 'active' : ''}" data-room-id="${r.conversation_id}">
+        <span class="chat-room-name">💬 ${escapeHtml(r.title)}</span>
+        ${r.unread_count > 0 ? `<span class="badge">${r.unread_count}</span>` : ''}
+      </div>
+    `).join("");
+
+    list.querySelectorAll(".chat-room-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const roomId = el.getAttribute("data-room-id");
+        if (roomId && roomId !== currentChatRoomId) {
+          currentChatRoomId = roomId;
+          renderGroupChatRooms(rooms);
+          loadGroupChatEvents(currentChatRoomId);
+          connectGroupChatSSE(currentChatRoomId);
+        }
+      });
+    });
+  }
+
+  async function loadGroupChatEvents(roomId) {
+    try {
+      const resp = await fetch(`/api/mcharness/chat/conversations/${roomId}/events`);
+      const res = await resp.json();
+      if (res.ok && res.events) {
+        renderGroupChatEvents(res.events);
+      }
+    } catch (err) {
+      console.error("load events error", err);
+    }
+  }
+
+  function renderGroupChatEvents(events) {
+    const container = document.getElementById("chat-messages-stream");
+    if (!container) return;
+
+    container.innerHTML = events.map(e => {
+      const isHuman = e.actor_type === "human";
+      const isWarden = e.actor_type === "warden" || e.actor_id === "warden";
+      const rowClass = isHuman ? "human-row" : (isWarden ? "warden-row" : "agent-row");
+      const actorLabel = isHuman ? "Matt" : escapeHtml(e.actor_display_name || e.actor_id);
+      const timeStr = new Date(e.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // Approval Card rendering if approval requested
+      let extraHtml = "";
+      if (e.event_type === "approval_requested" && e.approval_id) {
+        extraHtml = `
+          <div class="approval-card-chat" style="margin-top:8px; padding:10px; background:rgba(0,0,0,0.3); border:1px solid #f59e0b; border-radius:8px;">
+            <div style="font-weight:700; color:#f59e0b;">⚠️ Operator Approval Required</div>
+            <div style="margin:4px 0;">${escapeHtml(e.text)}</div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button type="button" class="btn primary small" onclick="resolveGroupChatApproval('${e.approval_id}', 'approved')">Approve</button>
+              <button type="button" class="btn small" onclick="resolveGroupChatApproval('${e.approval_id}', 'denied')">Deny</button>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="chat-bubble-row ${rowClass}">
+          <span class="chat-actor-label">${actorLabel}</span>
+          <div class="chat-bubble">
+            ${escapeHtml(e.text)}
+            ${extraHtml}
+          </div>
+          <span class="chat-timestamp">${timeStr}</span>
+        </div>
+      `;
+    }).join("");
+
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function sendHumanChatMessage() {
+    const textarea = document.getElementById("chat-input-textarea");
+    if (!textarea) return;
+    const text = textarea.value.trim();
+    if (!text) return;
+
+    textarea.value = "";
+    hideMentionMenu();
+
+    try {
+      const resp = await fetch(`/api/mcharness/chat/conversations/${currentChatRoomId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, actor_id: "matt" }),
+      });
+      const res = await resp.json();
+      if (res.ok) {
+        await loadGroupChatEvents(currentChatRoomId);
+      }
+    } catch (err) {
+      console.error("send message error", err);
+    }
+  }
+
+  function connectGroupChatSSE(roomId) {
+    if (sseEventSource) {
+      sseEventSource.close();
+    }
+    const statusPill = document.getElementById("chat-stream-status");
+    sseEventSource = new EventSource(`/api/mcharness/chat/conversations/${roomId}/stream`);
+
+    sseEventSource.onopen = () => {
+      if (statusPill) {
+        statusPill.textContent = "● LIVE SSE";
+        statusPill.style.color = "#34d399";
+      }
+    };
+
+    sseEventSource.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        loadGroupChatEvents(roomId);
+      } catch (err) {
+        // Heartbeat or pulse
+      }
+    };
+
+    sseEventSource.onerror = () => {
+      if (statusPill) {
+        statusPill.textContent = "● RECONNECTING";
+        statusPill.style.color = "#f59e0b";
+      }
+    };
+  }
+
+  async function resolveGroupChatApproval(approvalId, decision) {
+    try {
+      const resp = await fetch("/api/mcharness/captain/approvals/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approval_id: approvalId, decision, resolver_identity: "matt" }),
+      });
+      const res = await resp.json();
+      if (res.ok) {
+        alert(`Approval ${decision}!`);
+        await loadGroupChatEvents(currentChatRoomId);
+      }
+    } catch (err) {
+      console.error("resolve approval error", err);
+    }
+  }
+  window.resolveGroupChatApproval = resolveGroupChatApproval;
+
   async function init() {
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
     wireCaptainDeskListeners();
-    setActiveSection("mission");
+    initGroupChat();
+    setActiveSection("group-chat");
     await Promise.all([loadLibraryStatus(), loadCaptainDeckStatus(), loadRecentRuns(), loadRecentEvidence(), loadActiveCaptainPlan(), loadMissionWorklog(), loadRecentGates(), loadCaptainDeskData()]);
     if (window.WardenControlRoom && window.WardenControlRoom.refresh) {
       await window.WardenControlRoom.refresh({ quiet: true });
@@ -5715,4 +5970,5 @@
 
   // boot
   init().catch((e) => console.error("init error", e));
+  }
 })();

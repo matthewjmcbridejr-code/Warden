@@ -2880,6 +2880,163 @@ def warden_reconcile(project: str = "", trigger: str = "manual") -> str:
         })
     except Exception as exc:
         return _err("warden_reconcile", str(exc))
+# ---------------------------------------------------------------------------
+# AGENTIC GROUP CHAT / TEAM MAILBOX MCP TOOLS
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_team_rooms(project: str = "Warden") -> str:
+    """List active team chat rooms for the project."""
+    if error := _remote_bootstrap_error("warden_team_rooms"):
+        return _err("warden_team_rooms", error)
+    try:
+        from src.warden.group_chat import GroupChatStore
+        store = GroupChatStore()
+        rooms = store.list_conversations(project=project)
+        return _ok("warden_team_rooms", {
+            "project": project,
+            "count": len(rooms),
+            "rooms": [r.model_dump(mode="json") for r in rooms],
+        })
+    except Exception as exc:
+        return _err("warden_team_rooms", str(exc))
+
+
+@mcp.tool()
+def warden_team_history(
+    conversation_id: str = "conv_warden_team",
+    since_seq: int = 0,
+    limit: int = 50,
+) -> str:
+    """Read recent event history from a team chat room."""
+    if error := _remote_bootstrap_error("warden_team_history"):
+        return _err("warden_team_history", error)
+    try:
+        from src.warden.group_chat import GroupChatStore
+        store = GroupChatStore()
+        events = store.list_events(conversation_id=conversation_id, since_seq=since_seq, limit=limit)
+        return _ok("warden_team_history", {
+            "conversation_id": conversation_id,
+            "since_seq": since_seq,
+            "count": len(events),
+            "events": [e.model_dump(mode="json") for e in events],
+        })
+    except Exception as exc:
+        return _err("warden_team_history", str(exc))
+
+
+@mcp.tool()
+def warden_team_inbox(
+    conversation_id: str = "conv_warden_team",
+    agent_id: str = "",
+) -> str:
+    """Read assigned or mentioned work items for the calling agent in the team room."""
+    if error := _remote_bootstrap_error("warden_team_inbox"):
+        return _err("warden_team_inbox", error)
+    try:
+        from src.warden.group_chat import GroupChatStore
+        caller = _current_caller_identity()
+        target_agent = agent_id or caller.get("client_name") or caller.get("agent_id") or "agent"
+        store = GroupChatStore()
+        inbox_events = store.get_agent_inbox(agent_id=target_agent, conversation_id=conversation_id)
+        return _ok("warden_team_inbox", {
+            "conversation_id": conversation_id,
+            "agent_id": target_agent,
+            "count": len(inbox_events),
+            "events": [e.model_dump(mode="json") for e in inbox_events],
+        })
+    except Exception as exc:
+        return _err("warden_team_inbox", str(exc))
+
+
+@mcp.tool()
+def warden_team_send(
+    message: str,
+    conversation_id: str = "conv_warden_team",
+    project: str = "Warden",
+) -> str:
+    """Send an agent message or progress update to the team chat room."""
+    if error := _remote_bootstrap_error("warden_team_send"):
+        return _err("warden_team_send", error)
+    try:
+        from src.warden.group_chat import GroupChatStore, ChatEvent
+        caller = _current_caller_identity()
+        actor = caller.get("client_name") or caller.get("agent_id") or "agent"
+        store = GroupChatStore()
+        event = ChatEvent(
+            conversation_id=conversation_id,
+            project=project,
+            actor_id=actor,
+            actor_type="agent",
+            event_type="agent_message",
+            text=message,
+        )
+        stored, _ = store.append_event(event)
+        return _ok("warden_team_send", {
+            "conversation_id": conversation_id,
+            "event_id": stored.id,
+            "seq": stored.seq,
+            "actor_id": stored.actor_id,
+            "actor_display_name": stored.actor_display_name,
+            "text": stored.text,
+        })
+    except Exception as exc:
+        return _err("warden_team_send", str(exc))
+
+
+@mcp.tool()
+def warden_team_ack(
+    read_seq: int,
+    conversation_id: str = "conv_warden_team",
+) -> str:
+    """Acknowledge reading room history up to read_seq."""
+    if error := _remote_bootstrap_error("warden_team_ack"):
+        return _err("warden_team_ack", error)
+    try:
+        caller = _current_caller_identity()
+        return _ok("warden_team_ack", {
+            "conversation_id": conversation_id,
+            "read_seq": read_seq,
+            "caller": caller.get("client_name") or "agent",
+            "acknowledged": True,
+        })
+    except Exception as exc:
+        return _err("warden_team_ack", str(exc))
+
+
+@mcp.tool()
+def warden_team_status(
+    status: str,
+    current_task: str = "",
+    conversation_id: str = "conv_warden_team",
+) -> str:
+    """Report agent presence and working state (online, working, waiting, blocked, idle, offline)."""
+    if error := _remote_bootstrap_error("warden_team_status"):
+        return _err("warden_team_status", error)
+    try:
+        from src.warden.group_chat import GroupChatStore, ChatEvent
+        caller = _current_caller_identity()
+        actor = caller.get("client_name") or caller.get("agent_id") or "agent"
+        store = GroupChatStore()
+        event_type = f"agent_{status.lower()}" if status.lower() in ("online", "working", "waiting", "blocked", "idle", "offline") else "agent_working"
+        event = ChatEvent(
+            conversation_id=conversation_id,
+            actor_id=actor,
+            actor_type="agent",
+            event_type=event_type, # type: ignore
+            text=f"Status: {status}" + (f" on task '{current_task}'" if current_task else ""),
+            metadata={"status": status, "current_task": current_task},
+        )
+        stored, _ = store.append_event(event)
+        return _ok("warden_team_status", {
+            "conversation_id": conversation_id,
+            "actor_id": actor,
+            "status": status,
+            "current_task": current_task,
+            "event_id": stored.id,
+        })
+    except Exception as exc:
+        return _err("warden_team_status", str(exc))
 
 
 def main():
