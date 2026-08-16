@@ -1352,14 +1352,17 @@ def warden_bootstrap(
         }
 
         from src.warden.context_protocol import compute_context_revision, get_context_delta
+        from src.warden.grounding import list_claims
         all_mem_dicts = [
             {"memory_id": m.memory_id, "title": m.title or m.summary[:60], "summary": m.summary[:300], "kind": m.kind, "project": m.project_id or m.scope}
             for m in all_memories
         ]
+        claims_list = [c.model_dump(mode="json") for c in list_claims(project=project or "warden")]
         context_revision = compute_context_revision(
             project=project or "warden",
             tasks=coordination["open_tasks"],
             memories=all_mem_dicts,
+            claims=claims_list,
         )
 
         # -------------------------------------------------------------------
@@ -1385,6 +1388,7 @@ def warden_bootstrap(
                     project=project or "warden",
                     tasks=coordination["open_tasks"],
                     memories=all_mem_dicts,
+                    claims=claims_list,
                 )
                 return _ok("warden_bootstrap", {
                     "detail_mode": "auto",
@@ -1531,18 +1535,19 @@ def warden_context_delta(since_revision: str, project: str = "") -> str:
         memories = []
 
     try:
-        b_data = json.loads(warden_board()).get("data", {})
-        open_tasks = b_data.get("open_tasks", [])
+        from src.warden.grounding import list_claims
+        claims = [c.model_dump(mode="json") for c in list_claims(project=proj)]
     except Exception:
-        open_tasks = []
+        claims = []
 
-    curr_rev = compute_context_revision(project=proj, tasks=open_tasks, memories=memories)
+    curr_rev = compute_context_revision(project=proj, tasks=open_tasks, memories=memories, claims=claims)
     delta = get_context_delta(
         since_revision=since_revision,
         current_revision=curr_rev,
         project=proj,
         tasks=open_tasks,
         memories=memories,
+        claims=claims,
     )
     return _ok("warden_context_delta", delta)
 
