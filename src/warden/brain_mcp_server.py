@@ -1349,7 +1349,7 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         context_revision = compute_context_revision(
             project=project or "warden",
             tasks=coordination["open_tasks"],
-            memories=other_memories,
+            memories=recall_results,
         )
 
         if detail_mode == "minimal":
