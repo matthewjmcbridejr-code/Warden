@@ -1458,8 +1458,21 @@ def warden_context_delta(since_revision: str, project: str = "") -> str:
     from src.warden.context_protocol import compute_context_revision, get_context_delta
 
     proj = project or "warden"
-    memories = _recall_memories(project=proj, limit=50)
-    
+    try:
+        store = _store()
+        memories = [
+            {
+                "memory_id": m.memory_id,
+                "title": m.title,
+                "kind": m.kind,
+                "text": m.summary,
+                "project": m.project_id or m.scope,
+            }
+            for m in store.list_memories()
+        ]
+    except Exception:
+        memories = []
+
     try:
         b_data = json.loads(warden_board()).get("data", {})
         open_tasks = b_data.get("open_tasks", [])
