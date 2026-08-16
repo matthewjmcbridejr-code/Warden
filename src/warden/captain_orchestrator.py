@@ -476,20 +476,30 @@ def detect_orphaned_handoffs(project: str = "") -> List[CaptainIssue]:
     return issues
 
 
-def check_client_tool_catalog_freshness(
-    client_id: str, known_count: Optional[int] = None, known_revision: Optional[str] = None
-) -> Dict[str, Any]:
-    """Check if a connected client's catalog matches the current served tool catalog."""
+def _get_served_native_count() -> int:
+    """Returns current count of served native Warden tools."""
     try:
         from src.warden.brain_mcp_server import mcp
         from src.warden.mcp_hub import hub_status
         hs = hub_status()
         upstream_tool_names = set(hs.hub_tool_names)
-        native_count = len([name for name in mcp._tool_manager._tools if name not in upstream_tool_names])
+        return len([name for name in mcp._tool_manager._tools if name not in upstream_tool_names])
+    except Exception:
+        return 64
+
+
+def check_client_tool_catalog_freshness(
+    client_id: str, known_count: Optional[int] = None, known_revision: Optional[str] = None
+) -> Dict[str, Any]:
+    """Check if a connected client's catalog matches the current served tool catalog."""
+    try:
+        from src.warden.mcp_hub import hub_status
+        hs = hub_status()
+        native_count = _get_served_native_count()
         total_count = native_count + hs.hub_tool_count
     except Exception:
-        native_count = 60
-        total_count = 103
+        native_count = 64
+        total_count = 107
 
     is_stale = False
     reasons = []
