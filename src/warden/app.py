@@ -85,6 +85,11 @@ def create_app() -> FastAPI:
         # Fallback if Marius is not fully implemented or has missing deps
         print(f"Marius integration skipped: {e}")
 
+    @app.get("/.well-known/agent.json")
+    def well_known_a2a_agent_card():
+        from src.warden.agent_registry import get_warden_a2a_agent_card
+        return get_warden_a2a_agent_card()
+
     if _WEB_DIR.exists():
         app.mount("/web", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
     return app
