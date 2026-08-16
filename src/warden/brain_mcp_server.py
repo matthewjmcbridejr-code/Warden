@@ -1166,43 +1166,49 @@ def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
 
 
 @mcp.tool()
-def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") -> str:
-    """THE tool to call first. Returns a single agent-ready startup packet combining:
-    - Who the operator is and their current priorities
-    - Active projects and preferences
-    - Recent workstream (what was worked on last)
-    - Relevant memories for this task
-    - Relevant docs from the brain
-    - Constraints and known failures
-    - Recommended next action
-    - Proof expectations
+def warden_bootstrap(
+    task: str = "",
+    project: str = "",
+    mode: str = "auto",
+    known_context_revision: str | None = None,
+    known_tool_catalog_revision: str | None = None,
+    known_profile_revision: str | None = None,
+    detail: str | None = None,
+) -> str:
+    """THE tool to call first. Returns an efficient, revision-aware startup packet.
 
     Args:
         task: What you're about to work on. May be empty during cold start.
         project: Project name (e.g. 'Warden', 'Grademy') — auto-detected if omitted
-        detail: 'full' (default, rich context pack) or 'minimal' (compact header payload)
+        mode: 'auto' (default, revision-aware compact/delta), 'minimal' (compact header), or 'full' (deep pack)
+        known_context_revision: Last known context_revision string for warm delta reconnects
+        known_tool_catalog_revision: Last known tool_catalog_revision hash for catalog delta check
+        known_profile_revision: Last known profile_revision hash for operator profile delta check
+        detail: Backwards-compatible alias for mode ('full' or 'minimal')
     """
     try:
         import json as _json
 
         task = task.strip()
         project = project.strip()
-        detail_mode = (detail or "full").strip().lower()
+        eff_mode = (detail if detail is not None else mode).strip().lower()
         if not project and task:
             project = _detect_project(task, None) or ""
         orientation_query = task or (
             "latest current priorities constraints decisions failures handoffs active work"
         )
 
-        # 1. Personal profile
+        # 1. Personal profile & profile revision
         seed_if_missing()
         profile = load_profile()
+        from src.warden.profile_protocol import compute_profile_revision
+        profile_revision = compute_profile_revision(profile)
 
         # 2. Workstream
-        workstream = get_workstream(limit=8 if detail_mode == "full" else 3, project=project or None)
+        workstream = get_workstream(limit=8 if eff_mode == "full" else 3, project=project or None)
 
-        # 3. Recall
-        limit = 10 if detail_mode == "full" else 4
+        # 3. Memory recall & guardrails
+        limit = 10 if eff_mode == "full" else 4
         store = _store()
         recall_results = _semantic_recall(orientation_query, limit)
         if not recall_results:
@@ -1239,7 +1245,7 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
                 "tags": memory.tags,
                 "updated_at": memory.updated_at.isoformat(),
             })
-            if len(recent_guardrails) >= (12 if detail_mode == "full" else 4):
+            if len(recent_guardrails) >= (12 if eff_mode == "full" else 4):
                 break
 
         merged_recall: list[dict[str, Any]] = []
@@ -1251,7 +1257,7 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
             if memory_id:
                 seen_memory_ids.add(memory_id)
             merged_recall.append(row)
-        recall_results = merged_recall[:20 if detail_mode == "full" else 6]
+        recall_results = merged_recall[:20 if eff_mode == "full" else 6]
 
         constraints = [r for r in recall_results if r.get("kind") in ("constraint", "blocked_attempt")]
         failures = [r for r in recall_results if r.get("kind") == "failure"]
@@ -1310,7 +1316,7 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         freshest_memory_at = all_memories[0].updated_at.isoformat() if all_memories else None
         profile_updated_at = profile.get("last_updated") or profile.get("updated_at")
 
-        service_catalog = _service_catalog_data(verify_live_mail=(detail_mode == "full"))
+        service_catalog = _service_catalog_data(verify_live_mail=(eff_mode == "full"))
         _mark_caller_bootstrapped()
 
         # Tool revision metadata
@@ -1341,11 +1347,11 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
             "version": "1.0.0",
             "native_tool_count": native_count,
             "total_tool_count": total_count,
-            "tool_count": native_count,  # Backwards-compatible field reflecting native served tools
+            "tool_count": native_count,
             "revision_hash": rev_hash,
         }
 
-        from src.warden.context_protocol import compute_context_revision
+        from src.warden.context_protocol import compute_context_revision, get_context_delta
         all_mem_dicts = [
             {"memory_id": m.memory_id, "title": m.title or m.summary[:60], "summary": m.summary[:300], "kind": m.kind, "project": m.project_id or m.scope}
             for m in all_memories
@@ -1356,13 +1362,53 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
             memories=all_mem_dicts,
         )
 
-        if detail_mode == "minimal":
+        # -------------------------------------------------------------------
+        # AUTO MODE: RECONNECT REVISION CHECK (< 300 BYTES NO-CHANGE)
+        # -------------------------------------------------------------------
+        if eff_mode == "auto" and known_context_revision:
+            if known_context_revision == context_revision:
+                return _ok("warden_bootstrap", {
+                    "detail_mode": "auto",
+                    "context_changed": False,
+                    "context_revision": context_revision,
+                    "profile_changed": (known_profile_revision != profile_revision),
+                    "profile_revision": profile_revision,
+                    "tool_catalog_changed": (known_tool_catalog_revision != rev_hash),
+                    "tool_catalog_revision": tool_catalog_revision if known_tool_catalog_revision != rev_hash else {"revision_hash": rev_hash},
+                    "reconciled_open_task_count": len(coordination["open_tasks"]),
+                    "active_claim_count": len(coordination.get("active_claims", [])),
+                })
+            else:
+                delta = get_context_delta(
+                    since_revision=known_context_revision,
+                    current_revision=context_revision,
+                    project=project or "warden",
+                    tasks=coordination["open_tasks"],
+                    memories=all_mem_dicts,
+                )
+                return _ok("warden_bootstrap", {
+                    "detail_mode": "auto",
+                    "context_changed": True,
+                    "context_revision": context_revision,
+                    "profile_changed": (known_profile_revision != profile_revision),
+                    "profile_revision": profile_revision,
+                    "tool_catalog_changed": (known_tool_catalog_revision != rev_hash),
+                    "tool_catalog_revision": tool_catalog_revision if known_tool_catalog_revision != rev_hash else {"revision_hash": rev_hash},
+                    "context_delta": delta,
+                    "reconciled_open_task_count": len(coordination["open_tasks"]),
+                })
+
+        # -------------------------------------------------------------------
+        # COLD START / MINIMAL MODE (< 2 KB - 3 KB MAX)
+        # -------------------------------------------------------------------
+        if eff_mode in ("auto", "minimal"):
             return _ok("warden_bootstrap", {
-                "detail_mode": "minimal",
+                "detail_mode": eff_mode,
                 "task": task,
                 "project": project or "warden",
                 "caller": caller,
                 "context_revision": context_revision,
+                "profile_revision": profile_revision,
                 "tool_catalog_revision": tool_catalog_revision,
                 "operator_summary": {
                     "name": profile.get("name"),
@@ -1374,6 +1420,13 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
                 "active_claims": coordination.get("active_claims", []),
                 "stale_claims": coordination.get("stale_claims", []),
                 "reconciled_open_task_count": len(coordination["open_tasks"]),
+                "available_context_counts": {
+                    "decisions": len([m for m in all_memories if m.kind == "decision"]),
+                    "constraints": len([m for m in all_memories if m.kind in ("constraint", "blocked_attempt")]),
+                    "proofs": len([m for m in all_memories if m.kind == "proof"]),
+                    "docs": 5,
+                },
+                "recommended_next_action": next_action,
             })
 
         # Context pack (formatted text) for full mode
