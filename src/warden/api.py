@@ -4951,8 +4951,36 @@ def api_captain_desk(project: str = ""):
     noticed_items = [i.model_dump(mode="json") for i in open_issues]
     fixed_items = [i.model_dump(mode="json") for i in resolved_issues[:10]]
 
+    from src.warden.capability_grants import ControlPlaneStore
+    from src.warden.policy_engine import PolicyEngine
+    cp_store = ControlPlaneStore()
+    pe = PolicyEngine()
+
+    pending_approvals = cp_store.list_pending_approvals()
+    active_grants = cp_store.list_active_grants()
+
+    approval_items = [
+        {
+            "kind": "approval_request",
+            "approval_id": a.approval_id,
+            "action_id": a.action_id,
+            "agent_id": a.agent_id,
+            "summary": a.summary,
+            "risk_class": a.risk_class,
+            "resource": a.resource,
+            "project": a.project,
+            "reason": a.reason,
+            "status": a.status,
+            "requested_at": a.requested_at,
+            "expires_at": a.expires_at,
+        }
+        for a in pending_approvals
+    ]
+
     operator_issues = [i.model_dump(mode="json") for i in open_issues if i.requires_operator or i.severity in ("high", "critical")]
-    if not operator_issues:
+    all_needs_you_items = approval_items + operator_issues
+
+    if not all_needs_you_items:
         needs_you = {
             "empty": True,
             "title": "Nothing needs you.",
@@ -4962,8 +4990,8 @@ def api_captain_desk(project: str = ""):
     else:
         needs_you = {
             "empty": False,
-            "title": f"{len(operator_issues)} item(s) require operator decision.",
-            "items": operator_issues
+            "title": f"{len(all_needs_you_items)} item(s) require operator decision.",
+            "items": all_needs_you_items
         }
 
     from src.warden.context_protocol import compute_context_revision
@@ -5044,6 +5072,14 @@ def api_captain_desk(project: str = ""):
             "open_tasks": open_tasks,
             "active_claims": active_claims,
         },
+        "control_plane": {
+            "policy_revision": pe.policy_revision,
+            "status": "Operational",
+            "pending_approval_count": len(pending_approvals),
+            "active_grant_count": len(active_grants),
+            "active_grants": [g.model_dump(mode="json") for g in active_grants],
+            "pending_approvals": approval_items,
+        },
         "services": {
             "native_tool_count": native_cnt,
             "upstream_tool_count": upstream_cnt,
@@ -5059,6 +5095,33 @@ def api_captain_desk(project: str = ""):
         },
         "activity": activity_items,
     }
+
+
+class ResolveApprovalPayload(BaseModel):
+    approval_id: str
+    verdict: Literal["approved", "rejected"]
+    resolver: str = "operator"
+
+
+@mcharness_router.post("/captain/approvals/resolve")
+def api_resolve_approval(body: ResolveApprovalPayload):
+    """Operator-authenticated endpoint to resolve pending approval requests and issue grants."""
+    from src.warden.capability_grants import ControlPlaneStore
+    store = ControlPlaneStore()
+    try:
+        app_res, grant = store.resolve_approval(
+            approval_id=body.approval_id,
+            verdict=body.verdict,
+            resolver_identity=body.resolver,
+            is_agent=False, # Operator call
+        )
+        return {
+            "ok": True,
+            "approval": app_res.model_dump(mode="json"),
+            "grant": grant.model_dump(mode="json") if grant else None,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @mcharness_router.post("/captain/ask")

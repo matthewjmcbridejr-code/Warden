@@ -149,6 +149,119 @@ def run_golden_eval_suite(tmp_dir: Any = None) -> AgentOpsReport:
         details={"halt_behavior": "budget.exhausted halts execution"}
     ))
 
+    # EVAL 8 — SAFE READ (ALLOW)
+    from src.warden.action_model import WardenActionV1
+    from src.warden.policy_engine import PolicyEngine
+    pe = PolicyEngine()
+    read_act = WardenActionV1.create("warden_health", risk_class="READ")
+    read_dec = pe.evaluate(read_act)
+    e8_pass = (read_dec.verdict == "ALLOW")
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_8",
+        eval_name="EVAL 8 — Safe Read Operation",
+        level="component",
+        passed=e8_pass,
+        score=1.0 if e8_pass else 0.0,
+        details={"verdict": read_dec.verdict}
+    ))
+
+    # EVAL 9 — DESTRUCTIVE WRITE (ASK)
+    dest_act = WardenActionV1.create("warden_cancel_task", risk_class="DESTRUCTIVE")
+    dest_dec = pe.evaluate(dest_act)
+    e9_pass = (dest_dec.verdict == "ASK" and dest_dec.capability_grant_required is True)
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_9",
+        eval_name="EVAL 9 — Destructive Write Approval Gate",
+        level="component",
+        passed=e9_pass,
+        score=1.0 if e9_pass else 0.0,
+        details={"verdict": dest_dec.verdict}
+    ))
+
+    # EVAL 10 — APPROVAL GRANT ISSUANCE
+    from src.warden.capability_grants import ControlPlaneStore
+    cp_store = ControlPlaneStore()
+    app10 = cp_store.create_approval(dest_act, dest_dec)
+    app10_res, grt10 = cp_store.resolve_approval(app10.approval_id, verdict="approved", resolver_identity="operator")
+    e10_pass = (grt10 is not None and grt10.status == "active")
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_10",
+        eval_name="EVAL 10 — Scoped Capability Grant Issuance",
+        level="trajectory",
+        passed=e10_pass,
+        score=1.0 if e10_pass else 0.0,
+        details={"grant_status": grt10.status if grt10 else None}
+    ))
+
+    # EVAL 11 — ACTION MUTATION AFTER APPROVAL
+    grt11 = cp_store.issue_grant_for_action(dest_act, decision_id=dest_dec.decision_id)
+    mutated_act = WardenActionV1.create("warden_cancel_task", arguments={"task_id": "mutated_99"}, risk_class="DESTRUCTIVE")
+    e11_pass = (grt11.is_valid_for(mutated_act) is False)
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_11",
+        eval_name="EVAL 11 — Action Mutation Post-Approval Denial",
+        level="trajectory",
+        passed=e11_pass,
+        score=1.0 if e11_pass else 0.0,
+        details={"mutation_valid": grt11.is_valid_for(mutated_act)}
+    ))
+
+    # EVAL 12 — GRANT EXPIRY
+    grt12 = cp_store.issue_grant_for_action(dest_act, decision_id=dest_dec.decision_id)
+    grt12.expires_at = "2020-01-01T00:00:00+00:00"
+    e12_pass = (grt12.is_valid_for(dest_act) is False)
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_12",
+        eval_name="EVAL 12 — Expired Capability Grant Denial",
+        level="component",
+        passed=e12_pass,
+        score=1.0 if e12_pass else 0.0,
+        details={"expired_valid": grt12.is_valid_for(dest_act)}
+    ))
+
+    # EVAL 13 — AGENT SELF-APPROVAL DENIAL
+    e13_pass = False
+    try:
+        app13 = cp_store.create_approval(dest_act, dest_dec)
+        cp_store.resolve_approval(app13.approval_id, verdict="approved", resolver_identity="agent_bot", is_agent=True)
+    except ValueError:
+        e13_pass = True
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_13",
+        eval_name="EVAL 13 — Agent Self-Approval Denial",
+        level="outcome",
+        passed=e13_pass,
+        score=1.0 if e13_pass else 0.0,
+        details={"self_approval_blocked": e13_pass}
+    ))
+
+    # EVAL 14 — SUPERSEDED TASK REVOKES GRANT
+    task_act = WardenActionV1.create("warden_cancel_task", task_id="tsk_eval_14", risk_class="DESTRUCTIVE")
+    grt14 = cp_store.issue_grant_for_action(task_act, decision_id="dec14")
+    cp_store.revoke_grants_for_task("tsk_eval_14")
+    e14_pass = (grt14.status == "revoked" and grt14.is_valid_for(task_act) is False)
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_14",
+        eval_name="EVAL 14 — Task Supersedence Revokes Grant",
+        level="outcome",
+        passed=e14_pass,
+        score=1.0 if e14_pass else 0.0,
+        details={"revoked_status": grt14.status}
+    ))
+
+    # EVAL 15 — MONITOR MODE
+    unknown_act = WardenActionV1.create("warden_unknown_tool", risk_class="LOW_WRITE")
+    unknown_dec = pe.evaluate(unknown_act)
+    e15_pass = (unknown_dec.verdict in ("ALLOW", "MONITOR"))
+    results.append(EvalResult(
+        eval_id=f"{eval_id_base}_15",
+        eval_name="EVAL 15 — Monitor Mode Baseline",
+        level="component",
+        passed=e15_pass,
+        score=1.0 if e15_pass else 0.0,
+        details={"verdict": unknown_dec.verdict}
+    ))
+
     passed_count = sum(1 for r in results if r.passed)
     failed_count = len(results) - passed_count
 
