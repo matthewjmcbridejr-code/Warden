@@ -23,6 +23,7 @@ ALL_TASK_STATUSES = (
     "blocked",
     "needs_review",
     "completed",
+    "failed",
     "cancelled",
     "superseded",
 )
@@ -164,6 +165,11 @@ def cancel_task(task_id: str, reason: str, actor: str = "") -> Dict[str, Any]:
 
     clean_task["_status"] = "cancelled"
     clean_task["_path"] = str(dest_path)
+    try:
+        from src.warden.captain_orchestrator import on_state_event
+        on_state_event("task.cancelled", project=clean_task.get("project") or "warden")
+    except Exception:
+        pass
     return clean_task
 
 
@@ -200,6 +206,11 @@ def supersede_task(
 
     clean_task["_status"] = "superseded"
     clean_task["_path"] = str(dest_path)
+    try:
+        from src.warden.captain_orchestrator import on_state_event
+        on_state_event("task.superseded", project=clean_task.get("project") or "warden")
+    except Exception:
+        pass
     return clean_task
 
 

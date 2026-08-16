@@ -191,3 +191,48 @@ def test_captain_inference_providers():
         assert vertex_assessment.classification == "superseded_task"
 
     asyncio.run(_run())
+
+
+def test_detect_duplicate_active_work(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    draft_dir = board_root / "tasks" / "draft"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+
+    (draft_dir / "task-1.json").write_text(json.dumps({"task_id": "task-1", "title": "Build Feature Alpha", "status": "draft"}))
+    (draft_dir / "task-2.json").write_text(json.dumps({"task_id": "task-2", "title": "Build Feature Alpha", "status": "draft"}))
+
+    from src.warden.captain_orchestrator import detect_duplicate_active_work
+    issues = detect_duplicate_active_work()
+    assert len(issues) >= 1
+    assert issues[0].kind == "duplicate_work"
+
+
+def test_detect_orphaned_handoffs(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    review_dir = board_root / "tasks" / "needs_review"
+    handoffs_dir = board_root / "handoffs"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    handoffs_dir.mkdir(parents=True, exist_ok=True)
+
+    task_id = "task-orphaned-1"
+    (review_dir / f"{task_id}.json").write_text(json.dumps({"task_id": task_id, "title": "Orphaned Task", "status": "needs_review", "claimed_by": "codex"}))
+    (handoffs_dir / f"handoff_{task_id}.json").write_text(json.dumps({"task": task_id, "from_agent": "codex", "to_agent": "gemini"}))
+
+    from src.warden.captain_orchestrator import detect_orphaned_handoffs
+    issues = detect_orphaned_handoffs()
+    assert len(issues) >= 1
+    assert issues[0].kind == "orphaned_handoff"
+
+
+def test_detect_failed_or_stale_proofs(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    failed_dir = board_root / "tasks" / "failed"
+    failed_dir.mkdir(parents=True, exist_ok=True)
+
+    (failed_dir / "task-failed-1.json").write_text(json.dumps({"task_id": "task-failed-1", "title": "Failing Task", "status": "failed"}))
+
+    from src.warden.captain_orchestrator import detect_failed_or_stale_proofs
+    issues = detect_failed_or_stale_proofs()
+    assert len(issues) >= 1
+    assert issues[0].kind == "proof_failed"
+

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import uuid
 from abc import ABC, abstractmethod
@@ -357,6 +358,183 @@ def detect_service_degradation(project: str = "") -> List[CaptainIssue]:
     return issues
 
 
+def detect_conflicting_decisions(project: str = "") -> List[CaptainIssue]:
+    """Detect conflicting decision memories recorded in Warden Brain."""
+    issues: List[CaptainIssue] = []
+    try:
+        from src.warden.workbench import STORE as WORKBENCH_STORE
+        memories = WORKBENCH_STORE.search_memories("decision", limit=50)
+        decisions = [m.model_dump(mode="json") for m in memories if getattr(m, "kind", None) == "decision"]
+
+        for i, d1 in enumerate(decisions):
+            c1 = ((d1.get("title") or "") + " " + (d1.get("content") or "")).lower()
+            for d2 in decisions[i + 1 :]:
+                c2 = ((d2.get("title") or "") + " " + (d2.get("content") or "")).lower()
+
+                # Spark architecture conflict check
+                if ("spark" in c1 and "drive" in c1 and "mcp" not in c1) and ("spark" in c2 and "native" in c2 and "mcp" in c2):
+                    issue_id = "iss_conflicting_decisions_spark"
+                    existing = get_issue(issue_id)
+                    if not (existing and existing.status == "resolved"):
+                        issue = CaptainIssue(
+                            issue_id=issue_id,
+                            kind="contradictory_state",
+                            severity="high",
+                            status="open",
+                            project=project or "warden",
+                            subjects=[str(d1.get("memory_id") or ""), str(d2.get("memory_id") or "")],
+                            evidence=[{"decision_1": d1}, {"decision_2": d2}],
+                            summary=f"Conflicting decisions found: '{d1.get('title')}' vs '{d2.get('title')}'",
+                            recommended_action="Supersede old architecture decision with newer native MCP decision.",
+                            confidence=1.0,
+                            requires_inference=False,
+                            requires_operator=True,
+                        )
+                        issues.append(save_issue(issue))
+    except Exception:
+        pass
+    return issues
+
+
+def detect_duplicate_active_work(project: str = "") -> List[CaptainIssue]:
+    """Detect multiple active tasks targeting identical objectives or subjects."""
+    issues: List[CaptainIssue] = []
+    tasks = list_tasks(project=project)
+    active = [t for t in tasks if t.get("_status") in ("draft", "assigned", "claimed", "needs_review")]
+
+    seen_titles: Dict[str, Dict[str, Any]] = {}
+    for task in active:
+        title_slug = re.sub(r"[^a-z0-9]+", "-", str(task.get("title") or "").lower().strip())
+        if not title_slug:
+            continue
+        if title_slug in seen_titles:
+            other = seen_titles[title_slug]
+            task_id = str(task.get("task_id") or "")
+            other_id = str(other.get("task_id") or "")
+            issue_id = f"iss_duplicate_{task_id}_{other_id}"
+            existing = get_issue(issue_id)
+            if not (existing and existing.status == "resolved"):
+                issue = CaptainIssue(
+                    issue_id=issue_id,
+                    kind="duplicate_work",
+                    severity="medium",
+                    status="open",
+                    project=project or "warden",
+                    subjects=[task_id, other_id],
+                    evidence=[{"task_1": task}, {"task_2": other}],
+                    summary=f"Duplicate active work detected: '{task.get('title')}' ({task_id}) and ({other_id}).",
+                    recommended_action=f"Cancel or supersede duplicate task '{task_id}'.",
+                    confidence=0.9,
+                    requires_inference=False,
+                    requires_operator=False,
+                )
+                issues.append(save_issue(issue))
+        else:
+            seen_titles[title_slug] = task
+    return issues
+
+
+def detect_orphaned_handoffs(project: str = "") -> List[CaptainIssue]:
+    """Detect handoffs waiting for pickup without a claim by target agent."""
+    issues: List[CaptainIssue] = []
+    board = get_board_root()
+    handoffs_dir = board / "handoffs"
+    if not handoffs_dir.exists():
+        return issues
+
+    open_tasks = list_tasks(project=project)
+    active_task_ids = {t.get("task_id"): t for t in open_tasks if t.get("_status") in ("needs_review", "assigned")}
+
+    for h_file in handoffs_dir.glob("*.json"):
+        try:
+            h_data = json.loads(h_file.read_text(encoding="utf-8"))
+            task_id = h_data.get("task")
+            to_agent = h_data.get("to_agent")
+            if task_id in active_task_ids:
+                task = active_task_ids[task_id]
+                if task.get("_status") == "needs_review" and task.get("claimed_by") != to_agent:
+                    issue_id = f"iss_orphaned_handoff_{task_id}_{to_agent}"
+                    existing = get_issue(issue_id)
+                    if not (existing and existing.status == "resolved"):
+                        issue = CaptainIssue(
+                            issue_id=issue_id,
+                            kind="orphaned_handoff",
+                            severity="medium",
+                            status="open",
+                            project=project or "warden",
+                            subjects=[task_id, f"agent:{to_agent}"],
+                            evidence=[{"handoff": h_data}, {"task": task}],
+                            summary=f"Handoff for task '{task_id}' to agent '{to_agent}' remains unclaimed.",
+                            recommended_action=f"Agent '{to_agent}' should claim task '{task_id}' or reassign.",
+                            confidence=1.0,
+                            requires_inference=False,
+                            requires_operator=False,
+                        )
+                        issues.append(save_issue(issue))
+        except Exception:
+            continue
+    return issues
+
+
+def detect_tool_surface_drift(project: str = "") -> List[CaptainIssue]:
+    """Detect connected MCP clients serving stale or mismatched tool counts."""
+    issues: List[CaptainIssue] = []
+    try:
+        from src.warden.brain_mcp_server import mcp
+        native_count = len(mcp._tool_manager._tools)
+        expected_native_count = 60
+        if native_count != expected_native_count:
+            issue_id = "iss_tool_surface_drift"
+            existing = get_issue(issue_id)
+            if not (existing and existing.status == "resolved"):
+                issue = CaptainIssue(
+                    issue_id=issue_id,
+                    kind="tool_surface_stale",
+                    severity="low",
+                    status="open",
+                    project=project or "warden",
+                    subjects=["mcp:tool_surface"],
+                    evidence=[{"current_native_tools": native_count, "expected_native_tools": expected_native_count}],
+                    summary=f"Native MCP tool surface drift detected ({native_count} tools registered vs {expected_native_count} expected).",
+                    recommended_action="Emit tool catalog list_changed notification to connected clients.",
+                    confidence=1.0,
+                    requires_inference=False,
+                    requires_operator=False,
+                )
+                issues.append(save_issue(issue))
+    except Exception:
+        pass
+    return issues
+
+
+def detect_failed_or_stale_proofs(project: str = "") -> List[CaptainIssue]:
+    """Detect tasks or runs with failing test evidence or blocked proof gates."""
+    issues: List[CaptainIssue] = []
+    tasks = list_tasks(project=project)
+    failed_tasks = [t for t in tasks if t.get("_status") in ("blocked", "failed")]
+    for task in failed_tasks:
+        task_id = str(task.get("task_id") or "")
+        issue_id = f"iss_proof_failed_{task_id}"
+        existing = get_issue(issue_id)
+        if not (existing and existing.status == "resolved"):
+            issue = CaptainIssue(
+                issue_id=issue_id,
+                kind="proof_failed",
+                severity="high",
+                status="open",
+                project=project or "warden",
+                subjects=[task_id],
+                evidence=[{"task": task}],
+                summary=f"Task '{task.get('title')}' ({task_id}) failed verification or proof gate.",
+                recommended_action=f"Inspect failure evidence for task '{task_id}' and reassign or fix.",
+                confidence=1.0,
+                requires_inference=False,
+                requires_operator=False,
+            )
+            issues.append(save_issue(issue))
+    return issues
+
+
 # ---------------------------------------------------------------------------
 # Unified Reconciler Engine
 # ---------------------------------------------------------------------------
@@ -371,11 +549,21 @@ def reconcile(project: str = "", trigger: str = "") -> List[CaptainIssue]:
 
     all_issues.extend(detect_superseded_tasks(project=project))
     all_issues.extend(detect_stale_claims(project=project))
+    all_issues.extend(detect_conflicting_decisions(project=project))
+    all_issues.extend(detect_duplicate_active_work(project=project))
+    all_issues.extend(detect_orphaned_handoffs(project=project))
+    all_issues.extend(detect_tool_surface_drift(project=project))
+    all_issues.extend(detect_failed_or_stale_proofs(project=project))
     all_issues.extend(detect_dirty_worktrees(project=project))
     all_issues.extend(detect_service_degradation(project=project))
 
     log.info(f"Captain reconciliation run (trigger={trigger or 'manual'}): {len(all_issues)} issues active.")
     return all_issues
+
+
+def on_state_event(event_type: str, project: str = "", payload: Optional[Dict[str, Any]] = None) -> List[CaptainIssue]:
+    """Event handler entrypoint for state transitions (e.g. task.created, decision.created)."""
+    return reconcile(project=project, trigger=event_type)
 
 
 # ---------------------------------------------------------------------------
