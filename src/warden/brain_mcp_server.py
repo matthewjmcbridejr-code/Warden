@@ -1345,12 +1345,21 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
             "revision_hash": rev_hash,
         }
 
+        from src.warden.context_protocol import compute_context_revision
+        context_revision = compute_context_revision(
+            project=project or "warden",
+            tasks=coordination["open_tasks"],
+            memories=other_memories,
+        )
+
         if detail_mode == "minimal":
             return _ok("warden_bootstrap", {
                 "detail_mode": "minimal",
                 "task": task,
                 "project": project or "warden",
                 "caller": caller,
+                "context_revision": context_revision,
+                "tool_catalog_revision": tool_catalog_revision,
                 "operator_summary": {
                     "name": profile.get("name"),
                     "email": profile.get("email"),
@@ -1359,11 +1368,8 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
                 "critical_constraints": [c.get("title") for c in constraints[:3]],
                 "newest_decisions": [m.get("title") for m in other_memories if m.get("kind") == "decision"][:3],
                 "active_claims": coordination.get("active_claims", []),
-                "key_blockers": [f.get("title") for f in failures[:3]],
-                "service_summary": list(service_catalog.keys()) if isinstance(service_catalog, dict) else [],
-                "tool_catalog_revision": tool_catalog_revision,
-                "recommended_next_action": next_action,
-                "instruction": "Call warden_bootstrap(detail='full') for deep context pack and complete doc search.",
+                "stale_claims": coordination.get("stale_claims", []),
+                "reconciled_open_task_count": len(coordination["open_tasks"]),
             })
 
         # Context pack (formatted text) for full mode
@@ -1393,13 +1399,13 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
                 "The profile predates current memory. Treat recent constraints and decisions as newer "
                 "operational truth where they conflict with profile fields."
             )
-
         return _ok("warden_bootstrap", {
             "detail_mode": "full",
             "task": task,
             "project": project or None,
             "session_id": caller["session_id"],
             "caller": caller,
+            "context_revision": context_revision,
             "tool_catalog_revision": tool_catalog_revision,
             "protocol": {
                 "required_order": [
@@ -1442,6 +1448,32 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         })
     except Exception as exc:
         return _err("warden_bootstrap", str(exc))
+
+
+@mcp.tool()
+def warden_context_delta(since_revision: str, project: str = "") -> str:
+    """Returns a revisioned context delta payload comparing since_revision to current project context."""
+    _require_bootstrapped()
+    from src.warden.context_protocol import compute_context_revision, get_context_delta
+
+    proj = project or "warden"
+    memories = _recall_memories(project=proj, limit=50)
+    
+    try:
+        b_data = json.loads(warden_board()).get("data", {})
+        open_tasks = b_data.get("open_tasks", [])
+    except Exception:
+        open_tasks = []
+
+    curr_rev = compute_context_revision(project=proj, tasks=open_tasks, memories=memories)
+    delta = get_context_delta(
+        since_revision=since_revision,
+        current_revision=curr_rev,
+        project=proj,
+        tasks=open_tasks,
+        memories=memories,
+    )
+    return _ok("warden_context_delta", delta)
 
 
 # ---------------------------------------------------------------------------
