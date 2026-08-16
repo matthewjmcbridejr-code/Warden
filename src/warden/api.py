@@ -4807,6 +4807,105 @@ def post_cd_task_failure(task_id: str, body: _FailureBody):
     return {"ok": True, "task": task}
 
 
+# ---------------------------------------------------------------------------
+# Task Lifecycle & Captain Orchestrator API Routes
+# ---------------------------------------------------------------------------
+
+class TaskUpdatePayload(BaseModel):
+    updates: dict = {}
+    actor: str = ""
+
+class TaskCancelPayload(BaseModel):
+    reason: str
+    actor: str = ""
+
+class TaskSupersedePayload(BaseModel):
+    reason: str
+    actor: str = ""
+    superseded_by_task: str = ""
+    superseded_by_decision: str = ""
+
+class IssueResolvePayload(BaseModel):
+    resolution: str
+    actor: str = ""
+
+class ReconcilePayload(BaseModel):
+    project: str = ""
+    trigger: str = "manual"
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/update")
+def api_update_task(task_id: str, body: TaskUpdatePayload):
+    from src.warden.board import update_task
+    try:
+        updated = update_task(task_id, body.updates, actor=body.actor)
+        return {"ok": True, "task": updated}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/cancel")
+def api_cancel_task(task_id: str, body: TaskCancelPayload):
+    from src.warden.board import cancel_task
+    try:
+        cancelled = cancel_task(task_id, body.reason, actor=body.actor)
+        return {"ok": True, "task": cancelled}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/supersede")
+def api_supersede_task(task_id: str, body: TaskSupersedePayload):
+    from src.warden.board import supersede_task
+    try:
+        superseded = supersede_task(
+            task_id,
+            body.reason,
+            actor=body.actor,
+            superseded_by_task=body.superseded_by_task,
+            superseded_by_decision=body.superseded_by_decision,
+        )
+        return {"ok": True, "task": superseded}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.get("/warden/board/tasks/{task_id}/revalidate")
+def api_revalidate_task(task_id: str):
+    from src.warden.board import revalidate_task_or_claim
+    return {"ok": True, "result": revalidate_task_or_claim(task_id)}
+
+@mcharness_router.get("/warden/orchestrator/status")
+def api_orchestrator_status(project: str = ""):
+    from src.warden.captain_orchestrator import list_issues
+    issues = list_issues(project=project, status="open")
+    return {"ok": True, "active_issues_count": len(issues), "issues": [i.model_dump(mode="json") for i in issues]}
+
+@mcharness_router.get("/warden/orchestrator/issues")
+def api_list_issues(project: str = "", status: str = "", kind: str = ""):
+    from src.warden.captain_orchestrator import list_issues
+    issues = list_issues(project=project, status=status, kind=kind)
+    return {"ok": True, "count": len(issues), "issues": [i.model_dump(mode="json") for i in issues]}
+
+@mcharness_router.get("/warden/orchestrator/issues/{issue_id}")
+def api_get_issue(issue_id: str):
+    from src.warden.captain_orchestrator import get_issue
+    issue = get_issue(issue_id)
+    if not issue:
+        raise HTTPException(404, f"Issue {issue_id} not found.")
+    return {"ok": True, "issue": issue.model_dump(mode="json")}
+
+@mcharness_router.post("/warden/orchestrator/issues/{issue_id}/resolve")
+def api_resolve_issue(issue_id: str, body: IssueResolvePayload):
+    from src.warden.captain_orchestrator import resolve_issue
+    issue = resolve_issue(issue_id, body.resolution, actor=body.actor)
+    if not issue:
+        raise HTTPException(404, f"Issue {issue_id} not found.")
+    return {"ok": True, "issue": issue.model_dump(mode="json")}
+
+@mcharness_router.post("/warden/orchestrator/reconcile")
+def api_reconcile(body: ReconcilePayload):
+    from src.warden.captain_orchestrator import reconcile
+    issues = reconcile(project=body.project, trigger=body.trigger)
+    return {"ok": True, "trigger": body.trigger, "issues": [i.model_dump(mode="json") for i in issues]}
+
+
 class _HandoffBody(BaseModel):
     to_agent: str
     note: str = ""

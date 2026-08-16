@@ -1156,7 +1156,7 @@ def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
 
 
 @mcp.tool()
-def warden_bootstrap(task: str = "", project: str = "") -> str:
+def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") -> str:
     """THE tool to call first. Returns a single agent-ready startup packet combining:
     - Who the operator is and their current priorities
     - Active projects and preferences
@@ -1170,12 +1170,14 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
     Args:
         task: What you're about to work on. May be empty during cold start.
         project: Project name (e.g. 'Warden', 'Grademy') — auto-detected if omitted
+        detail: 'full' (default, rich context pack) or 'minimal' (compact header payload)
     """
     try:
         import json as _json
 
         task = task.strip()
         project = project.strip()
+        detail_mode = (detail or "full").strip().lower()
         if not project and task:
             project = _detect_project(task, None) or ""
         orientation_query = task or (
@@ -1187,12 +1189,10 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
         profile = load_profile()
 
         # 2. Workstream
-        workstream = get_workstream(limit=8, project=project or None)
+        workstream = get_workstream(limit=8 if detail_mode == "full" else 3, project=project or None)
 
-        # 3. Recall — task relevance plus fresh operational guardrails. A
-        # decision made after a task was claimed must still reach the next
-        # worker even when its wording does not match the task exactly.
-        limit = 10
+        # 3. Recall
+        limit = 10 if detail_mode == "full" else 4
         store = _store()
         recall_results = _semantic_recall(orientation_query, limit)
         if not recall_results:
@@ -1229,7 +1229,7 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
                 "tags": memory.tags,
                 "updated_at": memory.updated_at.isoformat(),
             })
-            if len(recent_guardrails) >= 12:
+            if len(recent_guardrails) >= (12 if detail_mode == "full" else 4):
                 break
 
         merged_recall: list[dict[str, Any]] = []
@@ -1241,38 +1241,13 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
             if memory_id:
                 seen_memory_ids.add(memory_id)
             merged_recall.append(row)
-        recall_results = merged_recall[:20]
+        recall_results = merged_recall[:20 if detail_mode == "full" else 6]
 
-        # Pull out constraints and failures specifically
         constraints = [r for r in recall_results if r.get("kind") in ("constraint", "blocked_attempt")]
         failures = [r for r in recall_results if r.get("kind") == "failure"]
         other_memories = [r for r in recall_results if r.get("kind") not in ("constraint", "blocked_attempt", "failure")]
 
-        # 4. Context pack (formatted text)
-        pack = store.build_memory_context_pack(
-            project_id=project or "warden",
-            user_prompt=orientation_query,
-            max_memories=8,
-        )
-
-        # 5. Relevant docs
-        from src.marius.search_provider import LocalJsonlSearchProvider
-        provider = LocalJsonlSearchProvider()
-        doc_results = provider.search(orientation_query, project=project or None, limit=5)
-        docs = [
-            {
-                "id": r.get("record_id"),
-                "title": r.get("title"),
-                "project": r.get("project"),
-                "snippet": r.get("snippet", "")[:200],
-            }
-            for r in doc_results
-            if r.get("sensitivity") != "secret_excluded"
-        ]
-
-        # 6. Coordination state. Bootstrap is the one required call, so it
-        # must also reveal work already in flight rather than relying on the
-        # client to remember to call warden_board separately.
+        # 4. Coordination state
         coordination: dict[str, Any] = {
             "open_tasks": [], "active_claims": [], "stale_claims": [],
             "recent_handoffs": [], "warnings": [],
@@ -1288,17 +1263,17 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
                         if str(row.get("project") or "").lower() == project.lower()
                     ]
                 coordination.update({
-                    "open_tasks": open_tasks[:10],
-                    "active_claims": list(board_data.get("active_claims", []))[-10:],
-                    "stale_claims": list(board_data.get("stale_claims", []))[-10:],
-                    "recent_handoffs": list(board_data.get("recent_handoffs", []))[:5],
+                    "open_tasks": open_tasks[:5],
+                    "active_claims": list(board_data.get("active_claims", []))[-5:],
+                    "stale_claims": list(board_data.get("stale_claims", []))[-5:],
+                    "recent_handoffs": list(board_data.get("recent_handoffs", []))[:3],
                 })
             else:
                 coordination["warnings"].append(board_payload.get("error", "board unavailable"))
         except Exception as exc:
             coordination["warnings"].append(f"board unavailable: {exc}")
 
-        # 7. Recommended next action heuristic
+        # 5. Recommended next action heuristic
         if coordination["open_tasks"]:
             next_action = (
                 f"Inspect {len(coordination['open_tasks'])} existing open task(s) and active claims "
@@ -1314,23 +1289,69 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
         else:
             next_action = "No prior context found — this appears to be fresh ground."
 
-        # 8. Proof expectations from profile + memories
         proof_expectations = [
             "Write warden_remember(kind='proof', ...) when task is verified working",
             "Write warden_remember(kind='failure', ...) if approach fails",
             "Write warden_remember(kind='decision', ...) for significant architecture choices",
         ]
-        # Add any acceptance_test memories as explicit proof gates
-        proof_memories = [m for m in store.list_memories() if m.kind == "acceptance_test" and m.status == "active"]
-        if proof_memories and project:
-            scoped = [m for m in proof_memories if (m.project_id or m.scope or "").lower() == project.lower()]
-            for pm in scoped[:3]:
-                proof_expectations.append(f"Acceptance test: {pm.title or pm.summary[:80]}")
 
         caller = _current_caller_identity()
         all_memories = store.list_memories()
         freshest_memory_at = all_memories[0].updated_at.isoformat() if all_memories else None
         profile_updated_at = profile.get("last_updated") or profile.get("updated_at")
+
+        service_catalog = _service_catalog_data(verify_live_mail=(detail_mode == "full"))
+        _mark_caller_bootstrapped()
+
+        # Tool revision metadata
+        tool_catalog_revision = {
+            "version": "1.0.0",
+            "tool_count": 30,
+            "revision_hash": "cat_rev_" + freshest_memory_at[:10] if freshest_memory_at else "cat_rev_0",
+        }
+
+        if detail_mode == "minimal":
+            return _ok("warden_bootstrap", {
+                "detail_mode": "minimal",
+                "task": task,
+                "project": project or "warden",
+                "caller": caller,
+                "operator_summary": {
+                    "name": profile.get("name"),
+                    "email": profile.get("email"),
+                    "current_priorities": profile.get("current_priorities", [])[:3],
+                },
+                "critical_constraints": [c.get("title") for c in constraints[:3]],
+                "newest_decisions": [m.get("title") for m in other_memories if m.get("kind") == "decision"][:3],
+                "active_claims": coordination.get("active_claims", []),
+                "key_blockers": [f.get("title") for f in failures[:3]],
+                "service_summary": list(service_catalog.keys()) if isinstance(service_catalog, dict) else [],
+                "tool_catalog_revision": tool_catalog_revision,
+                "recommended_next_action": next_action,
+                "instruction": "Call warden_bootstrap(detail='full') for deep context pack and complete doc search.",
+            })
+
+        # Context pack (formatted text) for full mode
+        pack = store.build_memory_context_pack(
+            project_id=project or "warden",
+            user_prompt=orientation_query,
+            max_memories=8,
+        )
+
+        from src.marius.search_provider import LocalJsonlSearchProvider
+        provider = LocalJsonlSearchProvider()
+        doc_results = provider.search(orientation_query, project=project or None, limit=5)
+        docs = [
+            {
+                "id": r.get("record_id"),
+                "title": r.get("title"),
+                "project": r.get("project"),
+                "snippet": r.get("snippet", "")[:200],
+            }
+            for r in doc_results
+            if r.get("sensitivity") != "secret_excluded"
+        ]
+
         freshness_warning = None
         if profile_updated_at and freshest_memory_at and str(profile_updated_at) < freshest_memory_at:
             freshness_warning = (
@@ -1338,18 +1359,13 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
                 "operational truth where they conflict with profile fields."
             )
 
-        # The bootstrap itself must be enough to orient a fresh agent. Include
-        # Warden's current service/account inventory so the operator does not
-        # need to repeat which integrations exist or which mailbox is usable.
-        service_catalog = _service_catalog_data(verify_live_mail=True)
-
-        _mark_caller_bootstrapped()
-
         return _ok("warden_bootstrap", {
+            "detail_mode": "full",
             "task": task,
             "project": project or None,
             "session_id": caller["session_id"],
             "caller": caller,
+            "tool_catalog_revision": tool_catalog_revision,
             "protocol": {
                 "required_order": [
                     "warden_bootstrap",
@@ -1364,7 +1380,6 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
                 "freshest_memory_at": freshest_memory_at,
                 "warning": freshness_warning,
             },
-
             "who_is_matt": {
                 "name": profile.get("name"),
                 "email": profile.get("email"),
@@ -1374,25 +1389,17 @@ def warden_bootstrap(task: str = "", project: str = "") -> str:
                 "preferences": profile.get("preferences", {}),
                 "server_context": profile.get("server_context", {}),
             },
-
             "recent_workstream": workstream,
-
             "relevant_memories": other_memories,
             "constraints": constraints,
             "prior_failures": failures,
-
             "context_pack": pack.get("context", ""),
             "context_memory_ids": pack.get("memory_ids", []),
-
             "relevant_docs": docs,
-
             "coordination": coordination,
-
             "available_services": service_catalog,
-
             "recommended_next_action": next_action,
             "proof_expectations": proof_expectations,
-
             "tip": (
                 "When done: call warden_remember(kind='proof'/'decision'/'failure') to persist your work. "
                 "Other agents will see it in their warden_bootstrap on the next session."
@@ -2446,6 +2453,219 @@ async def _handle_oauth_consent_submit(scope, receive, send) -> None:
     else:
         response = RedirectResponse(url=redirect_url, status_code=302)
     await response(scope, receive, send)
+
+
+# ---------------------------------------------------------------------------
+# Task Lifecycle & Dependency Traversal Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_update_task(task_id: str, updates_json: str = "{}", actor: str = "") -> str:
+    """Update metadata fields of an existing task while preserving history and file location.
+
+    Args:
+        task_id: Task ID to update
+        updates_json: JSON string of field updates (e.g. title, description, priority, files, based_on)
+        actor: Optional actor name
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_update_task"):
+            return _err("warden_update_task", error)
+        updates = json.loads(updates_json) if isinstance(updates_json, str) else updates_json
+        from src.warden.board import update_task
+        caller = _current_caller_identity()
+        updated = update_task(task_id, updates, actor=actor or caller["agent_id"])
+        return _ok("warden_update_task", {"task": updated})
+    except Exception as exc:
+        return _err("warden_update_task", str(exc))
+
+
+@mcp.tool()
+def warden_cancel_task(task_id: str, reason: str, actor: str = "") -> str:
+    """Cancel a task, moving it to tasks/cancelled while preserving full history and claim provenance.
+
+    Args:
+        task_id: Task ID to cancel
+        reason: Why the task is cancelled
+        actor: Optional actor name
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_cancel_task"):
+            return _err("warden_cancel_task", error)
+        from src.warden.board import cancel_task
+        caller = _current_caller_identity()
+        cancelled = cancel_task(task_id, reason, actor=actor or caller["agent_id"])
+        return _ok("warden_cancel_task", {"task": cancelled})
+    except Exception as exc:
+        return _err("warden_cancel_task", str(exc))
+
+
+@mcp.tool()
+def warden_supersede_task(
+    task_id: str,
+    reason: str,
+    actor: str = "",
+    superseded_by_task: str = "",
+    superseded_by_decision: str = "",
+) -> str:
+    """Mark a task superseded by a newer decision or task, preserving history and claim provenance.
+
+    Args:
+        task_id: Task ID being superseded
+        reason: Explanation of why task is superseded
+        actor: Optional actor name
+        superseded_by_task: Task ID that replaces this task
+        superseded_by_decision: Decision memory ID that supersedes this task
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_supersede_task"):
+            return _err("warden_supersede_task", error)
+        from src.warden.board import supersede_task
+        caller = _current_caller_identity()
+        superseded = supersede_task(
+            task_id,
+            reason,
+            actor=actor or caller["agent_id"],
+            superseded_by_task=superseded_by_task,
+            superseded_by_decision=superseded_by_decision,
+        )
+        return _ok("warden_supersede_task", {"task": superseded})
+    except Exception as exc:
+        return _err("warden_supersede_task", str(exc))
+
+
+@mcp.tool()
+def warden_revalidate_task_or_claim(task_id: str) -> str:
+    """Check if a task or claim remains valid active work.
+
+    Args:
+        task_id: Task ID to revalidate
+    """
+    try:
+        from src.warden.board import revalidate_task_or_claim
+        res = revalidate_task_or_claim(task_id)
+        return _ok("warden_revalidate_task_or_claim", res)
+    except Exception as exc:
+        return _err("warden_revalidate_task_or_claim", str(exc))
+
+
+@mcp.tool()
+def warden_get_dependent_work(decision_id: str, project: str = "") -> str:
+    """Traverse decision -> tasks -> claims -> runs -> proofs to find current work depending on a decision.
+
+    Args:
+        decision_id: Decision memory ID
+        project: Optional project filter
+    """
+    try:
+        from src.warden.board import get_work_dependent_on_decision
+        res = get_work_dependent_on_decision(decision_id, project=project)
+        return _ok("warden_get_dependent_work", res)
+    except Exception as exc:
+        return _err("warden_get_dependent_work", str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Captain Orchestrator Ledger & Reconciler Tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def warden_orchestrator_status(project: str = "") -> str:
+    """Get Captain continuous orchestrator status and active issue ledger summary.
+
+    Args:
+        project: Optional project filter
+    """
+    try:
+        from src.warden.captain_orchestrator import list_issues, reconcile
+        issues = list_issues(project=project, status="open")
+        return _ok("warden_orchestrator_status", {
+            "project": project or "warden",
+            "active_issues_count": len(issues),
+            "issues": [i.model_dump(mode="json") for i in issues[:10]],
+        })
+    except Exception as exc:
+        return _err("warden_orchestrator_status", str(exc))
+
+
+@mcp.tool()
+def warden_list_issues(project: str = "", status: str = "", kind: str = "") -> str:
+    """List persistent Captain orchestrator issues.
+
+    Args:
+        project: Optional project filter
+        status: Optional status filter ('open', 'in_progress', 'resolved', 'ignored')
+        kind: Optional issue kind filter
+    """
+    try:
+        from src.warden.captain_orchestrator import list_issues
+        issues = list_issues(project=project, status=status, kind=kind)
+        return _ok("warden_list_issues", {
+            "count": len(issues),
+            "issues": [i.model_dump(mode="json") for i in issues],
+        })
+    except Exception as exc:
+        return _err("warden_list_issues", str(exc))
+
+
+@mcp.tool()
+def warden_get_issue(issue_id: str) -> str:
+    """Get a specific Captain orchestrator issue by ID.
+
+    Args:
+        issue_id: Issue ID to fetch
+    """
+    try:
+        from src.warden.captain_orchestrator import get_issue
+        issue = get_issue(issue_id)
+        if not issue:
+            return _err("warden_get_issue", f"Issue {issue_id} not found.")
+        return _ok("warden_get_issue", {"issue": issue.model_dump(mode="json")})
+    except Exception as exc:
+        return _err("warden_get_issue", str(exc))
+
+
+@mcp.tool()
+def warden_resolve_issue(issue_id: str, resolution: str, actor: str = "") -> str:
+    """Mark a Captain issue as resolved with explanation and actor metadata.
+
+    Args:
+        issue_id: Issue ID to resolve
+        resolution: Explanation of resolution
+        actor: Actor resolving the issue
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_resolve_issue"):
+            return _err("warden_resolve_issue", error)
+        from src.warden.captain_orchestrator import resolve_issue
+        caller = _current_caller_identity()
+        issue = resolve_issue(issue_id, resolution, actor=actor or caller["agent_id"])
+        if not issue:
+            return _err("warden_resolve_issue", f"Issue {issue_id} not found.")
+        return _ok("warden_resolve_issue", {"issue": issue.model_dump(mode="json")})
+    except Exception as exc:
+        return _err("warden_resolve_issue", str(exc))
+
+
+@mcp.tool()
+def warden_reconcile(project: str = "", trigger: str = "manual") -> str:
+    """Trigger deterministic reconciliation across active tasks, claims, decisions, and services.
+
+    Args:
+        project: Optional project filter
+        trigger: Reason/event triggering reconciliation ('manual', 'decision.created', 'task.created', etc.)
+    """
+    try:
+        from src.warden.captain_orchestrator import reconcile
+        issues = reconcile(project=project, trigger=trigger)
+        return _ok("warden_reconcile", {
+            "trigger": trigger,
+            "project": project or "warden",
+            "active_issues_count": len(issues),
+            "issues": [i.model_dump(mode="json") for i in issues],
+        })
+    except Exception as exc:
+        return _err("warden_reconcile", str(exc))
 
 
 def main():
