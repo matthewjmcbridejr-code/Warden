@@ -1165,6 +1165,55 @@ def warden_search_docs(query: str, project: str = "", limit: int = 5) -> str:
         return _err("warden_search_docs", str(exc))
 
 
+def compute_tool_catalog_revision() -> dict[str, Any]:
+    """Computes a deterministic catalog revision hash including tool names, schemas, and annotations."""
+    hub = mcp_hub.hub_status()
+    if hub.enabled and getattr(hub, "hub_tool_count", 0) == 0 and not getattr(hub, "last_discovery_at", None):
+        try:
+            hub = mcp_hub.bootstrap_hub(mcp)
+        except Exception:
+            pass
+    upstream_tool_names = set(hub.hub_tool_names)
+    native_tool_names = sorted(name for name in mcp._tool_manager._tools if name not in upstream_tool_names)
+    upstream_tool_names_sorted = sorted(hub.hub_tool_names)
+    native_count = len(native_tool_names)
+    upstream_count = len(upstream_tool_names_sorted)
+    total_count = native_count + upstream_count
+
+    tool_schemas = {}
+    for name, tool in sorted(mcp._tool_manager._tools.items()):
+        params = getattr(tool, "parameters", None)
+        if params is None and hasattr(tool, "model_json_schema"):
+            try:
+                params = tool.model_json_schema()
+            except Exception:
+                params = {}
+        tool_schemas[name] = {
+            "parameters": params or {},
+            "annotations": getattr(tool, "annotations", None),
+        }
+
+    rev_payload = json.dumps({
+        "version": "1.0.0",
+        "native": native_tool_names,
+        "upstream": upstream_tool_names_sorted,
+        "native_count": native_count,
+        "upstream_count": upstream_count,
+        "schemas": tool_schemas,
+    }, sort_keys=True, default=str)
+
+    import hashlib
+    rev_hash = "cat_rev_" + hashlib.sha256(rev_payload.encode("utf-8")).hexdigest()[:12]
+
+    return {
+        "version": "1.0.0",
+        "native_tool_count": native_count,
+        "total_tool_count": total_count,
+        "tool_count": native_count,
+        "revision_hash": rev_hash,
+    }
+
+
 @mcp.tool()
 def warden_bootstrap(
     task: str = "",
@@ -1319,37 +1368,8 @@ def warden_bootstrap(
         service_catalog = _service_catalog_data(verify_live_mail=(eff_mode == "full"))
         _mark_caller_bootstrapped()
 
-        # Tool revision metadata
-        hub = mcp_hub.hub_status()
-        if hub.enabled and getattr(hub, "hub_tool_count", 0) == 0 and not getattr(hub, "last_discovery_at", None):
-            try:
-                hub = mcp_hub.bootstrap_hub(mcp)
-            except Exception:
-                pass
-        upstream_tool_names = set(hub.hub_tool_names)
-        native_tool_names = sorted(name for name in mcp._tool_manager._tools if name not in upstream_tool_names)
-        upstream_tool_names_sorted = sorted(hub.hub_tool_names)
-        native_count = len(native_tool_names)
-        upstream_count = len(upstream_tool_names_sorted)
-        total_count = native_count + upstream_count
-
-        rev_payload = json.dumps({
-            "version": "1.0.0",
-            "native": native_tool_names,
-            "upstream": upstream_tool_names_sorted,
-            "native_count": native_count,
-            "upstream_count": upstream_count,
-        }, sort_keys=True)
-        import hashlib
-        rev_hash = "cat_rev_" + hashlib.sha256(rev_payload.encode("utf-8")).hexdigest()[:12]
-
-        tool_catalog_revision = {
-            "version": "1.0.0",
-            "native_tool_count": native_count,
-            "total_tool_count": total_count,
-            "tool_count": native_count,
-            "revision_hash": rev_hash,
-        }
+        tool_catalog_revision = compute_tool_catalog_revision()
+        rev_hash = tool_catalog_revision["revision_hash"]
 
         from src.warden.context_protocol import compute_context_revision, get_context_delta
         from src.warden.grounding import list_claims
@@ -1416,13 +1436,12 @@ def warden_bootstrap(
                 "tool_catalog_revision": tool_catalog_revision,
                 "operator_summary": {
                     "name": profile.get("name"),
-                    "email": profile.get("email"),
                     "current_priorities": profile.get("current_priorities", [])[:3],
                 },
                 "critical_constraints": [c.get("title") for c in constraints[:3]],
                 "newest_decisions": [m.get("title") for m in other_memories if m.get("kind") == "decision"][:3],
-                "active_claims": coordination.get("active_claims", []),
-                "stale_claims": coordination.get("stale_claims", []),
+                "active_claim_count": len(coordination.get("active_claims", [])),
+                "stale_claim_count": len(coordination.get("stale_claims", [])),
                 "reconciled_open_task_count": len(coordination["open_tasks"]),
                 "available_context_counts": {
                     "decisions": len([m for m in all_memories if m.kind == "decision"]),

@@ -19,7 +19,6 @@ def compute_profile_revision(profile: dict[str, Any]) -> str:
     """
     material_fields = {
         "name": profile.get("name") or "",
-        "email": profile.get("email") or "",
         "active_projects": sorted(profile.get("active_projects") or []),
         "current_priorities": sorted(profile.get("current_priorities") or []),
         "preferences": profile.get("preferences") or {},

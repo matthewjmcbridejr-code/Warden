@@ -32,8 +32,14 @@ def _default_profile() -> dict[str, Any]:
             "Warden operator. Update this profile (warden_update_me or the UI) so "
             "agents get real context: who you are, what you're building, how you work."
         ),
-        "active_projects": [],
-        "current_priorities": [],
+        "active_projects": ["Warden"],
+        "current_priorities": [
+            "Productize Warden as a multi-agent operating/control layer.",
+            "Build Warden Control Plane v1: Actions + Decisions + Capability Grants + Approvals.",
+            "Keep cross-agent context revision-first, cheap, and automatic.",
+            "Preserve evidence and proof for consequential agent actions.",
+            "Prepare Warden for a sanitized public portfolio/demo distribution.",
+        ],
         "preferences": {
             "agent_trust": "agents read freely, writes gate through Warden proof gate",
         },
