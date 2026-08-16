@@ -1453,7 +1453,8 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
 @mcp.tool()
 def warden_context_delta(since_revision: str, project: str = "") -> str:
     """Returns a revisioned context delta payload comparing since_revision to current project context."""
-    _require_bootstrapped()
+    if error := _remote_bootstrap_error("warden_context_delta"):
+        return _err("warden_context_delta", error)
     from src.warden.context_protocol import compute_context_revision, get_context_delta
 
     proj = project or "warden"
@@ -1486,7 +1487,8 @@ def warden_ground_claim(
     confidence: float = 1.0,
 ) -> str:
     """Grounds an operational assertion backed by evidence URIs (service://, warden://, brain://)."""
-    _require_bootstrapped()
+    if error := _remote_bootstrap_error("warden_ground_claim"):
+        return _err("warden_ground_claim", error)
     from src.warden.grounding import ground_claim
     claim = ground_claim(
         subject=subject,
@@ -1502,7 +1504,8 @@ def warden_ground_claim(
 @mcp.tool()
 def warden_get_claim(claim_id: str) -> str:
     """Retrieves a grounded operational claim by claim_id."""
-    _require_bootstrapped()
+    if error := _remote_bootstrap_error("warden_get_claim"):
+        return _err("warden_get_claim", error)
     from src.warden.grounding import get_claim
     claim = get_claim(claim_id)
     if not claim:
@@ -1513,7 +1516,8 @@ def warden_get_claim(claim_id: str) -> str:
 @mcp.tool()
 def warden_list_claims(project: str = "", status: str = "", claim_type: str = "") -> str:
     """Lists grounded operational claims matching filters."""
-    _require_bootstrapped()
+    if error := _remote_bootstrap_error("warden_list_claims"):
+        return _err("warden_list_claims", error)
     from src.warden.grounding import list_claims
     claims = list_claims(project=project, status=status, claim_type=claim_type)
     return _ok("warden_list_claims", [c.model_dump(mode="json") for c in claims])
