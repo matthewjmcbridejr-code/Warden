@@ -1535,6 +1535,12 @@ def warden_context_delta(since_revision: str, project: str = "") -> str:
         memories = []
 
     try:
+        b_data = json.loads(warden_board()).get("data", {})
+        open_tasks = b_data.get("open_tasks", [])
+    except Exception:
+        open_tasks = []
+
+    try:
         from src.warden.grounding import list_claims
         claims = [c.model_dump(mode="json") for c in list_claims(project=proj)]
     except Exception:
