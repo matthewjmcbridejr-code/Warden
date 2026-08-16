@@ -4966,13 +4966,16 @@ def api_captain_desk(project: str = ""):
             "items": operator_issues
         }
 
+    from src.warden.context_protocol import compute_context_revision
+    ctx_rev = compute_context_revision(project=project or "warden")
+
     agent_info = [
-        {"agent_id": "captain", "name": "Captain Orchestrator", "kind": "orchestrator", "status": "Working", "role": "Control Plane", "model": vertex_prov.model, "provider": "Vertex AI / Local Fallback"},
-        {"agent_id": "claude", "name": "Claude 3.5 Sonnet", "kind": "code_agent", "status": "Ready", "role": "Primary Coder", "model": "claude-3-5-sonnet", "provider": "Anthropic"},
-        {"agent_id": "agy", "name": "AGY (Antigravity)", "kind": "pair_programmer", "status": "Working", "role": "Pair Programmer", "model": "gemini-2.5-pro", "provider": "Google DeepMind"},
-        {"agent_id": "spark", "name": "Spark Native MCP", "kind": "assistant", "status": "Ready", "role": "Drive & Docs", "model": "spark-native", "provider": "Native MCP"},
-        {"agent_id": "codex", "name": "Codex Runner", "kind": "runner", "status": "Idle", "role": "Execution Runner", "model": "codex-cli", "provider": "Local CLI"},
-        {"agent_id": "marius", "name": "Marius Resident", "kind": "gateway", "status": "Ready", "role": "Model Gateway", "model": "ollama / litellm", "provider": "Local Gateway"},
+        {"agent_id": "captain", "name": "Captain Orchestrator", "kind": "orchestrator", "protocol": "A2A / MCP", "status": "Working", "role": "Control Plane", "model": vertex_prov.model, "provider": "Vertex AI / Local Fallback"},
+        {"agent_id": "claude", "name": "Claude 3.5 Sonnet", "kind": "code_agent", "protocol": "A2A", "status": "Ready", "role": "Primary Coder", "model": "claude-3-5-sonnet", "provider": "Anthropic"},
+        {"agent_id": "agy", "name": "AGY (Antigravity)", "kind": "pair_programmer", "protocol": "A2A", "status": "Working", "role": "Pair Programmer", "model": "gemini-2.5-pro", "provider": "Google DeepMind"},
+        {"agent_id": "spark", "name": "Spark Native MCP", "kind": "assistant", "protocol": "MCP", "status": "Ready", "role": "Drive & Docs", "model": "spark-native", "provider": "Native MCP"},
+        {"agent_id": "codex", "name": "Codex Runner", "kind": "runner", "protocol": "Local", "status": "Idle", "role": "Execution Runner", "model": "codex-cli", "provider": "Local CLI"},
+        {"agent_id": "marius", "name": "Marius Resident", "kind": "gateway", "protocol": "Local", "status": "Ready", "role": "Model Gateway", "model": "ollama / litellm", "provider": "Local Gateway"},
     ]
 
     try:
@@ -5025,6 +5028,7 @@ def api_captain_desk(project: str = ""):
             "location": vertex_prov.location,
             "project_id": vertex_prov.project_id,
             "local_fallback_ready": True,
+            "context_revision": ctx_rev,
             "unresolved_issue_count": len(open_issues),
             "critical_issue_count": critical_count,
             "agent_count": len(agent_info),

@@ -5451,6 +5451,9 @@
     const modelEl = document.getElementById("captain-desk-model");
     if (modelEl) modelEl.textContent = cap.model || "Gemini 2.5 Flash";
 
+    const ctxRevEl = document.getElementById("captain-desk-context-rev");
+    if (ctxRevEl) ctxRevEl.textContent = cap.context_revision || "ctx_v1";
+
     const locEl = document.getElementById("captain-desk-location");
     if (locEl) locEl.textContent = cap.location || "global";
 
@@ -5559,7 +5562,7 @@
             <span>${escapeHtml(agent.name)}</span>
             <span class="captain-pill captain-pill-${agent.status === 'Working' ? 'info' : (agent.status === 'Ready' ? 'success' : 'warning')}">${agent.status}</span>
           </div>
-          <div class="captain-agent-role">${escapeHtml(agent.role)} · ${escapeHtml(agent.provider)}</div>
+          <div class="captain-agent-role">${agent.protocol ? `<strong>[${escapeHtml(agent.protocol)}]</strong> ` : ''}${escapeHtml(agent.role)} · ${escapeHtml(agent.provider)}</div>
         </div>`).join("") + `</div>`;
     }
 
