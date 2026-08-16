@@ -13,7 +13,8 @@
     </section>
     <nav class="workspace-nav" aria-label="Primary workspace">
       <p class="section-label">Workspace</p>
-      <button class="workspace active" data-workspace="chat" title="Persistent web AI workspaces"><span class="workspace-glyph" aria-hidden="true">◫</span><span class="workspace-copy"><strong>Chat</strong><small>Web platforms</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
+      <button class="workspace active" data-workspace="team-chat" title="Agentic Group Chat - Speak once to your AI team"><span class="workspace-glyph team-glyph" aria-hidden="true">💬</span><span class="workspace-copy"><strong>Team Chat</strong><small>Agentic group chat</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
+      <button class="workspace" data-workspace="chat" title="Persistent web AI workspaces"><span class="workspace-glyph" aria-hidden="true">◫</span><span class="workspace-copy"><strong>Web Platforms</strong><small>Claude · Gemini · Grok</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
       <button class="workspace" data-workspace="build" title="Local terminals and structured provider runs"><span class="workspace-glyph build-glyph" aria-hidden="true">⌁</span><span class="workspace-copy"><strong>Build</strong><small>Project missions</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
     </nav>
     <div class="section-row"><p class="section-label">Platforms</p><span><button id="restore-platform" class="icon-button" title="Restore a removed platform" aria-label="Restore removed platform">↶</button><button id="add-platform" class="icon-button add-button" title="Add a custom AI platform" aria-label="Add AI platform">＋</button></span></div>
@@ -28,7 +29,10 @@
   <main>
     <header id="browser-toolbar"><div class="toolbar"><button data-action="back" title="Back (Alt+Left)" aria-label="Back">←</button><button data-action="forward" title="Forward (Alt+Right)" aria-label="Forward">→</button><button id="reload-stop" data-action="reload" title="Reload (Ctrl+R)" aria-label="Reload">↻</button><button id="open-system" title="Open in system browser" aria-label="Open in system browser">↗</button><button id="handoff-to-build" class="handoff-btn" title="Handoff goal to Build mission">Handoff to Build →</button><span id="loading-state" role="status" aria-live="polite"></span></div><button id="platform-overflow" aria-label="Platform menu" aria-haspopup="menu" aria-expanded="false">•••</button></header>
     <div id="notice" role="status" hidden></div>
-    <section id="provider-host"><div class="empty"><span class="eyebrow">CHAT WORKSPACE</span><h1>Your project’s AI workspace.</h1><p>Add or select a sandboxed web platform. Login sessions stay inside the selected named Warden browser profile.</p><button id="empty-add-platform" class="primary">Add a web platform</button></div></section>
+    <section id="team-chat-workspace" style="width:100%; height:100%; display:flex; flex-direction:column; padding:0; margin:0;">
+      <iframe id="team-chat-frame" src="http://127.0.0.1:6969/web/warden/app.html" style="width:100%; height:100%; border:none; background:#0a101c;"></iframe>
+    </section>
+    <section id="provider-host" hidden><div class="empty"><span class="eyebrow">CHAT WORKSPACE</span><h1>Your project’s AI workspace.</h1><p>Add or select a sandboxed web platform. Login sessions stay inside the selected named Warden browser profile.</p><button id="empty-add-platform" class="primary">Add a web platform</button></div></section>
     <section id="build-workspace" hidden>
       <div id="simple-build" hidden>
         <header class="sb-commandbar">

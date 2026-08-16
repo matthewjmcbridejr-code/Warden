@@ -1,6 +1,6 @@
 export const providerIds = ['claude', 'chatgpt', 'gemini', 'grok'] as const;
 export type ProviderId = typeof providerIds[number];
-export type WorkspaceId = 'chat' | 'build';
+export type WorkspaceId = 'team-chat' | 'chat' | 'build';
 export type InterfaceMode = 'simple' | 'developer';
 export type ExecutionMode = 'local' | 'codex' | 'claude' | 'gemini' | 'grok';
 export type StructuredProviderId = Exclude<ExecutionMode, 'local'>;

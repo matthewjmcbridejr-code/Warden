@@ -110,6 +110,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 body[data-workspace='build'] .section-row, body[data-workspace='build'] #platform-search, body[data-workspace='build'] #platforms { display: none; }
 body[data-workspace='build'] .workspace-nav { padding-bottom: 12px; border-bottom: 1px solid #242126; }
 body[data-workspace='build'] .privacy { margin-top: auto; }
+body[data-workspace='team-chat'] .section-row, body[data-workspace='team-chat'] #platform-search, body[data-workspace='team-chat'] #platforms { display: none; }
+body[data-workspace='team-chat'] .workspace-nav { padding-bottom: 12px; border-bottom: 1px solid #242126; }
+body[data-workspace='team-chat'] .privacy { margin-top: auto; }
 .privacy { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 5px 0; border-top: 1px solid #242126; }
 .mode-toggle { display: flex; align-items: center; gap: 7px; color: #837a86; font-size: 9px; cursor: pointer; }
 .mode-toggle input { accent-color: var(--copper); }

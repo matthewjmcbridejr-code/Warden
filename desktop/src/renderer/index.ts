@@ -19,11 +19,12 @@ function applyMode(): void {
   $('.build-top').toggleAttribute('hidden', !developer || ui.workspace !== 'build');
   $('#terminal-workspace').toggleAttribute('hidden', !developer || ui.workspace !== 'build' || ui.execution !== 'local');
   $('#agent-workspace').toggleAttribute('hidden', !developer || ui.workspace !== 'build' || ui.execution === 'local');
+  $('#team-chat-workspace').toggleAttribute('hidden', ui.workspace !== 'team-chat');
   const toggle = document.getElementById('mode-toggle') as HTMLInputElement | null; if (toggle) toggle.checked = developer;
 }
 async function selectWorkspace(workspace: WorkspaceId): Promise<void> {
   ui.workspace = workspace; document.body.dataset.workspace = workspace; document.querySelectorAll<HTMLButtonElement>('[data-workspace]').forEach((button) => button.classList.toggle('active', button.dataset.workspace === workspace));
-  $('#provider-host').toggleAttribute('hidden', workspace !== 'chat'); $('#build-workspace').toggleAttribute('hidden', workspace !== 'build'); $('#browser-toolbar').toggleAttribute('hidden', workspace !== 'chat');
+  $('#provider-host').toggleAttribute('hidden', workspace !== 'chat'); $('#build-workspace').toggleAttribute('hidden', workspace !== 'build'); $('#team-chat-workspace').toggleAttribute('hidden', workspace !== 'team-chat'); $('#browser-toolbar').toggleAttribute('hidden', workspace !== 'chat');
   applyMode();
   await window.wardenDesk.state.update({ workspace });
   if (ui.activeProjectId) await window.wardenDesk.project.update(ui.activeProjectId, { workspace });
