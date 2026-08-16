@@ -481,9 +481,12 @@ def check_client_tool_catalog_freshness(
 ) -> Dict[str, Any]:
     """Check if a connected client's catalog matches the current served tool catalog."""
     try:
-        from src.warden.brain_mcp_server import mcp, _hub_status
-        native_count = len(mcp._tool_manager._tools)
-        total_count = native_count + getattr(_hub_status, "hub_tool_count", 0)
+        from src.warden.brain_mcp_server import mcp
+        from src.warden.mcp_hub import hub_status
+        hs = hub_status()
+        upstream_tool_names = set(hs.hub_tool_names)
+        native_count = len([name for name in mcp._tool_manager._tools if name not in upstream_tool_names])
+        total_count = native_count + hs.hub_tool_count
     except Exception:
         native_count = 60
         total_count = 103
@@ -628,22 +631,63 @@ class VertexGeminiInferenceProvider(CaptainInferenceProvider):
     def __init__(
         self,
         project_id: Optional[str] = None,
-        location: str = "us-central1",
-        model: str = "gemini-1.5-flash",
+        location: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         self.project_id = (
             project_id
+            or os.getenv("WARDEN_VERTEX_PROJECT")
             or os.getenv("VERTEX_PROJECT_ID")
             or os.getenv("GOOGLE_CLOUD_PROJECT")
-            or "grademy-dev"
+            or "booming-key-500220-d9"
         )
-        self.location = os.getenv("VERTEX_LOCATION", location)
-        self.model = os.getenv("VERTEX_MODEL", model)
+        self.location = (
+            os.getenv("WARDEN_VERTEX_LOCATION")
+            or os.getenv("VERTEX_LOCATION")
+            or location
+            or "global"
+        )
+        self.model = (
+            os.getenv("WARDEN_VERTEX_MODEL")
+            or os.getenv("VERTEX_MODEL")
+            or model
+            or "gemini-2.5-flash"
+        )
 
     async def assess(
         self, issue: CaptainIssue, context: Dict[str, Any], fallback_enabled: bool = True
     ) -> CaptainAssessment:
         try:
+            prompt = (
+                f"You are Warden Captain.\n"
+                f"Analyze this issue and provide structured assessment:\n"
+                f"Issue kind: {issue.kind}\nSummary: {issue.summary}\nEvidence: {json.dumps(issue.evidence)}\n"
+                f"Context: {json.dumps(context)}\n\n"
+                f"Respond ONLY with a JSON object containing keys:\n"
+                f"classification, severity, confidence, explanation, recommended_action, requires_operator"
+            )
+
+            # Try SDK first if available
+            try:
+                from google import genai
+                from google.genai import types
+
+                client = genai.Client(
+                    vertexai=True, project=self.project_id, location=self.location
+                )
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=CaptainAssessment,
+                        temperature=0.1,
+                    ),
+                )
+                return CaptainAssessment.model_validate_json(response.text)
+            except ImportError:
+                pass
+
             import google.auth
             from google.auth.transport.requests import Request
 
@@ -655,23 +699,21 @@ class VertexGeminiInferenceProvider(CaptainInferenceProvider):
 
             import urllib.request
 
-            url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/publishers/google/models/{self.model}:generateContent"
-
-            prompt = (
-                f"You are the Warden Captain Orchestrator AI assistant.\n"
-                f"Analyze this issue and provide structured assessment:\n"
-                f"Issue kind: {issue.kind}\nSummary: {issue.summary}\nEvidence: {json.dumps(issue.evidence)}\n"
-                f"Context: {json.dumps(context)}\n\n"
-                f"Respond ONLY with a JSON object containing keys:\n"
-                f"classification, severity, confidence, explanation, recommended_action, requires_operator"
+            endpoint_host = (
+                "aiplatform.googleapis.com"
+                if self.location == "global"
+                else f"{self.location}-aiplatform.googleapis.com"
             )
+            url = f"https://{endpoint_host}/v1/projects/{self.project_id}/locations/{self.location}/publishers/google/models/{self.model}:generateContent"
 
             req_body = json.dumps(
                 {
-                    "contents": [
-                        {"role": "user", "parts": [{"text": prompt}]}
-                    ],
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 500},
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "maxOutputTokens": 500,
+                        "responseMimeType": "application/json",
+                    },
                 }
             ).encode("utf-8")
 
@@ -698,9 +740,9 @@ class VertexGeminiInferenceProvider(CaptainInferenceProvider):
 
         except Exception as exc:
             if not fallback_enabled:
-                raise RuntimeError(f"Vertex inference failed with fallback_enabled=False: {exc}") from exc
-            log.warning(
-                f"VertexGeminiInferenceProvider fallback to local: {exc}"
-            )
+                raise RuntimeError(
+                    f"Vertex inference failed with fallback_enabled=False: {exc}"
+                ) from exc
+            log.warning(f"VertexGeminiInferenceProvider fallback to local: {exc}")
             fallback = LocalCaptainInferenceProvider()
             return await fallback.assess(issue, context)

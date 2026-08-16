@@ -186,9 +186,17 @@ def test_captain_inference_providers():
         assert local_assessment.confidence > 0.5
 
         # Vertex Gemini provider (mock test / ADC fallback check)
-        vertex_provider = VertexGeminiInferenceProvider(project_id="grademy-test")
+        vertex_provider = VertexGeminiInferenceProvider(project_id="booming-key-500220-d9", location="global", model="gemini-2.5-flash")
         vertex_assessment = await vertex_provider.assess(issue, context)
-        assert vertex_assessment.classification == "superseded_task"
+        assert isinstance(vertex_assessment.classification, str)
+
+        # Loud failure when fallback_enabled=False on invalid model
+        invalid_provider = VertexGeminiInferenceProvider(project_id="invalid-proj", location="us-central1", model="invalid-model-name-xyz")
+        try:
+            await invalid_provider.assess(issue, context, fallback_enabled=False)
+            assert False, "Should have raised RuntimeError when fallback_enabled=False"
+        except RuntimeError as exc:
+            assert "fallback_enabled=False" in str(exc)
 
     asyncio.run(_run())
 

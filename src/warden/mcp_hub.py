@@ -359,8 +359,8 @@ def bootstrap_hub(mcp: FastMCP) -> HubStatus:
     """
     global _hub_status
 
+    native_names = set(name for name in mcp._tool_manager._tools.keys() if name not in _tool_routes)
     _tool_routes.clear()
-    native_names = set(mcp._tool_manager._tools.keys())
     status = HubStatus(native_tool_count=len(native_names))
     registered: list[str] = []
     skipped: list[str] = []

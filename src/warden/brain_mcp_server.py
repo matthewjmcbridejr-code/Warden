@@ -1314,14 +1314,16 @@ def warden_bootstrap(task: str = "", project: str = "", detail: str = "full") ->
         _mark_caller_bootstrapped()
 
         # Tool revision metadata
-        native_count = len(mcp._tool_manager._tools)
         hub = mcp_hub.hub_status()
         if hub.enabled and getattr(hub, "hub_tool_count", 0) == 0 and not getattr(hub, "last_discovery_at", None):
             try:
                 hub = mcp_hub.bootstrap_hub(mcp)
             except Exception:
                 pass
-        total_count = native_count + getattr(hub, "hub_tool_count", 0)
+        upstream_tool_names = set(hub.hub_tool_names)
+        native_count = len([name for name in mcp._tool_manager._tools if name not in upstream_tool_names])
+        upstream_count = hub.hub_tool_count
+        total_count = native_count + upstream_count
         rev_seed = f"{native_count}:{total_count}:{freshest_memory_at or '0'}"
         import hashlib
         rev_hash = "cat_rev_" + hashlib.sha256(rev_seed.encode("utf-8")).hexdigest()[:12]
