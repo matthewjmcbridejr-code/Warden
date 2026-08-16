@@ -850,3 +850,169 @@ def refresh_agent_statuses(
         payload["notes"] = list(probed.get("notes") or [])
         refreshed.append(payload)
     return refreshed
+
+
+# ---------------------------------------------------------------------------
+# Warden MCP 2.0 & A2A Interoperability — Normalized Agent Descriptor
+# ---------------------------------------------------------------------------
+
+class NormalizedAgentDescriptor(BaseModel):
+    agent_id: str
+    name: str
+    description: str = ""
+    protocols: list[str] = Field(default_factory=lambda: ["local"])
+    provider: str = "Warden Core"
+    models: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    accepted_task_types: list[str] = Field(default_factory=list)
+    input_modalities: list[str] = Field(default_factory=lambda: ["text/plain", "application/json"])
+    output_modalities: list[str] = Field(default_factory=lambda: ["application/json", "text/markdown"])
+    endpoint: str | None = None
+    authentication_mode: str = "oauth2"
+    availability: str = "available"
+    health: dict[str, Any] = Field(default_factory=lambda: {"operational": True})
+    cost_class: str = "low"
+    latency_class: str = "balanced"
+    trust_level: str = "internal"
+    write_scope: list[str] = Field(default_factory=list)
+    proof_requirements: list[str] = Field(default_factory=list)
+    current_workload: int = 0
+    last_seen: str = Field(default_factory=_now_iso)
+    capability_revision: str = "cap_v1"
+    source: str = "builtin"
+
+
+def get_warden_a2a_agent_card(endpoint_base: str = "http://127.0.0.1:6969") -> dict[str, Any]:
+    """Generates a standard A2A Agent Card for Warden Captain Orchestrator."""
+    return {
+        "name": "Warden Captain Orchestrator",
+        "description": "Local-first AI control plane for task orchestration, context reconciliation, and multi-agent coordination.",
+        "version": "2.0.0",
+        "protocol": "a2a",
+        "capabilities": [
+            "repository.read",
+            "repository.write",
+            "software_architecture",
+            "code_implementation",
+            "context.reconciliation",
+            "task.orchestration",
+            "grounding.verification",
+        ],
+        "accepted_task_types": [
+            "software_architecture",
+            "code_implementation",
+            "reconciliation",
+            "audit",
+            "user_query",
+        ],
+        "input_modalities": ["text/plain", "application/json"],
+        "output_modalities": ["application/json", "text/markdown"],
+        "endpoint": f"{endpoint_base.rstrip('/')}/api/mcharness/a2a/tasks",
+        "authentication_mode": "oauth2",
+        "provider": "Warden Core",
+    }
+
+
+def normalize_agent_descriptor(raw: dict[str, Any], source: str = "configured") -> NormalizedAgentDescriptor:
+    """Normalizes raw A2A Agent Cards or Warden profile dicts into NormalizedAgentDescriptor."""
+    import hashlib
+    agent_id = raw.get("agent_id") or raw.get("id") or f"agent_{hashlib.sha256(raw.get('name', 'agent').encode()).hexdigest()[:8]}"
+    name = raw.get("name") or raw.get("label") or agent_id
+    description = raw.get("description") or ""
+
+    capabilities = list(raw.get("capabilities") or [])
+    accepted_tasks = list(raw.get("accepted_task_types") or [])
+    models = list(raw.get("models") or [])
+
+    protocols = list(raw.get("protocols") or ([raw.get("protocol")] if raw.get("protocol") else ["local"]))
+
+    return NormalizedAgentDescriptor(
+        agent_id=str(agent_id),
+        name=str(name),
+        description=str(description),
+        protocols=protocols,
+        provider=str(raw.get("provider") or "Warden"),
+        models=models,
+        capabilities=capabilities,
+        skills=list(raw.get("skills") or []),
+        accepted_task_types=accepted_tasks,
+        input_modalities=list(raw.get("input_modalities") or ["text/plain", "application/json"]),
+        output_modalities=list(raw.get("output_modalities") or ["application/json", "text/markdown"]),
+        endpoint=raw.get("endpoint"),
+        authentication_mode=str(raw.get("authentication_mode") or "oauth2"),
+        availability=str(raw.get("availability") or "available"),
+        health=dict(raw.get("health") or {"operational": True}),
+        cost_class=str(raw.get("cost_class") or "low"),
+        latency_class=str(raw.get("latency_class") or "balanced"),
+        trust_level=str(raw.get("trust_level") or ("internal" if source == "builtin" else "verified")),
+        write_scope=list(raw.get("write_scope") or []),
+        proof_requirements=list(raw.get("proof_requirements") or []),
+        current_workload=int(raw.get("current_workload") or 0),
+        last_seen=str(raw.get("last_seen") or _now_iso()),
+        capability_revision=str(raw.get("capability_revision") or "cap_v1"),
+        source=source,
+    )
+
+
+def match_agents(
+    descriptors: list[NormalizedAgentDescriptor],
+    *,
+    required_capabilities: list[str] | None = None,
+    task_type: str = "",
+    cost_class: str = "",
+    latency_class: str = "",
+    min_trust_level: str = "",
+) -> list[dict[str, Any]]:
+    """Deterministically ranks candidate agent descriptors based on capabilities, task match, availability, and trust."""
+    req_caps = set(required_capabilities or [])
+    ranked = []
+
+    for agent in descriptors:
+        score = 10.0
+        reasons = []
+
+        if agent.availability != "available":
+            score -= 50.0
+            reasons.append("agent_unavailable")
+
+        # Capabilities matching
+        agent_caps = set(agent.capabilities)
+        if req_caps:
+            matched_caps = req_caps.intersection(agent_caps)
+            missing_caps = req_caps - agent_caps
+            if missing_caps:
+                score -= len(missing_caps) * 15.0
+                reasons.append(f"missing_capabilities:{','.join(sorted(missing_caps))}")
+            if matched_caps:
+                score += len(matched_caps) * 10.0
+                reasons.append(f"capability_match:{','.join(sorted(matched_caps))}")
+
+        # Task type matching
+        if task_type and agent.accepted_task_types:
+            if task_type in agent.accepted_task_types:
+                score += 15.0
+                reasons.append(f"task_type_match:{task_type}")
+            else:
+                score -= 5.0
+
+        # Cost class penalty/bonus
+        if cost_class:
+            if agent.cost_class == cost_class:
+                score += 5.0
+                reasons.append(f"cost_class_match:{cost_class}")
+
+        # Workload penalty
+        if agent.current_workload > 0:
+            score -= agent.current_workload * 2.0
+            reasons.append(f"workload_penalty:{agent.current_workload}")
+
+        ranked.append({
+            "agent": agent.model_dump(mode="json"),
+            "match_score": round(score, 2),
+            "reason_codes": reasons,
+            "qualified": score > 0,
+        })
+
+    ranked.sort(key=lambda x: x["match_score"], reverse=True)
+    return ranked
