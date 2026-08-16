@@ -1,0 +1,193 @@
+"""Tests for Captain Orchestrator, Task Lifecycle, Reconciler, and Inference Providers.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import pytest
+
+from src.warden.board import (
+    cancel_task,
+    find_task,
+    get_work_dependent_on_decision,
+    revalidate_task_or_claim,
+    supersede_task,
+    update_task,
+)
+from src.warden.captain_orchestrator import (
+    CaptainIssue,
+    LocalCaptainInferenceProvider,
+    VertexGeminiInferenceProvider,
+    get_issue,
+    list_issues,
+    reconcile,
+    resolve_issue,
+    save_issue,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_warden_roots(tmp_path, monkeypatch):
+    data_dir = tmp_path / "warden_data"
+    board_dir = data_dir / "board"
+    board_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("WARDEN_DATA_ROOT", str(data_dir))
+    monkeypatch.setenv("MCHARNESS_DATA_ROOT", str(data_dir))
+    monkeypatch.setenv("WARDEN_BOARD_ROOT", str(board_dir))
+    monkeypatch.setenv("MCTABLE_BOARD_ROOT", str(board_dir))
+
+    return tmp_path
+
+
+def test_task_lifecycle_update_cancel_supersede(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    draft_dir = board_root / "tasks" / "draft"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+
+    task_id = "test-task-100"
+    task_file = draft_dir / f"{task_id}.json"
+    task_file.write_text(json.dumps({
+        "task_id": task_id,
+        "title": "Initial Task Title",
+        "description": "Initial Task Description",
+        "status": "draft",
+        "based_on": ["dec_123"],
+    }))
+
+    # 1. Update task
+    updated = update_task(task_id, {"title": "Updated Task Title", "priority": "high"}, actor="agent_test")
+    assert updated["title"] == "Updated Task Title"
+    assert updated["priority"] == "high"
+    assert updated["updated_by"] == "agent_test"
+
+    # 2. Revalidate active task
+    reval = revalidate_task_or_claim(task_id)
+    assert reval["valid"] is True
+    assert reval["status"] == "draft"
+
+    # 3. Supersede task
+    superseded = supersede_task(
+        task_id,
+        reason="Superseded by native architecture",
+        actor="captain",
+        superseded_by_decision="dec_native_spark",
+    )
+    assert superseded["status"] == "superseded"
+    assert superseded["supersede_reason"] == "Superseded by native architecture"
+    assert (board_root / "tasks" / "superseded" / f"{task_id}.json").exists()
+    assert not (board_root / "tasks" / "draft" / f"{task_id}.json").exists()
+
+    # 4. Revalidate superseded task
+    reval_sup = revalidate_task_or_claim(task_id)
+    assert reval_sup["valid"] is False
+    assert reval_sup["status"] == "superseded"
+
+
+def test_task_cancel_lifecycle(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    claimed_dir = board_root / "tasks" / "claimed"
+    claimed_dir.mkdir(parents=True, exist_ok=True)
+
+    task_id = "test-task-cancel-200"
+    (claimed_dir / f"{task_id}.json").write_text(json.dumps({
+        "task_id": task_id,
+        "title": "Task to cancel",
+        "status": "claimed",
+        "claimed_by": "codex",
+    }))
+
+    cancelled = cancel_task(task_id, reason="No longer needed", actor="operator")
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["cancelled_by"] == "operator"
+    assert (board_root / "tasks" / "cancelled" / f"{task_id}.json").exists()
+
+    reval = revalidate_task_or_claim(task_id)
+    assert reval["valid"] is False
+    assert reval["status"] == "cancelled"
+
+
+def test_dependency_traversal(tmp_path):
+    board_root = Path(tmp_path / "warden_data" / "board")
+    assigned_dir = board_root / "tasks" / "assigned"
+    claims_dir = board_root / "claims"
+    assigned_dir.mkdir(parents=True, exist_ok=True)
+    claims_dir.mkdir(parents=True, exist_ok=True)
+
+    task_id = "task-dep-300"
+    (assigned_dir / f"{task_id}.json").write_text(json.dumps({
+        "task_id": task_id,
+        "title": "Build feature dependent on decision 42",
+        "status": "assigned",
+        "based_on": ["dec_42"],
+    }))
+
+    (claims_dir / f"codex_{task_id}.json").write_text(json.dumps({
+        "task": task_id,
+        "agent": "codex",
+        "action": "CLAIM",
+    }))
+
+    dep_res = get_work_dependent_on_decision("dec_42")
+    assert dep_res["task_count"] == 1
+    assert dep_res["claim_count"] == 1
+    assert dep_res["dependent_tasks"][0]["task_id"] == task_id
+
+
+def test_captain_issue_ledger_and_reconciliation(tmp_path):
+    # Save issue
+    issue = CaptainIssue(
+        issue_id="iss_test_100",
+        kind="stale_claim",
+        severity="medium",
+        summary="Stale claim detected for missing task",
+        recommended_action="Clean claim",
+    )
+    saved = save_issue(issue)
+    assert saved.issue_id == "iss_test_100"
+
+    # Get issue
+    fetched = get_issue("iss_test_100")
+    assert fetched is not None
+    assert fetched.kind == "stale_claim"
+
+    # List issues
+    all_issues = list_issues()
+    assert len(all_issues) == 1
+
+    # Resolve issue
+    resolved = resolve_issue("iss_test_100", resolution="Cleaned up claim record", actor="captain")
+    assert resolved is not None
+    assert resolved.status == "resolved"
+    assert resolved.resolution == "captain: Cleaned up claim record"
+
+    # Duplicate reconciliation run does not duplicate resolved issue
+    reconcile_issues = reconcile(trigger="test_trigger")
+    assert not any(i.issue_id == "iss_test_100" for i in reconcile_issues)
+
+
+def test_captain_inference_providers():
+    import asyncio
+
+    async def _run():
+        issue = CaptainIssue(
+            issue_id="iss_inf_1",
+            kind="superseded_task",
+            severity="high",
+            summary="Test superseded task issue",
+            recommended_action="Supersede task",
+        )
+        context = {"project": "warden"}
+
+        # Local provider
+        local_provider = LocalCaptainInferenceProvider()
+        local_assessment = await local_provider.assess(issue, context)
+        assert local_assessment.classification == "superseded_task"
+        assert local_assessment.confidence > 0.5
+
+        # Vertex Gemini provider (mock test / ADC fallback check)
+        vertex_provider = VertexGeminiInferenceProvider(project_id="grademy-test")
+        vertex_assessment = await vertex_provider.assess(issue, context)
+        assert vertex_assessment.classification == "superseded_task"
+
+    asyncio.run(_run())
