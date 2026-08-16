@@ -87,6 +87,18 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             source_path TEXT,
             title TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS brain_notebooklm_mirror_status (
+            item_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'vault',
+            local_checksum TEXT,
+            export_path TEXT,
+            status TEXT DEFAULT 'pending',
+            last_synced_at TEXT,
+            last_error TEXT,
+            title TEXT
+        );
     """)
     conn.commit()
 

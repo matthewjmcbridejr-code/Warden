@@ -2774,12 +2774,19 @@
     const listEl = document.getElementById("connectors-provider-list");
     if (!listEl) return;
     try {
-      const [provData, accData] = await Promise.all([
+      const [provData, accData, mailData] = await Promise.all([
         requestJson(`${MCH}/warden/connectors/providers`),
         requestJson(`${MCH}/warden/connectors/accounts`),
+        requestJson(`${MCH}/warden/mail/accounts?verify_live=true`),
       ]);
       const providers = (provData && provData.providers) || [];
-      const accounts = (accData && accData.accounts) || [];
+      const mailHealthById = new Map(
+        (((mailData && mailData.accounts) || []).map((account) => [account.account_id, account.health]))
+      );
+      const accounts = ((accData && accData.accounts) || []).map((account) => ({
+        ...account,
+        health: mailHealthById.get(account.account_id) || account.health,
+      }));
 
       if (!providers.length) {
         listEl.innerHTML = '<p class="connectors-empty">No connector providers registered.</p>';
@@ -2797,22 +2804,33 @@
         const caps = (p.capabilities || []).join(", ") || "—";
         const connected = connectedByProvider[p.provider_id] || [];
         const isConnected = connected.length > 0;
-        const configuredClass = isConnected ? "connector-configured" : (p.configured ? "connector-ready" : "connector-unconfigured");
-        const statusLabel = isConnected ? `${connected.length} account${connected.length > 1 ? "s" : ""} connected` : (p.configured ? "Ready to connect" : "Setup required");
-        const statusPillClass = isConnected ? "status-connected" : (p.configured ? "status-ready" : "status-coming");
+        const operationalCount = connected.filter((account) => account.health && account.health.operational === true).length;
+        const configuredClass = operationalCount > 0 ? "connector-configured" : (isConnected || p.configured ? "connector-ready" : "connector-unconfigured");
+        const statusLabel = operationalCount > 0
+          ? `${operationalCount} of ${connected.length} account${connected.length > 1 ? "s" : ""} operational`
+          : isConnected
+            ? `${connected.length} credential${connected.length > 1 ? "s" : ""} saved · needs attention`
+            : (p.configured ? "Ready to connect" : "Setup required");
+        const statusPillClass = operationalCount > 0 ? "status-connected" : (isConnected || p.configured ? "status-ready" : "status-coming");
 
         // Connected accounts rows
         const accountsHtml = connected.map((a) => {
-          const accountStatus = a.status === "connected" ? "Connected"
+          const health = a.health || {};
+          const accountStatus = health.state === "operational" ? "Operational"
+            : health.state === "needs_reauth" ? "Reconnect"
+            : health.state === "unavailable" ? "Unavailable"
+            : health.state === "unsupported" ? "Configured"
+            : health.state === "unchecked" ? "Not checked"
             : a.status === "needs_check" ? "Needs check"
             : a.status === "needs_reauth" ? "Reconnect"
-            : (a.status || "Unknown");
-          const statusClass = a.status === "connected" ? "status-connected" : "status-ready";
+            : "Credential saved";
+          const statusClass = health.operational === true ? "status-connected" : "status-ready";
           const persistence = a.credential_stored ? "Saved locally" : "Credential missing";
+          const healthNote = health.message ? ` · ${health.message}` : "";
           return `
             <div class="connector-account-row" data-account-id="${escapeHtml(a.account_id)}">
               <span class="connector-account-email">${escapeHtml(a.display_email || a.account_id)}</span>
-              <span class="connector-account-persistence">${escapeHtml(persistence)}</span>
+              <span class="connector-account-persistence">${escapeHtml(persistence + healthNote)}</span>
               <span class="status-pill ${statusClass}" style="font-size:0.72rem;">${escapeHtml(accountStatus)}</span>
               <button type="button" class="btn connector-disconnect-btn"
                 data-disconnect-id="${escapeHtml(a.account_id)}" style="font-size:0.75rem;padding:2px 8px;">Disconnect</button>
@@ -2847,12 +2865,14 @@
               <div class="connector-form-row">
                 <label class="connector-label">Google Email Address</label>
                 <input type="email" class="connector-input" placeholder="you@gmail.com or you@company.com"
-                  id="gmail-imap-email-input" autocomplete="email" />
+                  id="gmail-imap-email-input" name="warden-google-mailbox-email"
+                  autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
               </div>
               <div class="connector-form-row">
                 <label class="connector-label">Google App Password</label>
                 <input type="password" class="connector-input" placeholder="16-character app password"
-                  id="gmail-imap-pass-input" autocomplete="off" spellcheck="false" />
+                  id="gmail-imap-pass-input" name="warden-google-app-password-new"
+                  autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" spellcheck="false" />
               </div>
               <div class="connector-setup-actions">
                 <button type="button" class="btn primary connector-gmail-imap-submit-btn">
@@ -2885,12 +2905,14 @@
                       <div class="connector-form-row">
                         <label class="connector-label">Client ID</label>
                         <input type="text" class="connector-input connector-client-id-input"
-                          placeholder="Paste Client ID" autocomplete="off" spellcheck="false" />
+                          name="warden-google-oauth-client-id" placeholder="Paste Client ID"
+                          autocomplete="off" data-lpignore="true" data-1p-ignore="true" spellcheck="false" />
                       </div>
                       <div class="connector-form-row">
                         <label class="connector-label">Client Secret</label>
                         <input type="password" class="connector-input connector-client-secret-input"
-                          placeholder="Paste Client Secret" autocomplete="off" spellcheck="false" />
+                          name="warden-google-oauth-client-secret-new" placeholder="Paste Client Secret"
+                          autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" spellcheck="false" />
                       </div>
                       <div class="connector-setup-actions">
                         <button type="button" class="btn primary connector-save-config-btn"
@@ -2979,12 +3001,14 @@
                 <div class="connector-form-row">
                   <label class="connector-label">iCloud Email</label>
                   <input type="email" class="connector-input" placeholder="your@icloud.com or me.com"
-                    id="icloud-email-input" autocomplete="email" />
+                    id="icloud-email-input" name="warden-icloud-mailbox-email"
+                    autocomplete="off" data-lpignore="true" data-1p-ignore="true" />
                 </div>
                 <div class="connector-form-row">
                   <label class="connector-label">App-Specific Password</label>
                   <input type="password" class="connector-input" placeholder="xxxx-xxxx-xxxx-xxxx"
-                    id="icloud-pass-input" autocomplete="off" spellcheck="false" />
+                    id="icloud-pass-input" name="warden-icloud-app-password-new"
+                    autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" spellcheck="false" />
                 </div>
                 <div class="connector-setup-actions">
                   <button type="button" class="btn primary connector-icloud-submit-btn">
@@ -4943,7 +4967,8 @@
 
     const accounts = cc.accounts;
     const accountsUnknown = accounts === null || accounts === undefined;
-    const mailConnected = !accountsUnknown && accounts.some((a) => a.status === "connected" || a.status === "active");
+    const mailConfigured = !accountsUnknown && accounts.some((a) => a.credential_stored);
+    const mailConnected = !accountsUnknown && accounts.some((a) => a.health && a.health.operational === true);
 
     const evidenceCount = (state.recentEvidence || []).length;
     const steps = (state.activeCaptainPlan && state.activeCaptainPlan.steps) || [];
@@ -4985,8 +5010,10 @@
       };
     } else if (!accountsUnknown && !mailConnected) {
       move = {
-        title: "Connect Gmail or iCloud",
-        reason: "The assistant can search your inbox once a read-only mail account is connected.",
+        title: mailConfigured ? "Reconnect mail access" : "Connect Gmail or iCloud",
+        reason: mailConfigured
+          ? "Warden has a saved mail credential, but live read-only mailbox access is not operational."
+          : "The assistant can search your inbox once a read-only mail account is connected.",
         ctaLabel: "Open Mail Settings",
         ctaAction: "goto-mail",
       };
@@ -5116,7 +5143,7 @@
     const [sourcesRes, healthRes, accountsRes] = await Promise.allSettled([
       requestJsonTimeout(`${MCH}/warden/brain/sources?limit=6`, {}, 8000),
       requestJsonTimeout(`${MCH}/warden/brain/health`, {}, 8000),
-      requestJsonTimeout(`${MCH}/warden/connectors/accounts`, {}, 8000),
+      requestJsonTimeout(`${MCH}/warden/mail/accounts?verify_live=true`, {}, 10000),
     ]);
     state.cc.sources = sourcesRes.status === "fulfilled" ? (sourcesRes.value.sources || []) : null;
     state.cc.brainHealth = healthRes.status === "fulfilled" ? healthRes.value : null;

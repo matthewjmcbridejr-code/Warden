@@ -52,6 +52,18 @@ async def test_register_and_get_client_round_trip(provider):
     assert client.client_name == "Test Client"
 
 
+async def test_client_summary_exposes_identity_without_credentials(provider, oauth_env):
+    await _register_client(provider, client_id="hyperagent-123")
+
+    summary = oauth_env.get_client_summary("hyperagent-123")
+
+    assert summary == {
+        "client_id": "hyperagent-123",
+        "client_name": "Test Client",
+    }
+    assert "secret" not in summary
+
+
 async def test_register_client_rejects_http_redirect_uri(provider, oauth_env):
     from mcp.server.auth.provider import RegistrationError
     info = OAuthClientInformationFull(

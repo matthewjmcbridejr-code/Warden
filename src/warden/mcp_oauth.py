@@ -98,6 +98,24 @@ def _save(name: str, data: dict) -> None:
         pass
 
 
+def get_client_summary(client_id: str) -> dict[str, str] | None:
+    """Return non-secret registration metadata for one OAuth client.
+
+    Tool handlers use this to attribute activity to the calling application.
+    Client secrets and redirect metadata are intentionally excluded.
+    """
+    if not client_id:
+        return None
+    with _LOCK:
+        record = _load("clients.json").get(client_id)
+    if not isinstance(record, dict):
+        return None
+    return {
+        "client_id": client_id,
+        "client_name": str(record.get("client_name") or client_id),
+    }
+
+
 class OAuthProvider(OAuthAuthorizationServerProvider):
     """Single-owner OAuth 2.1 provider."""
 

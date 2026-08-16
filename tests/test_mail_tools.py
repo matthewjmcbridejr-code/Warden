@@ -76,6 +76,55 @@ def test_mcp_mail_search_returns_error_without_account_id():
     assert "error" in result or result.get("ok") is False
 
 
+def test_mcp_mail_accounts_status_reports_operational_health(monkeypatch):
+    import urllib.request
+    from src.warden import brain_mcp_server as server
+
+    payload = {
+        "accounts": [{
+            "account_id": "gmail-1",
+            "provider": "gmail",
+            "display_email": "user@gmail.com",
+            "status": "connected",
+            "health": {
+                "state": "needs_reauth",
+                "operational": False,
+                "message": "Reconnect Gmail.",
+            },
+        }],
+        "configured_count": 1,
+        "operational_count": 0,
+        "verified_live": True,
+    }
+    seen = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(payload).encode()
+
+    def fake_urlopen(url, timeout):
+        seen["url"] = url
+        seen["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(server, "get_access_token", lambda: None)
+
+    result = json.loads(server.warden_mail_accounts_status())
+
+    assert seen["url"].endswith("/warden/mail/accounts?verify_live=true")
+    assert result["data"]["configured"] is True
+    assert result["data"]["operational"] is False
+    assert result["data"]["connected"] is False
+    assert result["data"]["accounts"][0]["health"]["state"] == "needs_reauth"
+
+
 # ─── Mail trace step in Marius Agent ──────────────────────────────────────────
 
 def test_mail_tool_appears_in_trace(monkeypatch):

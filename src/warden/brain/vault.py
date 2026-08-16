@@ -38,7 +38,7 @@ VAULT_FOLDERS = [
 
 EXCLUDE_DIRS = {
     ".git", ".obsidian", ".trash", "node_modules",
-    "__pycache__", ".venv", "venv", ".env",
+    "__pycache__", ".venv", "venv", ".env", "notebooklm",
 }
 
 EXCLUDE_EXTENSIONS = {".sh", ".py", ".js", ".ts", ".env", ".pem", ".key", ".crt"}

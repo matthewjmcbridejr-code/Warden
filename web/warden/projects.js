@@ -538,6 +538,26 @@
     }
   }
 
+  async function triggerNotebookLMMirror(projectId) {
+    if (!projectId) return;
+    const btn = document.getElementById("notebooklm-mirror-btn");
+    const statusEl = document.getElementById("notebooklm-mirror-status");
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = "Mirroring...";
+    try {
+      const res = await apiFetch(`${API}/projects/${projectId}/notebooklm-mirror`, { method: "POST" });
+      if (res && res.ok) {
+        if (statusEl) statusEl.textContent = `Synced ${res.synced} items to NotebookLM`;
+      } else {
+        if (statusEl) statusEl.textContent = `Mirror error: ${res?.error || "Failed"}`;
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Mirror error: ${err.message || err}`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   /* Load projects                                                        */
   /* ------------------------------------------------------------------ */

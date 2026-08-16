@@ -7,6 +7,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 from .base import MailProvider
@@ -92,8 +93,14 @@ class GmailProvider(MailProvider):
         """Refresh the access token using the refresh token."""
         if not self._refresh_token:
             raise TokenExpiredError("No refresh token available")
-        client_id = __import__("os").getenv("WARDEN_GOOGLE_OAUTH_CLIENT_ID", "")
-        client_secret = __import__("os").getenv("WARDEN_GOOGLE_OAUTH_CLIENT_SECRET", "")
+        # Warden supports credentials stored in its local connector vault as
+        # well as environment variables. Using only getenv here made a
+        # successfully connected mailbox fail as soon as its first one-hour
+        # access token expired.
+        from ..connectors.oauth import get_provider_credentials
+        client_id, client_secret = get_provider_credentials("gmail")
+        if not client_id:
+            raise TokenExpiredError("Gmail OAuth client is not configured")
         payload = urllib.parse.urlencode({
             "grant_type": "refresh_token",
             "refresh_token": self._refresh_token,
@@ -104,8 +111,28 @@ class GmailProvider(MailProvider):
                             {"Content-Type": "application/x-www-form-urlencoded"})
         if "access_token" in result:
             self._access_token = result["access_token"]
+            self._persist_refreshed_token(result)
         else:
             raise TokenExpiredError("Token refresh failed")
+
+    def _persist_refreshed_token(self, result: dict) -> None:
+        """Persist the rotated access token while retaining the refresh token."""
+        from ..connectors.store import ConnectorStore
+
+        store = ConnectorStore()
+        token_str = store._get_token(self._account_id)
+        try:
+            stored = json.loads(token_str or "{}")
+        except Exception:
+            stored = {}
+        stored.update({
+            "access_token": self._access_token,
+            "refresh_token": self._refresh_token,
+            "expires_in": result.get("expires_in"),
+            "token_type": result.get("token_type", stored.get("token_type", "Bearer")),
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        store._store_token(self._account_id, json.dumps(stored))
 
     def check_connection(self) -> bool:
         try:

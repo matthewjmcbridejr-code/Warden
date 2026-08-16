@@ -4807,6 +4807,105 @@ def post_cd_task_failure(task_id: str, body: _FailureBody):
     return {"ok": True, "task": task}
 
 
+# ---------------------------------------------------------------------------
+# Task Lifecycle & Captain Orchestrator API Routes
+# ---------------------------------------------------------------------------
+
+class TaskUpdatePayload(BaseModel):
+    updates: dict = {}
+    actor: str = ""
+
+class TaskCancelPayload(BaseModel):
+    reason: str
+    actor: str = ""
+
+class TaskSupersedePayload(BaseModel):
+    reason: str
+    actor: str = ""
+    superseded_by_task: str = ""
+    superseded_by_decision: str = ""
+
+class IssueResolvePayload(BaseModel):
+    resolution: str
+    actor: str = ""
+
+class ReconcilePayload(BaseModel):
+    project: str = ""
+    trigger: str = "manual"
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/update")
+def api_update_task(task_id: str, body: TaskUpdatePayload):
+    from src.warden.board import update_task
+    try:
+        updated = update_task(task_id, body.updates, actor=body.actor)
+        return {"ok": True, "task": updated}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/cancel")
+def api_cancel_task(task_id: str, body: TaskCancelPayload):
+    from src.warden.board import cancel_task
+    try:
+        cancelled = cancel_task(task_id, body.reason, actor=body.actor)
+        return {"ok": True, "task": cancelled}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.post("/warden/board/tasks/{task_id}/supersede")
+def api_supersede_task(task_id: str, body: TaskSupersedePayload):
+    from src.warden.board import supersede_task
+    try:
+        superseded = supersede_task(
+            task_id,
+            body.reason,
+            actor=body.actor,
+            superseded_by_task=body.superseded_by_task,
+            superseded_by_decision=body.superseded_by_decision,
+        )
+        return {"ok": True, "task": superseded}
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+
+@mcharness_router.get("/warden/board/tasks/{task_id}/revalidate")
+def api_revalidate_task(task_id: str):
+    from src.warden.board import revalidate_task_or_claim
+    return {"ok": True, "result": revalidate_task_or_claim(task_id)}
+
+@mcharness_router.get("/warden/orchestrator/status")
+def api_orchestrator_status(project: str = ""):
+    from src.warden.captain_orchestrator import list_issues
+    issues = list_issues(project=project, status="open")
+    return {"ok": True, "active_issues_count": len(issues), "issues": [i.model_dump(mode="json") for i in issues]}
+
+@mcharness_router.get("/warden/orchestrator/issues")
+def api_list_issues(project: str = "", status: str = "", kind: str = ""):
+    from src.warden.captain_orchestrator import list_issues
+    issues = list_issues(project=project, status=status, kind=kind)
+    return {"ok": True, "count": len(issues), "issues": [i.model_dump(mode="json") for i in issues]}
+
+@mcharness_router.get("/warden/orchestrator/issues/{issue_id}")
+def api_get_issue(issue_id: str):
+    from src.warden.captain_orchestrator import get_issue
+    issue = get_issue(issue_id)
+    if not issue:
+        raise HTTPException(404, f"Issue {issue_id} not found.")
+    return {"ok": True, "issue": issue.model_dump(mode="json")}
+
+@mcharness_router.post("/warden/orchestrator/issues/{issue_id}/resolve")
+def api_resolve_issue(issue_id: str, body: IssueResolvePayload):
+    from src.warden.captain_orchestrator import resolve_issue
+    issue = resolve_issue(issue_id, body.resolution, actor=body.actor)
+    if not issue:
+        raise HTTPException(404, f"Issue {issue_id} not found.")
+    return {"ok": True, "issue": issue.model_dump(mode="json")}
+
+@mcharness_router.post("/warden/orchestrator/reconcile")
+def api_reconcile(body: ReconcilePayload):
+    from src.warden.captain_orchestrator import reconcile
+    issues = reconcile(project=body.project, trigger=body.trigger)
+    return {"ok": True, "trigger": body.trigger, "issues": [i.model_dump(mode="json") for i in issues]}
+
+
 class _HandoffBody(BaseModel):
     to_agent: str
     note: str = ""
@@ -5747,15 +5846,34 @@ def post_warden_icloud_connect(body: ICloudConnectRequest):
 # ─── Mail endpoints ───────────────────────────────────────────────────────────
 
 @mcharness_router.get("/warden/mail/accounts")
-def get_warden_mail_accounts():
-    """List connected mail accounts (no tokens returned)."""
+def get_warden_mail_accounts(verify_live: bool = False):
+    """List mail accounts and optionally verify read-only provider access.
+
+    ``credential_stored`` means configured, not operational. When
+    ``verify_live`` is true each account receives a redacted ``health`` record
+    based on a bounded provider check. Tokens and passwords are never returned.
+    """
     from .connectors.store import ConnectorStore
-    from .connectors.registry import PROVIDERS
+    from .mail.health import check_mail_accounts
     all_accounts = ConnectorStore().list_accounts(redact=True)
     mail_providers = {"gmail", "outlook", "icloud"}
     mail_accounts = [a for a in all_accounts
                      if a.get("provider") in mail_providers]
-    return {"ok": True, "accounts": mail_accounts, "count": len(mail_accounts)}
+    health_records = check_mail_accounts(mail_accounts, verify_live=verify_live)
+    for account, health in zip(mail_accounts, health_records):
+        account["health"] = health
+    operational_count = sum(
+        1 for account in mail_accounts
+        if account.get("health", {}).get("operational") is True
+    )
+    return {
+        "ok": True,
+        "accounts": mail_accounts,
+        "count": len(mail_accounts),
+        "configured_count": sum(1 for account in mail_accounts if account.get("credential_stored")),
+        "operational_count": operational_count,
+        "verified_live": verify_live,
+    }
 
 
 @mcharness_router.get("/warden/mail/search")
@@ -5858,6 +5976,12 @@ class BrainMirrorRequest(BaseModel):
     dry_run: bool = True
     source_ids: list[str] = []
     limit: int = 50
+
+
+class NotebookLMMirrorRequest(BaseModel):
+    project_id: str
+    dry_run: bool = False
+    limit: int = 100
 
 
 class BrainProviderConfigSaveRequest(BaseModel):
@@ -6063,6 +6187,29 @@ def get_brain_mirror_status():
     """Return mirror sync status for all sources."""
     from .brain.mirror import mirror_status
     result = mirror_status()
+    return {"ok": True, **result}
+
+
+@mcharness_router.post("/warden/brain/notebooklm/mirror")
+def post_brain_notebooklm_mirror(body: NotebookLMMirrorRequest):
+    """Mirror project vault notes and memories into NotebookLM source bundle."""
+    from .brain.notebooklm_mirror import mirror_project_to_notebooklm
+    try:
+        result = mirror_project_to_notebooklm(
+            project_id=body.project_id,
+            dry_run=body.dry_run,
+            limit=body.limit,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        raise HTTPException(400, f"NotebookLM mirror failed: {exc}")
+
+
+@mcharness_router.get("/warden/brain/notebooklm/mirror-status")
+def get_brain_notebooklm_mirror_status(project_id: str = ""):
+    """Return NotebookLM mirror sync status."""
+    from .brain.notebooklm_mirror import notebooklm_mirror_status
+    result = notebooklm_mirror_status(project_id=project_id or None)
     return {"ok": True, **result}
 
 

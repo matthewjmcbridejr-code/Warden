@@ -197,15 +197,22 @@ def tool_warden_context(query: str = "") -> dict:
 
 
 def tool_mail_accounts() -> dict:
-    """Check which mail accounts are connected (Gmail, iCloud, Outlook)."""
+    """Check which mail accounts are configured and operational."""
     import urllib.request
     try:
-        with urllib.request.urlopen(f"{WARDEN_API_BASE}/warden/mail/accounts", timeout=5) as r:
+        with urllib.request.urlopen(
+            f"{WARDEN_API_BASE}/warden/mail/accounts?verify_live=true", timeout=10
+        ) as r:
             data = json.loads(r.read())
         accounts = data.get("accounts", [])
-        return {"connected": bool(accounts), "count": len(accounts),
+        operational = data.get("operational_count", 0) > 0
+        return {"configured": bool(accounts), "connected": operational,
+                "operational": operational, "count": len(accounts),
+                "configured_count": data.get("configured_count", 0),
+                "operational_count": data.get("operational_count", 0),
                 "accounts": [{"account_id": a.get("account_id"), "provider": a.get("provider"),
-                               "display_email": a.get("display_email"), "status": a.get("status")}
+                               "display_email": a.get("display_email"), "status": a.get("status"),
+                               "health": a.get("health")}
                               for a in accounts]}
     except Exception as e:
         return {"error": str(e), "connected": False}

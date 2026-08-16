@@ -15,6 +15,7 @@ import email.header
 import imaplib
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -25,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
+
+
+def _imap_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("WARDEN_MAIL_CONNECT_TIMEOUT_SECONDS", "6")))
+    except ValueError:
+        return 6.0
 
 _imap_factory = None  # test injection: callable(host, port) -> IMAP4_SSL-like
 
@@ -37,7 +45,7 @@ def set_imap_factory(fn) -> None:
 def _make_imap(host: str, port: int):
     if _imap_factory is not None:
         return _imap_factory(host, port)
-    return imaplib.IMAP4_SSL(host, port)
+    return imaplib.IMAP4_SSL(host, port, timeout=_imap_timeout_seconds())
 
 
 def _decode_header(raw: str) -> str:

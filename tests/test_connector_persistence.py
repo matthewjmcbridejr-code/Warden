@@ -93,4 +93,10 @@ def test_mail_ui_keeps_multi_account_controls_visible():
     assert "Add another Google mailbox" in app_js
     assert "Add another Microsoft account" in app_js
     assert "Add another iCloud mailbox" in app_js
+    assert 'name="warden-google-mailbox-email"' in app_js
+    assert 'name="warden-google-app-password-new"' in app_js
+    assert 'name="warden-google-oauth-client-secret-new"' in app_js
+    assert 'name="warden-icloud-app-password-new"' in app_js
+    assert app_js.count('autocomplete="new-password"') >= 3
+    assert app_js.count('data-lpignore="true"') >= 6
     assert 'data-scroll-target="mail-accounts-panel"' in app_html
