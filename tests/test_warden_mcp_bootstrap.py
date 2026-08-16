@@ -172,7 +172,7 @@ def test_cold_bootstrap_returns_guardrails_claims_and_freshness(monkeypatch):
     })
     server._BOOTSTRAPPED_CALLERS.clear()
 
-    payload = json.loads(server.warden_bootstrap())
+    payload = json.loads(server.warden_bootstrap(detail="full"))
 
     assert payload["ok"] is True
     data = payload["data"]
