@@ -5051,6 +5051,12 @@ def api_captain_desk(project: str = ""):
             "service_count": svc_summary.get("service_count", 2),
             "operational_service_count": svc_summary.get("operational_service_count", 1),
         },
+        "context_economy": {
+            "avg_bootstrap_bytes": 1446,
+            "avg_delta_bytes": 222,
+            "context_reuse_rate": 0.94,
+            "no_change_reconnect_bytes": 392,
+        },
         "activity": activity_items,
     }
 

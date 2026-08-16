@@ -46,6 +46,14 @@ class RunEnvelope(BaseModel):
     latency_ms: float = 0.0
     token_usage: dict[str, int] = Field(default_factory=dict)
     estimated_cost_usd: float | None = None
+    bootstrap_bytes: int = 0
+    context_delta_bytes: int = 0
+    context_pack_bytes: int = 0
+    input_context_bytes: int = 0
+    output_bytes: int = 0
+    artifact_bytes_referenced: int = 0
+    number_of_bootstraps: int = 0
+    number_of_context_deltas: int = 0
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     ended_at: str | None = None
     final_status: str = "running" # running, completed, failed, cancelled, budget_exhausted

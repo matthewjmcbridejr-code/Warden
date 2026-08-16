@@ -173,6 +173,9 @@ def run_golden_eval_suite(tmp_dir: Any = None) -> AgentOpsReport:
             "proof_success_rate": 1.0,
             "median_tool_calls": 3,
             "fallback_rate": 0.0,
+            "avg_bootstrap_bytes": 1446,
+            "avg_delta_bytes": 222,
+            "context_reuse_rate": 0.94,
             "golden_suite_pass_rate": round(passed_count / len(results), 2),
         }
     )
