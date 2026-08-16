@@ -35,7 +35,7 @@ def compute_context_revision(
             kind = m.get("kind") or ""
             if (not project or p == project or p == "all") and kind in ("decision", "constraint", "proof"):
                 mem_id = m.get("memory_id") or m.get("title") or ""
-                text = m.get("text") or m.get("title") or ""
+                text = m.get("title") or m.get("summary") or m.get("text") or ""
                 items.append(f"mem:{mem_id}:{kind}:{text}")
 
     if tasks:

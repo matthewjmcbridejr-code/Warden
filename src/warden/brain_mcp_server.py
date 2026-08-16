@@ -1463,9 +1463,9 @@ def warden_context_delta(since_revision: str, project: str = "") -> str:
         memories = [
             {
                 "memory_id": m.memory_id,
-                "title": m.title,
+                "title": m.title or m.summary[:60],
+                "summary": m.summary[:300],
                 "kind": m.kind,
-                "text": m.summary,
                 "project": m.project_id or m.scope,
             }
             for m in store.list_memories()
