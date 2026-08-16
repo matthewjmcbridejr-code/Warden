@@ -1476,6 +1476,49 @@ def warden_context_delta(since_revision: str, project: str = "") -> str:
     return _ok("warden_context_delta", delta)
 
 
+@mcp.tool()
+def warden_ground_claim(
+    subject: str,
+    statement: str,
+    evidence_refs: list[str],
+    project: str = "warden",
+    claim_type: str = "epistemic",
+    confidence: float = 1.0,
+) -> str:
+    """Grounds an operational assertion backed by evidence URIs (service://, warden://, brain://)."""
+    _require_bootstrapped()
+    from src.warden.grounding import ground_claim
+    claim = ground_claim(
+        subject=subject,
+        statement=statement,
+        evidence_refs=evidence_refs,
+        project=project or "warden",
+        claim_type=claim_type,
+        confidence=confidence,
+    )
+    return _ok("warden_ground_claim", claim.model_dump(mode="json"))
+
+
+@mcp.tool()
+def warden_get_claim(claim_id: str) -> str:
+    """Retrieves a grounded operational claim by claim_id."""
+    _require_bootstrapped()
+    from src.warden.grounding import get_claim
+    claim = get_claim(claim_id)
+    if not claim:
+        return _err("warden_get_claim", f"Claim {claim_id} not found.")
+    return _ok("warden_get_claim", claim.model_dump(mode="json"))
+
+
+@mcp.tool()
+def warden_list_claims(project: str = "", status: str = "", claim_type: str = "") -> str:
+    """Lists grounded operational claims matching filters."""
+    _require_bootstrapped()
+    from src.warden.grounding import list_claims
+    claims = list_claims(project=project, status=status, claim_type=claim_type)
+    return _ok("warden_list_claims", [c.model_dump(mode="json") for c in claims])
+
+
 # ---------------------------------------------------------------------------
 # Bulletin board / McTable coordination tools
 # ---------------------------------------------------------------------------
