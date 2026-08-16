@@ -300,3 +300,23 @@ def test_check_client_tool_catalog_freshness():
     assert stale_res["is_stale"] is True
     assert "reconnect" in stale_res["recommended_action"].lower() or "refresh" in stale_res["recommended_action"].lower()
 
+
+def test_captain_desk_endpoint_aggregation():
+    from src.warden.api import api_captain_desk
+    data = api_captain_desk(project="warden")
+    assert data["ok"] is True
+    assert "captain" in data
+    assert "noticed" in data
+    assert "fixed" in data
+    assert "needs_you" in data
+    assert "agents" in data
+    assert "board" in data
+    assert "services" in data
+    assert "activity" in data
+
+    svc = data["services"]
+    assert svc["native_tool_count"] == 60
+    assert svc["upstream_tool_count"] == 43
+    assert svc["total_tool_count"] == 103
+
+
