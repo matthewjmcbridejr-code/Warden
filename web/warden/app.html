@@ -80,8 +80,8 @@
       <!-- SECTION: AGENTIC GROUP CHAT -->
       <section id="warden-section-group-chat" class="workspace-section cmd-section active" data-section="group-chat" data-testid="warden-section-group-chat">
         <div class="group-chat-container">
-          <!-- Rooms Rail -->
-          <div class="chat-rooms-sidebar">
+          <!-- Rooms Rail (Hidden by default for max workspace width) -->
+          <div class="chat-rooms-sidebar" style="display:none;">
             <div class="chat-sidebar-header">
               <h3>TEAMS & ROOMS</h3>
               <button type="button" id="chat-new-room-btn" class="btn small">+ New</button>
@@ -99,12 +99,15 @@
             </div>
           </div>
 
-          <!-- Main Chat Panel -->
+          <!-- Main Chat Panel (100% width when drawer closed) -->
           <div class="chat-main-panel">
             <!-- Chat Header -->
             <div class="chat-header">
               <div class="chat-header-info">
-                <h2 id="chat-room-title">Warden Team</h2>
+                <div class="chat-header-title-row">
+                  <h2 id="chat-room-title">Warden Team</h2>
+                  <span class="chat-working-badge">● 3 working</span>
+                </div>
                 <div class="chat-header-participants" id="chat-header-participants">
                   <span class="p-badge online"><span class="dot">●</span> Claude UX</span>
                   <span class="p-badge online"><span class="dot">●</span> Codex Builder</span>
@@ -113,14 +116,14 @@
                 </div>
               </div>
               <div class="chat-header-actions">
-                <span id="chat-stream-status" class="chat-status-pill">● LIVE SSE</span>
-                <button type="button" id="chat-toggle-team-panel-btn" class="btn small">Team & Tasks</button>
+                <span id="chat-stream-status" class="chat-status-pill" style="display:none;"></span>
+                <button type="button" id="chat-toggle-team-panel-btn" class="btn small chat-drawer-toggle" data-testid="team-work-btn" onclick="document.getElementById('chat-team-panel').classList.toggle('open')">Team &amp; Work</button>
               </div>
             </div>
 
             <!-- Messages Stream -->
             <div class="chat-messages-stream" id="chat-messages-stream">
-              <!-- Event Bubbles & Cards -->
+              <!-- Event Bubbles, Cards, or Empty State -->
             </div>
 
             <!-- Composer & Autocomplete -->
@@ -133,43 +136,66 @@
                 <div class="mention-item" data-mention="team"><strong>@team</strong> — All Agents</div>
               </div>
               <div class="chat-composer-input-row">
-                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Talk to your team... (e.g. Finish the settings screen, @Claude UX, @Codex verify)"></textarea>
-                <button type="button" id="chat-send-btn" class="btn primary chat-send-btn">Send</button>
+                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Message your team... (or @mention someone)"></textarea>
+                <button type="button" id="chat-send-btn" class="btn primary chat-send-btn" data-testid="chat-send-btn">Send</button>
               </div>
             </div>
           </div>
 
-          <!-- Right Rail: Team & Active Tasks -->
-          <div class="chat-team-panel" id="chat-team-panel">
-            <div class="chat-panel-section">
-              <h4>ACTIVE TEAM</h4>
-              <div class="team-agent-card">
-                <span class="team-agent-name">Claude UX</span>
-                <span class="team-agent-status status-working">Working</span>
-              </div>
-              <div class="team-agent-card">
-                <span class="team-agent-name">Codex Builder</span>
-                <span class="team-agent-status status-waiting">Waiting</span>
-              </div>
-              <div class="team-agent-card">
-                <span class="team-agent-name">Spark Research</span>
-                <span class="team-agent-status status-working">Working</span>
-              </div>
-              <div class="team-agent-card">
-                <span class="team-agent-name">Warden</span>
-                <span class="team-agent-status status-online">Online</span>
-              </div>
+          <!-- Slide-Over Drawer: Team & Work (Closed by default) -->
+          <div class="chat-team-panel chat-team-drawer" id="chat-team-panel">
+            <div class="drawer-header">
+              <h3>TEAM & WORK</h3>
+              <button type="button" id="chat-close-drawer-btn" class="drawer-close-btn" onclick="document.getElementById('chat-team-panel').classList.remove('open')">&times;</button>
             </div>
-            <div class="chat-panel-section">
-              <h4>ACTIVE TASKS</h4>
-              <div id="chat-active-tasks-list" class="chat-side-list">
-                <!-- Dynamically populated -->
+            <div class="drawer-content">
+              <div class="chat-panel-section">
+                <div class="team-agent-card">
+                  <div class="agent-info">
+                    <span class="team-agent-name">Claude UX</span>
+                    <span class="agent-subtext">Working · Settings screen</span>
+                  </div>
+                  <span class="team-agent-status status-working">Working</span>
+                </div>
+                <div class="team-agent-card">
+                  <div class="agent-info">
+                    <span class="team-agent-name">Codex Builder</span>
+                    <span class="agent-subtext">Waiting · Verification</span>
+                  </div>
+                  <span class="team-agent-status status-waiting">Waiting</span>
+                </div>
+                <div class="team-agent-card">
+                  <div class="agent-info">
+                    <span class="team-agent-name">Spark Research</span>
+                    <span class="agent-subtext">Working · OAuth research</span>
+                  </div>
+                  <span class="team-agent-status status-working">Working</span>
+                </div>
+                <div class="team-agent-card">
+                  <div class="agent-info">
+                    <span class="team-agent-name">Warden</span>
+                    <span class="agent-subtext">Supervising</span>
+                  </div>
+                  <span class="team-agent-status status-online">Online</span>
+                </div>
               </div>
-            </div>
-            <div class="chat-panel-section">
-              <h4>PENDING APPROVALS</h4>
-              <div id="chat-approvals-list" class="chat-side-list">
-                <!-- Dynamically populated -->
+              <div class="drawer-divider"></div>
+              <div class="chat-panel-section work-summary-section">
+                <div class="work-summary-row">
+                  <span class="work-summary-item"><strong id="drawer-active-tasks-count">2</strong> active tasks</span>
+                  <span class="work-summary-item"><strong id="drawer-waiting-count">1</strong> waiting</span>
+                  <span class="work-summary-item"><strong id="drawer-approvals-count">0</strong> approvals</span>
+                </div>
+                <button type="button" id="chat-open-captain-desk-btn" class="btn primary full-width drawer-captain-btn">Open Captain Desk</button>
+              </div>
+              <div class="drawer-divider"></div>
+              <div class="chat-panel-section">
+                <h4>ACTIVE TASKS</h4>
+                <div id="chat-active-tasks-list" class="chat-side-list"></div>
+              </div>
+              <div class="chat-panel-section">
+                <h4>PENDING APPROVALS</h4>
+                <div id="chat-approvals-list" class="chat-side-list"></div>
               </div>
             </div>
           </div>
@@ -1313,7 +1339,7 @@
     </div>
   </div>
 
-  <script src="./app.js?v=phase3-team-chat"></script>
+  <script src="./app.js?v=phase4-team-chat-redesign"></script>
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>

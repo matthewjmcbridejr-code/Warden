@@ -6813,17 +6813,19 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * AGENTIC GROUP CHAT STYLES (FAMILY GROUP CHAT GRAMMAR)
+ * AGENTIC GROUP CHAT STYLES (HUMAN-FIRST TEAM CHAT)
  * --------------------------------------------------------------------------- */
 .group-chat-container {
-  display: grid;
-  grid-template-columns: 240px 1fr 280px;
+  position: relative;
+  display: flex;
+  flex-direction: row;
   height: calc(100vh - 120px);
   min-height: 600px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
+  width: 100%;
 }
 
 .chat-rooms-sidebar {
@@ -6905,24 +6907,44 @@ body {
 }
 
 .chat-main-panel {
+  flex: 1;
   display: flex;
   flex-direction: column;
   background: rgba(10, 16, 28, 0.95);
+  width: 100%;
+  min-width: 0;
+  height: 100%;
 }
 
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
+}
+
+.chat-header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .chat-header-info h2 {
   font-size: 1.1rem;
   font-weight: 700;
-  margin: 0 0 4px 0;
+  margin: 0;
+}
+
+.chat-working-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border-radius: 12px;
+  font-weight: 600;
 }
 
 .chat-header-participants {
@@ -6941,6 +6963,12 @@ body {
 .p-badge.online .dot { color: #34d399; }
 .p-badge.warden .dot { color: #60a5fa; }
 
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .chat-status-pill {
   font-size: 0.75rem;
   padding: 4px 10px;
@@ -6951,13 +6979,94 @@ body {
   font-weight: 600;
 }
 
+.chat-drawer-toggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.chat-drawer-toggle:hover {
+  background: rgba(125, 176, 255, 0.15);
+  border-color: rgba(125, 176, 255, 0.4);
+}
+
 .chat-messages-stream {
   flex: 1;
-  padding: 20px;
+  padding: 24px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+}
+
+/* Onboarding Empty State */
+.chat-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: auto;
+  max-width: 520px;
+  text-align: center;
+  padding: 30px 20px;
+}
+
+.empty-avatar-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: #ffffff;
+  box-shadow: 0 0 24px rgba(37, 99, 235, 0.4);
+  margin-bottom: 16px;
+}
+
+.empty-state-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0 0 8px 0;
+}
+
+.empty-state-subtitle {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0 0 24px 0;
+}
+
+.starter-prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.starter-prompt-chip {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.starter-prompt-chip:hover {
+  background: #334155;
+  border-color: #60a5fa;
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 
 .chat-bubble-row {
@@ -6978,14 +7087,14 @@ body {
 }
 
 .chat-actor-label {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: var(--muted);
   margin-bottom: 2px;
 }
 
 .chat-bubble {
-  padding: 12px 16px;
+  padding: 14px 18px;
   border-radius: 16px;
   font-size: 0.95rem;
   line-height: 1.45;
@@ -7000,7 +7109,7 @@ body {
 }
 
 .chat-bubble-row.agent-row .chat-bubble {
-  background: rgba(30, 41, 59, 0.95);
+  background: #1e293b;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #e2e8f0;
   border-bottom-left-radius: 4px;
@@ -7020,7 +7129,7 @@ body {
 }
 
 .chat-composer-container {
-  padding: 16px;
+  padding: 16px 20px;
   background: var(--bg);
   border-top: 1px solid var(--line);
   position: relative;
@@ -7029,7 +7138,7 @@ body {
 .mention-autocomplete-menu {
   position: absolute;
   bottom: 80px;
-  left: 16px;
+  left: 20px;
   background: #1e293b;
   border: 1px solid rgba(125, 176, 255, 0.3);
   border-radius: 8px;
@@ -7062,7 +7171,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--fg);
-  padding: 12px;
+  padding: 12px 14px;
   font-family: inherit;
   font-size: 0.9rem;
   resize: none;
@@ -7074,19 +7183,103 @@ body {
 }
 
 .chat-send-btn {
-  padding: 0 20px;
+  padding: 0 22px;
   border-radius: 10px;
   font-weight: 700;
 }
 
-.chat-team-panel {
-  background: var(--bg);
+/* Slide-Over Drawer: Team & Work */
+.chat-team-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: #0f172a;
   border-left: 1px solid var(--line);
-  padding: 16px;
+  z-index: 100;
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
-  gap: 20px;
+}
+
+.chat-team-drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drawer-header h3 {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--fg);
+  margin: 0;
+}
+
+.drawer-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.drawer-close-btn:hover {
+  color: var(--fg);
+}
+
+.drawer-content {
+  padding: 20px;
   overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-subtext {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.drawer-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+.work-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--fg);
+  margin-bottom: 12px;
+}
+
+.work-summary-item strong {
+  color: #60a5fa;
+}
+
+.drawer-captain-btn {
+  margin-top: 4px;
+  width: 100%;
 }
 
 .chat-panel-section h4 {
@@ -7101,10 +7294,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 6px;
-  margin-bottom: 6px;
+  border-radius: 8px;
+  margin-bottom: 8px;
 }
 
 .team-agent-name {

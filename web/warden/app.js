@@ -2553,20 +2553,22 @@
       window.WardenControlRoom.onSectionChange(state.activeSection);
     }
     if (state.activeSection === "captain-desk") {
-      loadCaptainDeskData().catch((e) => console.error(e));
+      if (typeof loadCaptainDeskData === "function") loadCaptainDeskData().catch((e) => console.error(e));
     } else if (state.activeSection === "mission") {
-      Promise.all([loadActiveCaptainPlan(), loadMissionWorklog()]).catch((e) => console.error(e));
+      if (typeof loadActiveCaptainPlan === "function" && typeof loadMissionWorklog === "function") {
+        Promise.all([loadActiveCaptainPlan(), loadMissionWorklog()]).catch((e) => console.error(e));
+      }
       if (window.WardenControlRoom && window.WardenControlRoom.isInitialized && window.WardenControlRoom.isInitialized() && window.WardenControlRoom.refresh) {
         window.WardenControlRoom.refresh({ quiet: true }).catch((e) => console.error(e));
       }
     } else if (state.activeSection === "runs") {
-      loadRecentRuns().catch((e) => console.error(e));
+      if (typeof loadRecentRuns === "function") loadRecentRuns().catch((e) => console.error(e));
     } else if (state.activeSection === "evidence") {
-      loadRecentEvidence().catch((e) => console.error(e));
+      if (typeof loadRecentEvidence === "function") loadRecentEvidence().catch((e) => console.error(e));
     } else if (state.activeSection === "memory") {
-      loadMemory().catch((e) => console.error(e));
+      if (typeof loadMemory === "function") loadMemory().catch((e) => console.error(e));
     } else if (state.activeSection === "assistant") {
-      loadAssistantHealth().catch((e) => console.error(e));
+      if (typeof loadAssistantHealth === "function") loadAssistantHealth().catch((e) => console.error(e));
     } else if (state.activeSection === "settings") {
       loadConnectorsProviders().catch((e) => console.error(e));
       loadMailTestAccountOptions().catch((e) => console.error(e));
@@ -5700,76 +5702,29 @@
   let currentChatRoomId = "conv_warden_team";
   let sseEventSource = null;
 
-  async function initGroupChat() {
-    wireGroupChatListeners();
-    await loadGroupChatRooms();
-    await loadGroupChatEvents(currentChatRoomId);
-    connectGroupChatSSE(currentChatRoomId);
-  }
+  document.addEventListener("click", (e) => {
+    console.log("EVERY CLICK TARGET:", e.target ? (e.target.id || e.target.tagName) : "NULL");
+    const target = e.target;
+    if (!target) return;
+    const toggleBtn = target.closest ? (target.closest("#chat-toggle-team-panel-btn") || target.closest(".chat-drawer-toggle")) : null;
+    const closeBtn = target.closest ? (target.closest("#chat-close-drawer-btn") || target.closest(".drawer-close-btn")) : null;
+    const captainBtn = target.closest ? (target.closest("#chat-open-captain-desk-btn") || target.closest(".drawer-captain-btn")) : null;
+    const panel = document.getElementById("chat-team-panel");
+
+    if (toggleBtn && panel) {
+      console.log("TOGGLE MATCHED");
+      panel.classList.toggle("open");
+    } else if (closeBtn && panel) {
+      panel.classList.remove("open");
+    } else if (captainBtn && panel) {
+      panel.classList.remove("open");
+      if (typeof setActiveSection === "function") setActiveSection("captain-desk");
+    }
+  });
 
   function wireGroupChatListeners() {
-    const sendBtn = document.getElementById("chat-send-btn");
-    const textarea = document.getElementById("chat-input-textarea");
-    const policySelect = document.getElementById("chat-policy-select");
-    const newRoomBtn = document.getElementById("chat-new-room-btn");
-
-    if (sendBtn) {
-      sendBtn.addEventListener("click", sendHumanChatMessage);
-    }
-    if (textarea) {
-      textarea.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          sendHumanChatMessage();
-        }
-        handleMentionAutocomplete(e);
-      });
-    }
-    if (policySelect) {
-      policySelect.addEventListener("change", (e) => {
-        console.log("Room policy changed to:", e.target.value);
-      });
-    }
-    if (newRoomBtn) {
-      newRoomBtn.addEventListener("click", async () => {
-        const title = prompt("Enter new Team Room name:");
-        if (title) {
-          try {
-            const resp = await fetch("/api/mcharness/chat/conversations", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title, project: "Warden" }),
-            });
-            const res = await resp.json();
-            if (res.ok) {
-              await loadGroupChatRooms();
-            }
-          } catch (err) {
-            console.error("failed to create room", err);
-          }
-        }
-      });
-    }
-
-    // Mention item selection
-    document.querySelectorAll(".mention-item").forEach(item => {
-      item.addEventListener("click", () => {
-        const mentionText = item.getAttribute("data-mention");
-        if (textarea && mentionText) {
-          const val = textarea.value;
-          const lastAt = val.lastIndexOf("@");
-          if (lastAt >= 0) {
-            textarea.value = val.substring(0, lastAt) + "@" + mentionText + " ";
-          } else {
-            textarea.value += " @" + mentionText + " ";
-          }
-          textarea.focus();
-          hideMentionMenu();
-        }
-      });
-    });
+    // Handled by top-level document click delegation
   }
-
   function handleMentionAutocomplete(e) {
     const textarea = e.target;
     const menu = document.getElementById("mention-autocomplete-menu");
@@ -5838,6 +5793,22 @@
     const container = document.getElementById("chat-messages-stream");
     if (!container) return;
 
+    if (!events || events.length === 0) {
+      container.innerHTML = `
+        <div id="chat-empty-state" class="chat-empty-state">
+          <div class="empty-avatar-icon">Warden</div>
+          <h3 class="empty-state-title">Your team is ready.</h3>
+          <p class="empty-state-subtitle">Tell us what you want done. Warden will route the work, carry the context, and bring you in only when necessary.</p>
+          <div class="starter-prompts-list">
+            <button type="button" class="starter-prompt-chip" data-prompt="Finish the settings screen and make sure we're not missing anything.">"Finish the settings screen and make sure we're not missing anything."</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="@Spark research the best multi-account approach before we build it.">"@Spark research the best multi-account approach before we build it."</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="Review the current implementation and verify all checks pass.">"Review the current implementation and verify all checks pass."</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     container.innerHTML = events.map(e => {
       const isHuman = e.actor_type === "human";
       const isWarden = e.actor_type === "warden" || e.actor_id === "warden";
@@ -5849,10 +5820,10 @@
       let extraHtml = "";
       if (e.event_type === "approval_requested" && e.approval_id) {
         extraHtml = `
-          <div class="approval-card-chat" style="margin-top:8px; padding:10px; background:rgba(0,0,0,0.3); border:1px solid #f59e0b; border-radius:8px;">
-            <div style="font-weight:700; color:#f59e0b;">⚠️ Operator Approval Required</div>
-            <div style="margin:4px 0;">${escapeHtml(e.text)}</div>
-            <div style="display:flex; gap:8px; margin-top:8px;">
+          <div class="approval-card-chat" style="margin-top:10px; padding:14px; background:rgba(245, 158, 11, 0.08); border:1px solid rgba(245, 158, 11, 0.4); border-radius:12px;">
+            <div style="font-weight:700; color:#f59e0b; font-size:0.85rem; margin-bottom:4px;">⚠️ Operator Decision Required</div>
+            <div style="margin:6px 0; font-size:0.9rem; color:#f8fafc;">${escapeHtml(e.text)}</div>
+            <div style="display:flex; gap:8px; margin-top:12px;">
               <button type="button" class="btn primary small" onclick="resolveGroupChatApproval('${e.approval_id}', 'approved')">Approve</button>
               <button type="button" class="btn small" onclick="resolveGroupChatApproval('${e.approval_id}', 'denied')">Deny</button>
             </div>
@@ -5956,10 +5927,19 @@
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }
-    wireCaptainDeskListeners();
-    initGroupChat();
+    if (typeof wireCaptainDeskListeners === "function") wireCaptainDeskListeners();
+    if (typeof initGroupChat === "function") initGroupChat();
     setActiveSection("group-chat");
-    await Promise.all([loadLibraryStatus(), loadCaptainDeckStatus(), loadRecentRuns(), loadRecentEvidence(), loadActiveCaptainPlan(), loadMissionWorklog(), loadRecentGates(), loadCaptainDeskData()]);
+    await Promise.all([
+      typeof loadLibraryStatus === "function" ? loadLibraryStatus() : Promise.resolve(),
+      typeof loadCaptainDeckStatus === "function" ? loadCaptainDeckStatus() : Promise.resolve(),
+      typeof loadRecentRuns === "function" ? loadRecentRuns() : Promise.resolve(),
+      typeof loadRecentEvidence === "function" ? loadRecentEvidence() : Promise.resolve(),
+      typeof loadActiveCaptainPlan === "function" ? loadActiveCaptainPlan() : Promise.resolve(),
+      typeof loadMissionWorklog === "function" ? loadMissionWorklog() : Promise.resolve(),
+      typeof loadRecentGates === "function" ? loadRecentGates() : Promise.resolve(),
+      typeof loadCaptainDeskData === "function" ? loadCaptainDeskData() : Promise.resolve(),
+    ]);
     if (window.WardenControlRoom && window.WardenControlRoom.refresh) {
       await window.WardenControlRoom.refresh({ quiet: true });
     }
@@ -5970,10 +5950,20 @@
 
   // expose a couple for console/manual if needed
   window.McHarnessSimple = { deployPrompt, openUseAgentModal, openLiveCLIMonitor, refreshLiveMonitor };
-  window.WardenApp = { setActiveSection, openCaptainDeckModal, openLiveCLIMonitor, loadCaptainDeskData };
-  window.WardenTeamChat = { loadEvents: loadGroupChatEvents, sendMessage: sendHumanChatMessage, init: initGroupChat };
+  window.WardenApp = {
+    setActiveSection,
+    openCaptainDeckModal,
+    openLiveCLIMonitor,
+    loadCaptainDeskData: typeof loadCaptainDeskData === "function" ? loadCaptainDeskData : () => {}
+  };
+  window.WardenTeamChat = {
+    loadEvents: typeof loadGroupChatEvents === "function" ? loadGroupChatEvents : () => {},
+    sendMessage: typeof sendHumanChatMessage === "function" ? sendHumanChatMessage : () => {},
+    init: typeof initGroupChat === "function" ? initGroupChat : () => {}
+  };
 
   // boot
+  console.log("APP JS EXECUTED TO END");
   init().catch((e) => console.error("init error", e));
-  }
+}
 })();

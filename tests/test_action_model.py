@@ -7,9 +7,9 @@ from src.warden.action_model import WardenActionV1, redact_sensitive_arguments, 
 def test_redact_sensitive_arguments():
     raw_args = {
         "command": "git push",
-        "api_key": "secret_key_12345",
+        "api_key": "dummy_val_123",
         "nested": {
-            "password": "my_password_xyz",
+            "password": "dummy_pass_123",
             "safe_field": "hello",
         },
     }

@@ -45,7 +45,20 @@ def test_installed_electron_app_team_chat_and_persistence():
             stream = frame.wait_for_selector("#chat-messages-stream")
             assert stream is not None
 
-            # 4. Post message and verify stream content renders
+            # 4. Test Team & Work Drawer Toggle using frame.click
+            drawer = frame.wait_for_selector("#chat-team-panel")
+            assert drawer is not None
+            assert not frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should be closed by default"
+
+            frame.click("#chat-toggle-team-panel-btn")
+            page1.wait_for_timeout(500)
+            assert frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should open after clicking Team & Work button"
+
+            frame.click("#chat-close-drawer-btn")
+            page1.wait_for_timeout(500)
+            assert not frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should close after clicking close button"
+
+            # 5. Post message and verify stream content renders
             frame.evaluate("""async () => {
                 const text = "Installed App Verification Test!";
                 await fetch("/api/mcharness/chat/conversations/conv_warden_team/messages", {
@@ -70,7 +83,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             stream_html = stream.inner_html()
             assert "Installed App Verification Test!" in stream_html
 
-            # 5. Test workspace switching: Team Chat -> Web Platforms (chat) -> Team Chat
+            # 6. Test workspace switching: Team Chat -> Web Platforms (chat) -> Team Chat
             page1.evaluate("document.querySelector('button[data-workspace=\"chat\"]').click()")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "chat"
@@ -80,7 +93,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
-            # 6. Test workspace switching: Team Chat -> Build -> Team Chat
+            # 7. Test workspace switching: Team Chat -> Build -> Team Chat
             page1.evaluate("document.querySelector('button[data-workspace=\"build\"]').click()")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "build"
@@ -90,7 +103,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
-            # 7. Capture Screenshot FROM THE REAL INSTALLED ELECTRON APP
+            # 8. Capture Screenshot FROM THE REAL INSTALLED ELECTRON APP
             screenshot_path = SCREENSHOT_DIR / "installed_warden_ai_desk_team_chat.png"
             page1.screenshot(path=str(screenshot_path))
             print(f"\n[CAPTURED REAL INSTALLED ELECTRON WINDOW SCREENSHOT]: {screenshot_path}")
