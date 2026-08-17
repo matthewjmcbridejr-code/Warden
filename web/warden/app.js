@@ -5949,6 +5949,10 @@
   window.resolveGroupChatApproval = resolveGroupChatApproval;
 
   async function init() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("embed") === "true" || window.location.hash.includes("embed")) {
+      document.body.classList.add("embed-mode");
+    }
     if (window.WardenControlRoom && window.WardenControlRoom.init) {
       window.WardenControlRoom.init();
     }

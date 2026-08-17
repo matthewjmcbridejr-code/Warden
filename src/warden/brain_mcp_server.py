@@ -2023,6 +2023,80 @@ def warden_handoff(
         return _err("warden_handoff", str(exc))
 
 
+@mcp.tool()
+def warden_complete_task(task_id: str, summary: str = "") -> str:
+    """Mark a board task as complete (done) and release active claims on it.
+
+    Args:
+        task_id: The ID or title slug of the task to complete
+        summary: Optional completion summary
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_complete_task"):
+            return _err("warden_complete_task", error)
+
+        # 1. Clean up claim files
+        claims_dir = BOARD_ROOT / "claims"
+        if claims_dir.exists():
+            for claim_file in claims_dir.glob("*.json"):
+                try:
+                    data = json.loads(claim_file.read_text())
+                    if task_id in claim_file.name or data.get("task") == task_id or data.get("task_id") == task_id:
+                        claim_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            active_jsonl = claims_dir / "active.jsonl"
+            if active_jsonl.exists():
+                lines = active_jsonl.read_text().splitlines()
+                new_lines = []
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                        if task_id not in str(item.get("task", "")) and task_id not in str(item.get("task_id", "")):
+                            new_lines.append(line)
+                    except Exception:
+                        new_lines.append(line)
+                active_jsonl.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+
+        # 2. Move task file across all status folders to done
+        done_dir = BOARD_ROOT / "tasks" / "done"
+        done_dir.mkdir(parents=True, exist_ok=True)
+
+        completed_count = 0
+        tasks_dir = BOARD_ROOT / "tasks"
+        if tasks_dir.exists():
+            for status_dir in tasks_dir.iterdir():
+                if not status_dir.is_dir() or status_dir.name == "done":
+                    continue
+                for task_file in status_dir.glob("*.json"):
+                    if task_id in task_file.name:
+                        try:
+                            task_data = json.loads(task_file.read_text())
+                            task_data["status"] = "done"
+                            task_data["_status"] = "done"
+                            task_data["completed_at"] = _ts()
+                            if summary:
+                                task_data["completion_summary"] = summary
+                            dest = done_dir / task_file.name
+                            dest.write_text(json.dumps(task_data, indent=2))
+                            task_file.unlink(missing_ok=True)
+                            completed_count += 1
+                        except Exception:
+                            pass
+
+        return _ok("warden_complete_task", {
+            "task_id": task_id,
+            "status": "done",
+            "completed_tasks": completed_count
+        })
+    except Exception as exc:
+        return _err("warden_complete_task", str(exc))
+
+
+
 # ---------------------------------------------------------------------------
 # WardenAgent + Gateway tools — accessible to any connected agent
 # ---------------------------------------------------------------------------

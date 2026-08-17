@@ -7134,3 +7134,43 @@ body {
     max-width: 92%;
   }
 }
+
+/* Embedded Presentation Mode for Electron AI Desk */
+body.embed-mode {
+  background: #0a101c !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+body.embed-mode .warden-sidebar,
+body.embed-mode .captain-deck-bar,
+body.embed-mode .brand-chip {
+  display: none !important;
+}
+
+body.embed-mode .warden-shell {
+  display: block !important;
+  grid-template-columns: 1fr !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+body.embed-mode .warden-main {
+  height: 100vh !important;
+  width: 100vw !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+body.embed-mode #warden-section-group-chat {
+  height: 100vh !important;
+  width: 100vw !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
