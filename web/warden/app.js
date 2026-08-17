@@ -5971,6 +5971,7 @@
   // expose a couple for console/manual if needed
   window.McHarnessSimple = { deployPrompt, openUseAgentModal, openLiveCLIMonitor, refreshLiveMonitor };
   window.WardenApp = { setActiveSection, openCaptainDeckModal, openLiveCLIMonitor, loadCaptainDeskData };
+  window.WardenTeamChat = { loadEvents: loadGroupChatEvents, sendMessage: sendHumanChatMessage, init: initGroupChat };
 
   // boot
   init().catch((e) => console.error("init error", e));

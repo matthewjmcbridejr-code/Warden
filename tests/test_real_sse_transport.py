@@ -1,4 +1,4 @@
-"""Real SSE transport integration test verifying wire replay and duplicate prevention."""
+"""Real SSE transport integration test verifying wire replay, sequence bounds, and zero duplicate events."""
 from __future__ import annotations
 
 import json
@@ -47,7 +47,21 @@ def test_real_sse_transport_reconnect_and_zero_duplicates():
     finally:
         sse_resp.close()
 
-    # Assert exact wire replay
+    # 4. Strengthened SSE Assertions
+    replayed_seqs = [e["seq"] for e in replayed_events]
+    replayed_ids = [e["id"] for e in replayed_events]
+    offline_events = [e for e in replayed_events if "Real SSE Wire Test Message 2 (offline)" in e.get("text", "")]
+
+    # Exact expected sequence IDs & strictly increasing order
     assert len(replayed_events) >= 2
-    assert replayed_events[0]["seq"] > seq1
-    assert "Real SSE Wire Test Message 2 (offline)" in replayed_events[0]["text"]
+    assert replayed_seqs == sorted(replayed_seqs), f"Sequence numbers not strictly increasing: {replayed_seqs}"
+
+    # Zero duplicate sequence numbers
+    assert len(replayed_seqs) == len(set(replayed_seqs)), f"Duplicate sequence numbers found: {replayed_seqs}"
+
+    # Zero duplicate event IDs
+    assert len(replayed_ids) == len(set(replayed_ids)), f"Duplicate event IDs found: {replayed_ids}"
+
+    # Offline event is definitely present exactly once
+    assert len(offline_events) == 1, f"Offline event expected once, got {len(offline_events)}"
+    assert offline_events[0]["seq"] > seq1

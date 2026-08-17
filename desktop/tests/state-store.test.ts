@@ -17,6 +17,15 @@ describe('project, profile, and platform persistence', () => {
     expect(recovered.state.version).toBe(2); expect(recovered.state.onboardingComplete).toBe(true);
   });
 
+  it('persists team-chat workspace selection across state reloads and project updates', () => {
+    const root = mkdtempSync(join(tmpdir(), 'warden-team-chat-state-'));
+    const store = new StateStore(root);
+    store.patch({ workspace: 'team-chat' });
+    expect(store.state.workspace).toBe('team-chat');
+    const recovered = new StateStore(root);
+    expect(recovered.state.workspace).toBe('team-chat');
+  });
+
   it('persists editable platforms, profile assignment, order, removal, restoration, and projects', () => {
     const root = mkdtempSync(join(tmpdir(), 'warden-state-')); const first = new StateStore(root);
     const work = first.createProfile('Work');
