@@ -16,9 +16,13 @@ def get_main_page(context, timeout=10):
     start = time.time()
     while time.time() - start < timeout:
         for p in context.pages:
-            if "index.html" in p.url or "app.asar" in p.url or (p.url.startswith("file:") and not p.url.endswith("about:blank")):
+            url = p.url
+            if ("index.html" in url or "app.asar" in url or (url.startswith("file:") and not url.endswith("about:blank"))) and "app.html" not in url:
                 return p
         time.sleep(0.5)
+    for p in context.pages:
+        if "app.html" not in p.url:
+            return p
     return context.pages[0]
 
 
