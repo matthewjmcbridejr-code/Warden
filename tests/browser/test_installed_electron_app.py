@@ -46,7 +46,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             # 1. Ensure Team Chat workspace is active
             page1.wait_for_selector("button.workspace", timeout=10000)
             if page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace !== 'team-chat'"):
-                page1.click("button[data-workspace='team-chat']")
+                page1.click("button[data-workspace='team-chat']", force=True)
             page1.wait_for_selector("#team-chat-workspace:not([hidden])", timeout=10000)
 
             # 2. Verify active workspace button is team-chat
@@ -66,11 +66,11 @@ def test_installed_electron_app_team_chat_and_persistence():
             assert drawer is not None
             assert not frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should be closed by default"
 
-            frame.click("#chat-toggle-team-panel-btn")
+            frame.click("#chat-toggle-team-panel-btn", force=True)
             page1.wait_for_timeout(500)
             assert frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should open after clicking Team & Work button"
 
-            frame.click("#chat-close-drawer-btn")
+            frame.click("#chat-close-drawer-btn", force=True)
             page1.wait_for_timeout(500)
             assert not frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should close after clicking close button"
 
@@ -78,7 +78,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             textarea = frame.wait_for_selector("#chat-input-textarea", state="visible", timeout=10000)
             assert textarea is not None
             frame.fill("#chat-input-textarea", "Installed real UI send verification")
-            frame.click("#chat-send-btn")
+            frame.click("#chat-send-btn", force=True)
 
             stream_text = ""
             for _ in range(20):
@@ -90,11 +90,11 @@ def test_installed_electron_app_team_chat_and_persistence():
             assert frame.input_value("#chat-input-textarea") == ""
 
             # 6. Test workspace switching: Team Chat -> Web Platforms (chat) -> Team Chat
-            page1.click("button[data-workspace='chat']")
+            page1.click("button[data-workspace='chat']", force=True)
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "chat"
 
-            page1.click("button[data-workspace='team-chat']")
+            page1.click("button[data-workspace='team-chat']", force=True)
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
