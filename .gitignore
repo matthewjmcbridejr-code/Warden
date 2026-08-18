@@ -53,3 +53,4 @@ configs/warden_resident.env
 .claude/
 *.tar.gz
 google-cloud-sdk/
+.vercel

@@ -1,0 +1,13 @@
+{
+  "name": "client-portal-app",
+  "version": "1.0.0",
+  "description": "Client Portal Fixture Application for Warden Finish Commercial Reality",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node -e 'console.log(\"Build complete\")'"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

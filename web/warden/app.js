@@ -5702,28 +5702,111 @@
   let currentChatRoomId = "conv_warden_team";
   let sseEventSource = null;
 
-  document.addEventListener("click", (e) => {
-    console.log("EVERY CLICK TARGET:", e.target ? (e.target.id || e.target.tagName) : "NULL");
-    const target = e.target;
-    if (!target) return;
-    const toggleBtn = target.closest ? (target.closest("#chat-toggle-team-panel-btn") || target.closest(".chat-drawer-toggle")) : null;
-    const closeBtn = target.closest ? (target.closest("#chat-close-drawer-btn") || target.closest(".drawer-close-btn")) : null;
-    const captainBtn = target.closest ? (target.closest("#chat-open-captain-desk-btn") || target.closest(".drawer-captain-btn")) : null;
-    const panel = document.getElementById("chat-team-panel");
-
-    if (toggleBtn && panel) {
-      console.log("TOGGLE MATCHED");
-      panel.classList.toggle("open");
-    } else if (closeBtn && panel) {
-      panel.classList.remove("open");
-    } else if (captainBtn && panel) {
-      panel.classList.remove("open");
-      if (typeof setActiveSection === "function") setActiveSection("captain-desk");
-    }
-  });
+  wireGroupChatListeners();
+  loadGroupChatEvents(currentChatRoomId);
+  connectGroupChatSSE(currentChatRoomId);
 
   function wireGroupChatListeners() {
-    // Handled by top-level document click delegation
+    console.error("WIRE GROUP CHAT LISTENERS CALLED, ALREADY WIRED?:", Boolean(window._groupChatListenersWired));
+    if (window._groupChatListenersWired) return;
+    window._groupChatListenersWired = true;
+
+    // Single delegated click listener on document for Team Chat controls
+    document.addEventListener("click", (e) => {
+      const target = e.target;
+      if (!target || !target.closest) return;
+
+      // 1. Send Button
+      const sendBtn = target.closest("#chat-send-btn");
+      if (sendBtn) {
+        console.error("SEND BUTTON CLICKED VIA DELEGATION");
+        e.preventDefault();
+        sendHumanChatMessage();
+        return;
+      }
+
+      // 2. Toggle Team Drawer
+      const toggleBtn = target.closest("#chat-toggle-team-panel-btn") || target.closest(".chat-drawer-toggle");
+      if (toggleBtn) {
+        e.preventDefault();
+        const panel = document.getElementById("chat-team-panel");
+        if (panel) panel.classList.toggle("open");
+        return;
+      }
+
+      // 3. Close Drawer
+      const closeBtn = target.closest("#chat-close-drawer-btn") || target.closest(".drawer-close-btn");
+      if (closeBtn) {
+        e.preventDefault();
+        const panel = document.getElementById("chat-team-panel");
+        if (panel) panel.classList.remove("open");
+        return;
+      }
+
+      // 4. Open Captain Desk
+      const captainBtn = target.closest("#chat-open-captain-desk-btn") || target.closest(".drawer-captain-btn");
+      if (captainBtn) {
+        e.preventDefault();
+        const panel = document.getElementById("chat-team-panel");
+        if (panel) panel.classList.remove("open");
+        if (typeof setActiveSection === "function") setActiveSection("captain-desk");
+        return;
+      }
+
+      // 5. Starter Prompt Chips
+      const chip = target.closest(".starter-prompt-chip");
+      if (chip) {
+        const textarea = document.getElementById("chat-input-textarea");
+        const promptText = chip.dataset.prompt || chip.textContent.trim();
+        if (textarea && promptText) {
+          textarea.value = promptText;
+          textarea.focus();
+        }
+        return;
+      }
+
+      // 6. Mention Menu Items
+      const mentionItem = target.closest(".mention-item");
+      if (mentionItem) {
+        const mention = mentionItem.dataset.mention;
+        if (mention) {
+          insertMentionIntoTextarea(mention);
+        }
+        return;
+      }
+
+      // 7. Approval Buttons
+      const approvalBtn = target.closest(".chat-approval-btn");
+      if (approvalBtn) {
+        e.preventDefault();
+        const runId = approvalBtn.dataset.runId;
+        const approvalId = approvalBtn.dataset.approvalId;
+        const decision = approvalBtn.dataset.decision;
+        const scope = approvalBtn.dataset.scope || "once";
+        if (runId && approvalId && decision && typeof respondGroupChatApproval === "function") {
+          respondGroupChatApproval(runId, approvalId, decision, scope);
+        }
+        return;
+      }
+
+      // 8. Close mention menu on outside click
+      const mentionMenu = document.getElementById("mention-autocomplete-menu");
+      if (mentionMenu && mentionMenu.style.display !== "none" && !target.closest("#mention-autocomplete-menu") && !target.closest("#chat-input-textarea")) {
+        hideMentionMenu();
+      }
+    });
+
+    // Textarea Keydown (Enter to send, Shift+Enter newline, @ mention)
+    const textarea = document.getElementById("chat-input-textarea");
+    if (textarea) {
+      textarea.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendHumanChatMessage();
+        }
+      });
+      textarea.addEventListener("input", handleMentionAutocomplete);
+    }
   }
   function handleMentionAutocomplete(e) {
     const textarea = e.target;
@@ -5847,12 +5930,25 @@
   }
 
   async function sendHumanChatMessage() {
+    if (isSendingHumanMessage) return;
+
     const textarea = document.getElementById("chat-input-textarea");
+    const sendBtn = document.getElementById("chat-send-btn");
+    const errorBanner = document.getElementById("chat-send-error");
     if (!textarea) return;
+
     const text = textarea.value.trim();
     if (!text) return;
 
-    textarea.value = "";
+    isSendingHumanMessage = true;
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Sending...";
+    }
+    if (errorBanner) {
+      errorBanner.style.display = "none";
+    }
+
     hideMentionMenu();
 
     try {
@@ -5863,10 +5959,23 @@
       });
       const res = await resp.json();
       if (res.ok) {
+        textarea.value = "";
         await loadGroupChatEvents(currentChatRoomId);
+      } else {
+        throw new Error(res.detail || res.error || "Failed to send message");
       }
     } catch (err) {
       console.error("send message error", err);
+      if (errorBanner) {
+        errorBanner.textContent = `Send failed: ${err.message || err}. Message preserved.`;
+        errorBanner.style.display = "block";
+      }
+    } finally {
+      isSendingHumanMessage = false;
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send";
+      }
     }
   }
 
@@ -5928,6 +6037,7 @@
       window.WardenControlRoom.init();
     }
     if (typeof wireCaptainDeskListeners === "function") wireCaptainDeskListeners();
+    if (typeof wireGroupChatListeners === "function") wireGroupChatListeners();
     if (typeof initGroupChat === "function") initGroupChat();
     setActiveSection("group-chat");
     await Promise.all([
@@ -5948,12 +6058,16 @@
     loadSidebarAgentsAndTasks().catch((e) => console.error("sidebar agents/tasks load error", e));
   }
 
-  // expose a couple for console/manual if needed
-  window.McHarnessSimple = { deployPrompt, openUseAgentModal, openLiveCLIMonitor, refreshLiveMonitor };
+  window.McHarnessSimple = {
+    deployPrompt: typeof deployPrompt === "function" ? deployPrompt : () => {},
+    openUseAgentModal: typeof openUseAgentModal === "function" ? openUseAgentModal : () => {},
+    openLiveCLIMonitor: typeof openLiveCLIMonitor === "function" ? openLiveCLIMonitor : () => {},
+    refreshLiveMonitor: typeof refreshLiveMonitor === "function" ? refreshLiveMonitor : () => {}
+  };
   window.WardenApp = {
-    setActiveSection,
-    openCaptainDeckModal,
-    openLiveCLIMonitor,
+    setActiveSection: typeof setActiveSection === "function" ? setActiveSection : () => {},
+    openCaptainDeckModal: typeof openCaptainDeckModal === "function" ? openCaptainDeckModal : () => {},
+    openLiveCLIMonitor: typeof openLiveCLIMonitor === "function" ? openLiveCLIMonitor : () => {},
     loadCaptainDeskData: typeof loadCaptainDeskData === "function" ? loadCaptainDeskData : () => {}
   };
   window.WardenTeamChat = {

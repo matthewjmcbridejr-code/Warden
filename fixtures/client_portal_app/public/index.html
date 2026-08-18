@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client Portal — Acme Project Hub</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --success: #10b981;
+      --border: #334155;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.25rem 2rem;
+      background: #1e293b;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #60a5fa;
+    }
+    .badge {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--success);
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    main {
+      flex: 1;
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.75rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    label {
+      display: block;
+      margin-bottom: 0.4rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    input[type="email"], input[type="password"], input[type="text"], input[type="file"] {
+      width: 100%;
+      padding: 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: #fff;
+      box-sizing: border-box;
+    }
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.65rem 1.25rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: var(--primary-hover);
+    }
+    .progress-bar-bg {
+      background: #0f172a;
+      border-radius: 8px;
+      height: 16px;
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+    .progress-bar-fill {
+      background: linear-gradient(90deg, #3b82f6, #10b981);
+      height: 100%;
+      width: 85%;
+      transition: width 0.4s ease;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    th {
+      color: var(--muted);
+    }
+    @media (max-width: 600px) {
+      main {
+        padding: 1rem;
+      }
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Acme Client Portal</h1>
+    <span class="badge" id="portal-status-badge">Project Status: 85% Complete</span>
+  </header>
+
+  <main id="app">
+    <!-- Auth Section -->
+    <section class="card" id="auth-section">
+      <h2>Client Portal Sign In</h2>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="email">Email Address</label>
+          <input type="email" id="email" value="client@acme.corp" required>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" value="••••••••" required>
+        </div>
+        <button type="submit" id="btn-login">Sign In to Dashboard</button>
+      </form>
+      <p id="auth-message" style="margin-top: 0.5rem; color: var(--success); font-size: 0.85rem; display: none;">✓ Authenticated successfully.</p>
+    </section>
+
+    <!-- Project Progress Status Section -->
+    <section class="card" id="project-status-section">
+      <h2>Project Progress Tracking</h2>
+      <div style="display: flex; justify-content: space-between; font-size: 0.95rem;">
+        <span style="font-weight: 600;" id="project-name">Acme Portal Redesign</span>
+        <span style="color: var(--success); font-weight: 700;" id="progress-text">85% Complete</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-bar" style="width: 85%;"></div>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--muted);" id="current-phase">Current Phase: Production Deployment & Acceptance Verification</p>
+    </section>
+
+    <!-- Document Upload & Listing Section -->
+    <section class="card" id="document-section">
+      <h2>Project Documents & Files</h2>
+      <form id="upload-form" onsubmit="handleUpload(event)">
+        <div class="form-group">
+          <label for="doc-file">Upload New Document</label>
+          <input type="file" id="doc-file">
+        </div>
+        <button type="submit" id="btn-upload">Upload Document</button>
+      </form>
+
+      <table id="document-list-table">
+        <thead>
+          <tr>
+            <th>Document Name</th>
+            <th>Size</th>
+            <th>Uploaded Date</th>
+          </tr>
+        </thead>
+        <tbody id="document-table-body">
+          <tr>
+            <td>Project_Specification_v1.pdf</td>
+            <td>2.4 MB</td>
+            <td>2026-08-17 10:00</td>
+          </tr>
+          <tr>
+            <td>Brand_Assets_Pack.zip</td>
+            <td>14.8 MB</td>
+            <td>2026-08-17 11:30</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    async function fetchDocuments() {
+      try {
+        const res = await fetch('/api/documents');
+        const data = await res.json();
+        if (data.ok && data.documents) {
+          const tbody = document.getElementById('document-table-body');
+          tbody.innerHTML = '';
+          data.documents.forEach(doc => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${doc.name}</td><td>${doc.size}</td><td>${doc.uploaded_at}</td>`;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load documents:', err);
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('auth-message');
+      msg.style.display = 'block';
+      msg.textContent = '✓ Authenticated as ' + email;
+    }
+
+    async function handleUpload(e) {
+      e.preventDefault();
+      const fileInput = document.getElementById('doc-file');
+      const filename = fileInput.files[0] ? fileInput.files[0].name : 'Client_Signed_Contract.pdf';
+      try {
+        const res = await fetch('/api/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: filename, size: '3.1 MB' })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          fetchDocuments();
+        }
+      } catch (err) {
+        console.error('Upload error:', err);
+      }
+    }
+
+    // Initialize
+    fetchDocuments();
+  </script>
+</body>
+</html>
