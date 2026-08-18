@@ -140,10 +140,12 @@ router.include_router(workbench_router)
 
 from .projects import router as projects_router
 from .webstudio.api import router as webstudio_router
+from .finish.api import router as finish_router
 
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
 mcharness_router.include_router(projects_router)
 mcharness_router.include_router(webstudio_router)
+mcharness_router.include_router(finish_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
 _CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]

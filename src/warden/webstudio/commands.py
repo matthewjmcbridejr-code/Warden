@@ -50,6 +50,7 @@ def run_command(
     cwd: Path | str,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     env: Optional[dict[str, str]] = None,
+    input_str: Optional[str] = None,
 ) -> CommandResult:
     """Run a command as an argv list (never via shell=True) with a hard timeout."""
     if not args:
@@ -64,6 +65,7 @@ def run_command(
             text=True,
             timeout=timeout,
             env=env,
+            input=input_str,
         )
         return CommandResult(
             args=args,
