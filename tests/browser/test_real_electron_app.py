@@ -40,6 +40,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
             page1.wait_for_timeout(2000)
 
             # 1. Ensure Team Chat workspace is active
+            page1.wait_for_selector("button.workspace", timeout=10000)
             if page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace !== 'team-chat'"):
                 page1.click("button[data-workspace='team-chat']")
             page1.wait_for_selector("#team-chat-workspace:not([hidden])", timeout=10000)
@@ -63,7 +64,9 @@ def test_real_electron_app_lifecycle_and_team_chat():
             frame.click("#chat-send-btn")
 
             # 5. Verify event text appears in stream
-            frame.wait_for_selector("text=Hello from Real Electron Integration Test!", timeout=10000)
+            page1.wait_for_timeout(1500)
+            stream_text = frame.locator("#chat-messages-stream").text_content()
+            assert "Hello from Real Electron Integration Test!" in stream_text
             assert frame.input_value("#chat-input-textarea") == ""
 
             # 6. Switch to Web Platforms workspace

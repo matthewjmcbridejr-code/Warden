@@ -40,6 +40,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             page1.wait_for_timeout(2000)
 
             # 1. Ensure Team Chat workspace is active
+            page1.wait_for_selector("button.workspace", timeout=10000)
             if page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace !== 'team-chat'"):
                 page1.click("button[data-workspace='team-chat']")
             page1.wait_for_selector("#team-chat-workspace:not([hidden])", timeout=10000)
@@ -75,7 +76,9 @@ def test_installed_electron_app_team_chat_and_persistence():
             frame.fill("#chat-input-textarea", "Installed real UI send verification")
             frame.click("#chat-send-btn")
 
-            frame.wait_for_selector("text=Installed real UI send verification", timeout=10000)
+            page1.wait_for_timeout(1500)
+            stream_text = frame.locator("#chat-messages-stream").text_content()
+            assert "Installed real UI send verification" in stream_text
             assert frame.input_value("#chat-input-textarea") == ""
 
             # 6. Test workspace switching: Team Chat -> Web Platforms (chat) -> Team Chat
