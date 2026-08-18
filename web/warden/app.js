@@ -5703,6 +5703,8 @@
   let sseEventSource = null;
 
   wireGroupChatListeners();
+  loadGroupChatEvents(currentChatRoomId);
+  connectGroupChatSSE(currentChatRoomId);
 
   function wireGroupChatListeners() {
     console.error("WIRE GROUP CHAT LISTENERS CALLED, ALREADY WIRED?:", Boolean(window._groupChatListenersWired));
