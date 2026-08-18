@@ -58,6 +58,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
             assert stream is not None
 
             # 4. Real user send interaction inside iframe
+            frame.wait_for_function("() => Boolean(window._groupChatListenersWired)", timeout=10000)
             textarea = frame.wait_for_selector("#chat-input-textarea", state="visible", timeout=10000)
             assert textarea is not None
             frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!")
