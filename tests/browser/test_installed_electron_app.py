@@ -30,7 +30,7 @@ def test_installed_electron_app_team_chat_and_persistence():
             time.sleep(0.5)
 
             # 1. Click Team Chat workspace button
-            page1.evaluate("document.querySelector('button[data-workspace=\"team-chat\"]').click()")
+            page1.click("button[data-workspace='team-chat']")
             page1.wait_for_timeout(1000)
 
             # 2. Verify active workspace button is team-chat
@@ -58,47 +58,29 @@ def test_installed_electron_app_team_chat_and_persistence():
             page1.wait_for_timeout(500)
             assert not frame.evaluate("document.getElementById('chat-team-panel').classList.contains('open')"), "Drawer should close after clicking close button"
 
-            # 5. Post message and verify stream content renders
-            frame.evaluate("""async () => {
-                const text = "Installed App Verification Test!";
-                await fetch("/api/mcharness/chat/conversations/conv_warden_team/messages", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text, actor_id: "matt" }),
-                });
-                const eventsResp = await fetch("/api/mcharness/chat/conversations/conv_warden_team/events");
-                const eventsRes = await eventsResp.json();
-                const container = document.getElementById("chat-messages-stream");
-                if (container && eventsRes.events) {
-                    container.innerHTML = eventsRes.events.map(e => `
-                        <div class="chat-bubble-row ${e.actor_type}">
-                            <span class="chat-actor-label">${e.actor_display_name || e.actor_id}</span>
-                            <div class="chat-bubble">${e.text}</div>
-                        </div>
-                    `).join("");
-                }
-            }""")
-            page1.wait_for_timeout(2000)
+            # 5. Post message via real UI interaction and verify stream content renders
+            frame.fill("#chat-input-textarea", "Installed real UI send verification")
+            frame.click("#chat-send-btn")
 
-            stream_html = stream.inner_html()
-            assert "Installed App Verification Test!" in stream_html
+            frame.wait_for_selector("text=Installed real UI send verification", timeout=10000)
+            assert frame.input_value("#chat-input-textarea") == ""
 
             # 6. Test workspace switching: Team Chat -> Web Platforms (chat) -> Team Chat
-            page1.evaluate("document.querySelector('button[data-workspace=\"chat\"]').click()")
+            page1.click("button[data-workspace='chat']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "chat"
 
-            page1.evaluate("document.querySelector('button[data-workspace=\"team-chat\"]').click()")
+            page1.click("button[data-workspace='team-chat']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
             # 7. Test workspace switching: Team Chat -> Build -> Team Chat
-            page1.evaluate("document.querySelector('button[data-workspace=\"build\"]').click()")
+            page1.click("button[data-workspace='build']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "build"
 
-            page1.evaluate("document.querySelector('button[data-workspace=\"team-chat\"]').click()")
+            page1.click("button[data-workspace='team-chat']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None

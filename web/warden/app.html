@@ -117,7 +117,7 @@
               </div>
               <div class="chat-header-actions">
                 <span id="chat-stream-status" class="chat-status-pill" style="display:none;"></span>
-                <button type="button" id="chat-toggle-team-panel-btn" class="btn small chat-drawer-toggle" data-testid="team-work-btn" onclick="document.getElementById('chat-team-panel').classList.toggle('open')">Team &amp; Work</button>
+                <button type="button" id="chat-toggle-team-panel-btn" class="btn small chat-drawer-toggle" data-testid="team-work-btn">Team &amp; Work</button>
               </div>
             </div>
 
@@ -128,6 +128,7 @@
 
             <!-- Composer & Autocomplete -->
             <div class="chat-composer-container">
+              <div id="chat-send-error" class="chat-send-error" style="display:none; padding:8px 12px; margin-bottom:8px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.4); border-radius:8px; color:#f87171; font-size:0.85rem;"></div>
               <div id="mention-autocomplete-menu" class="mention-autocomplete-menu" style="display:none;">
                 <div class="mention-item" data-mention="Claude"><strong>@Claude</strong> — UX & Frontend</div>
                 <div class="mention-item" data-mention="Codex"><strong>@Codex</strong> — Builder & Verification</div>
@@ -146,7 +147,7 @@
           <div class="chat-team-panel chat-team-drawer" id="chat-team-panel">
             <div class="drawer-header">
               <h3>TEAM & WORK</h3>
-              <button type="button" id="chat-close-drawer-btn" class="drawer-close-btn" onclick="document.getElementById('chat-team-panel').classList.remove('open')">&times;</button>
+              <button type="button" id="chat-close-drawer-btn" class="drawer-close-btn">&times;</button>
             </div>
             <div class="drawer-content">
               <div class="chat-panel-section">
@@ -1339,7 +1340,7 @@
     </div>
   </div>
 
-  <script src="./app.js?v=phase4-team-chat-redesign"></script>
+  <script src="./app.js?v=phase8-wire-fresh"></script>
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>

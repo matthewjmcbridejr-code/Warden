@@ -16,12 +16,12 @@ def test_real_electron_app_lifecycle_and_team_chat():
     assert os.path.exists(APP_BIN), f"Packaged Electron app binary missing at {APP_BIN}"
 
     # --- Session 1: Launch Electron, Click Team Chat, Send Message, Switch Workspaces ---
-    proc1 = subprocess.Popen([APP_BIN, "--no-sandbox", "--remote-debugging-port=9222"])
+    proc1 = subprocess.Popen([APP_BIN, "--no-sandbox", "--remote-debugging-port=9225"])
     time.sleep(3)
 
     try:
         with sync_playwright() as p:
-            browser1 = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            browser1 = p.chromium.connect_over_cdp("http://127.0.0.1:9225")
             context1 = browser1.contexts[0]
             page1 = context1.pages[0]
 
@@ -30,7 +30,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
             time.sleep(0.5)
 
             # 1. Click Team Chat workspace button
-            page1.evaluate("document.querySelector('button[data-workspace=\"team-chat\"]').click()")
+            page1.click("button[data-workspace='team-chat']")
             page1.wait_for_timeout(1000)
 
             # 2. Verify active workspace button
@@ -45,40 +45,22 @@ def test_real_electron_app_lifecycle_and_team_chat():
             stream = frame.wait_for_selector("#chat-messages-stream")
             assert stream is not None
 
-            # 4. Send human prompt and render team conversation inside frame
+            # 4. Real user send interaction inside iframe
             page1.wait_for_timeout(1000)
-            frame.evaluate("""async () => {
-                const text = "Hello from Real Electron Integration Test!";
-                await fetch("/api/mcharness/chat/conversations/conv_warden_team/messages", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ text, actor_id: "matt" }),
-                });
-                const eventsResp = await fetch("/api/mcharness/chat/conversations/conv_warden_team/events");
-                const eventsRes = await eventsResp.json();
-                const container = document.getElementById("chat-messages-stream");
-                if (container && eventsRes.events) {
-                    container.innerHTML = eventsRes.events.map(e => `
-                        <div class="chat-bubble-row ${e.actor_type}">
-                            <span class="chat-actor-label">${e.actor_display_name || e.actor_id}</span>
-                            <div class="chat-bubble">${e.text}</div>
-                        </div>
-                    `).join("");
-                }
-            }""")
-            page1.wait_for_timeout(2000)
+            frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!")
+            frame.click("#chat-send-btn")
 
             # 5. Verify event text appears in stream
-            stream_html = stream.inner_html()
-            assert "Hello from Real Electron Integration Test!" in stream_html
+            frame.wait_for_selector("text=Hello from Real Electron Integration Test!", timeout=10000)
+            assert frame.input_value("#chat-input-textarea") == ""
 
             # 6. Switch to Web Platforms workspace
-            page1.evaluate("document.querySelector('button[data-workspace=\"chat\"]').click()")
+            page1.click("button[data-workspace='chat']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "chat"
 
             # 7. Switch back to Team Chat
-            page1.evaluate("document.querySelector('button[data-workspace=\"team-chat\"]').click()")
+            page1.click("button[data-workspace='team-chat']")
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
@@ -95,12 +77,12 @@ def test_real_electron_app_lifecycle_and_team_chat():
     time.sleep(2)
 
     # --- Session 2: Relaunch Electron App & Verify Team Chat Persistence ---
-    proc2 = subprocess.Popen([APP_BIN, "--no-sandbox", "--remote-debugging-port=9223"])
+    proc2 = subprocess.Popen([APP_BIN, "--no-sandbox", "--remote-debugging-port=9226"])
     time.sleep(3)
 
     try:
         with sync_playwright() as p:
-            browser2 = p.chromium.connect_over_cdp("http://127.0.0.1:9223")
+            browser2 = p.chromium.connect_over_cdp("http://127.0.0.1:9226")
             context2 = browser2.contexts[0]
             page2 = context2.pages[0]
 
