@@ -12,10 +12,13 @@ SCREENSHOT_DIR = Path("/home/matt/workspaces/warden/mcharness-public-export/docs
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_main_page(context):
-    for p in context.pages:
-        if "index.html" in p.url or "app.asar" in p.url or p.url.startswith("file:"):
-            return p
+def get_main_page(context, timeout=10):
+    start = time.time()
+    while time.time() - start < timeout:
+        for p in context.pages:
+            if "index.html" in p.url or "app.asar" in p.url or (p.url.startswith("file:") and not p.url.endswith("about:blank")):
+                return p
+        time.sleep(0.5)
     return context.pages[0]
 
 
@@ -50,11 +53,12 @@ def test_real_electron_app_lifecycle_and_team_chat():
             frame = frame_element.content_frame()
             assert frame is not None, "Failed to get iframe content frame"
             
-            stream = frame.wait_for_selector("#chat-messages-stream")
+            stream = frame.wait_for_selector("#chat-messages-stream", state="visible", timeout=10000)
             assert stream is not None
 
             # 4. Real user send interaction inside iframe
-            page1.wait_for_timeout(1000)
+            textarea = frame.wait_for_selector("#chat-input-textarea", state="visible", timeout=10000)
+            assert textarea is not None
             frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!")
             frame.click("#chat-send-btn")
 
