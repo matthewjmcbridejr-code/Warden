@@ -12,6 +12,13 @@ SCREENSHOT_DIR = Path("/home/matt/workspaces/warden/mcharness-public-export/docs
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def get_main_page(context):
+    for p in context.pages:
+        if "index.html" in p.url or "app.asar" in p.url or p.url.startswith("file:"):
+            return p
+    return context.pages[0]
+
+
 def test_real_electron_app_lifecycle_and_team_chat():
     assert os.path.exists(APP_BIN), f"Packaged Electron app binary missing at {APP_BIN}"
 
@@ -23,7 +30,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
         with sync_playwright() as p:
             browser1 = p.chromium.connect_over_cdp("http://127.0.0.1:9225")
             context1 = browser1.contexts[0]
-            page1 = context1.pages[0]
+            page1 = get_main_page(context1)
 
             # Close onboarding dialog if modal
             page1.evaluate("() => { const d = document.getElementById('onboarding-dialog'); if (d) d.close(); }")
@@ -84,7 +91,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
         with sync_playwright() as p:
             browser2 = p.chromium.connect_over_cdp("http://127.0.0.1:9226")
             context2 = browser2.contexts[0]
-            page2 = context2.pages[0]
+            page2 = get_main_page(context2)
 
             # Verify workspace survived close/relaunch and restored team-chat
             restored_workspace = page2.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace")
