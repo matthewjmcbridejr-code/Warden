@@ -7316,6 +7316,117 @@ body {
 .status-waiting { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
 .status-online { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 
+/* Rich Chat Event Cards */
+.plan-card-chat, .memory-card-chat, .decision-card-chat, .finish-card-chat, .proof-card-chat, .artifact-card-chat {
+  margin-top: 10px;
+  padding: 14px 16px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(125, 176, 255, 0.25);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.plan-card-chat {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.3), rgba(15, 23, 42, 0.9));
+}
+
+.card-header-chat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.card-title-chat {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #93c5fd;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-badge-chat {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.badge-plan { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
+.badge-memory { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+.badge-decision { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
+.badge-finish { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+.badge-proof { background: rgba(14, 165, 233, 0.2); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); }
+
+.steps-list-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.step-item-chat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+.step-status-pill {
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.step-passed { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.step-in_progress { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+.step-queued { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+
+.card-actions-chat {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.memory-item-chat {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.memory-title-chat {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 3px;
+}
+
+.memory-snippet-chat {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.finish-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+  font-size: 0.82rem;
+}
+
+.finish-meta-item strong {
+  color: #34d399;
+}
+
 @media (max-width: 768px) {
   .group-chat-container {
     grid-template-columns: 1fr;

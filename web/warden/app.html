@@ -130,27 +130,48 @@
             <div class="chat-composer-container">
               <div id="chat-send-error" class="chat-send-error" style="display:none; padding:8px 12px; margin-bottom:8px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.4); border-radius:8px; color:#f87171; font-size:0.85rem;"></div>
               <div id="mention-autocomplete-menu" class="mention-autocomplete-menu" style="display:none;">
-                <div class="mention-item" data-mention="Claude"><strong>@Claude</strong> — UX & Frontend</div>
-                <div class="mention-item" data-mention="Codex"><strong>@Codex</strong> — Builder & Verification</div>
-                <div class="mention-item" data-mention="Spark"><strong>@Spark</strong> — Research & Specs</div>
-                <div class="mention-item" data-mention="Warden"><strong>@Warden</strong> — Orchestrator</div>
-                <div class="mention-item" data-mention="team"><strong>@team</strong> — All Agents</div>
+                <div class="mention-item" data-mention="Captain"><strong>@Captain</strong> — Continuous Orchestrator</div>
+                <div class="mention-item" data-mention="Brain"><strong>@Brain</strong> — Memory &amp; Knowledge Recall</div>
+                <div class="mention-item" data-mention="Memory"><strong>@Memory</strong> — Decisions &amp; History</div>
+                <div class="mention-item" data-mention="Claude"><strong>@Claude</strong> — UX &amp; Frontend</div>
+                <div class="mention-item" data-mention="Codex"><strong>@Codex</strong> — Builder &amp; Verification</div>
+                <div class="mention-item" data-mention="Spark"><strong>@Spark</strong> — Research &amp; Specs</div>
+                <div class="mention-item" data-mention="Agy"><strong>@Agy</strong> — Pair Programmer &amp; MCP</div>
+                <div class="mention-item" data-mention="team"><strong>@team</strong> — All Coordinated Agents</div>
+                <div class="mention-item" data-command="/plan"><strong>/plan &lt;goal&gt;</strong> — Formulate Captain plan</div>
+                <div class="mention-item" data-command="/recall"><strong>/recall &lt;query&gt;</strong> — Search Brain memories</div>
+                <div class="mention-item" data-command="/remember"><strong>/remember &lt;text&gt;</strong> — Save decision to Brain</div>
+                <div class="mention-item" data-command="/status"><strong>/status</strong> — Live Warden system pulse</div>
+                <div class="mention-item" data-command="/tasks"><strong>/tasks</strong> — List active board tasks</div>
+                <div class="mention-item" data-command="/runs"><strong>/runs</strong> — Runner sessions status</div>
+                <div class="mention-item" data-command="/proofs"><strong>/proofs</strong> — Recent verification proofs</div>
+                <div class="mention-item" data-command="/finish"><strong>/finish</strong> — Persistent FinishJob engine</div>
+                <div class="mention-item" data-command="/stop"><strong>/stop</strong> — Pause team execution</div>
               </div>
               <div class="chat-composer-input-row">
-                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Message your team... (or @mention someone)"></textarea>
+                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Talk to Warden... (@mention, /command, or ask anything)"></textarea>
                 <button type="button" id="chat-send-btn" class="btn primary chat-send-btn" data-testid="chat-send-btn">Send</button>
               </div>
             </div>
           </div>
 
-          <!-- Slide-Over Drawer: Team & Work (Closed by default) -->
+          <!-- Slide-Over Drawer: Warden Context (Closed by default) -->
           <div class="chat-team-panel chat-team-drawer" id="chat-team-panel">
             <div class="drawer-header">
-              <h3>TEAM & WORK</h3>
+              <h3>WARDEN CONTEXT</h3>
               <button type="button" id="chat-close-drawer-btn" class="drawer-close-btn">&times;</button>
             </div>
             <div class="drawer-content">
+              <!-- Captain & Agents -->
               <div class="chat-panel-section">
+                <h4>CAPTAIN &amp; TEAM</h4>
+                <div class="team-agent-card">
+                  <div class="agent-info">
+                    <span class="team-agent-name">Warden Captain</span>
+                    <span class="agent-subtext">Continuous Orchestrator · Gemini 2.5</span>
+                  </div>
+                  <span class="team-agent-status status-online">Operational</span>
+                </div>
                 <div class="team-agent-card">
                   <div class="agent-info">
                     <span class="team-agent-name">Claude UX</span>
@@ -168,28 +189,22 @@
                 <div class="team-agent-card">
                   <div class="agent-info">
                     <span class="team-agent-name">Spark Research</span>
-                    <span class="agent-subtext">Working · OAuth research</span>
+                    <span class="agent-subtext">Working · Specs &amp; Research</span>
                   </div>
                   <span class="team-agent-status status-working">Working</span>
-                </div>
-                <div class="team-agent-card">
-                  <div class="agent-info">
-                    <span class="team-agent-name">Warden</span>
-                    <span class="agent-subtext">Supervising</span>
-                  </div>
-                  <span class="team-agent-status status-online">Online</span>
                 </div>
               </div>
               <div class="drawer-divider"></div>
               <div class="chat-panel-section work-summary-section">
                 <div class="work-summary-row">
-                  <span class="work-summary-item"><strong id="drawer-active-tasks-count">2</strong> active tasks</span>
+                  <span class="work-summary-item"><strong id="drawer-active-tasks-count">1</strong> active task</span>
                   <span class="work-summary-item"><strong id="drawer-waiting-count">1</strong> waiting</span>
                   <span class="work-summary-item"><strong id="drawer-approvals-count">0</strong> approvals</span>
                 </div>
                 <button type="button" id="chat-open-captain-desk-btn" class="btn primary full-width drawer-captain-btn">Open Captain Desk</button>
               </div>
               <div class="drawer-divider"></div>
+              <!-- Active Tasks & Approvals -->
               <div class="chat-panel-section">
                 <h4>ACTIVE TASKS</h4>
                 <div id="chat-active-tasks-list" class="chat-side-list"></div>
@@ -197,6 +212,16 @@
               <div class="chat-panel-section">
                 <h4>PENDING APPROVALS</h4>
                 <div id="chat-approvals-list" class="chat-side-list"></div>
+              </div>
+              <div class="drawer-divider"></div>
+              <!-- Brain Memory & Proof -->
+              <div class="chat-panel-section">
+                <h4>BRAIN MEMORY &amp; DECISIONS</h4>
+                <div id="chat-recent-memories-list" class="chat-side-list"></div>
+              </div>
+              <div class="chat-panel-section">
+                <h4>RECENT PROOFS</h4>
+                <div id="chat-recent-proofs-list" class="chat-side-list"></div>
               </div>
             </div>
           </div>

@@ -204,7 +204,17 @@ async function initialize(): Promise<void> {
   const historyDialog = $('#history-dialog') as HTMLDialogElement; $('#show-history').addEventListener('click', () => { const active = ui.activeTerminal ? ui.terminals.get(ui.activeTerminal) : undefined; const list = $('#history-list'); list.replaceChildren(); for (const command of active?.metadata.history || []) { const li = document.createElement('li'); li.textContent = command; list.append(li); } historyDialog.showModal(); }); $('[data-close-dialog]').addEventListener('click', () => historyDialog.close()); $('#clear-history').addEventListener('click', async () => { const active = ui.activeTerminal ? ui.terminals.get(ui.activeTerminal) : undefined; if (active) { await window.wardenDesk.terminal.clearHistory(active.metadata.id); active.metadata.history = []; } historyDialog.close(); });
   window.wardenDesk.platform.onStatus(renderProviderStatus); window.wardenDesk.platform.onMenuAction((action) => void handleMenuAction(action)); window.wardenDesk.terminal.onData(({ id, data }) => ui.terminals.get(id)?.terminal.write(data)); window.wardenDesk.terminal.onState((metadata) => { const item = ui.terminals.get(metadata.id); if (item) item.metadata = metadata; renderTabs(); });
   window.wardenDesk.runs.onChanged((run) => { if (!ui.activeProjectId || run.projectId === ui.activeProjectId) ui.runs.set(run.id, run); renderRuns(); if (ui.activeRun === run.id) renderRun(run); onSimpleBuildRunsChanged(run); });
-  window.addEventListener('keydown', (event) => { if (ui.workspace !== 'chat' || !ui.platformId) return; if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'back'); } if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'forward'); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'reload'); } });
+  window.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'w') {
+      event.preventDefault();
+      void selectWorkspace('team-chat');
+      return;
+    }
+    if (ui.workspace !== 'chat' || !ui.platformId) return;
+    if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'back'); }
+    if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'forward'); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r') { event.preventDefault(); void window.wardenDesk.platform.action(ui.platformId, 'reload'); }
+  });
   new ResizeObserver(() => { providerBounds(); fitActiveTerminal(); }).observe(document.body); window.addEventListener('beforeunload', () => void window.wardenDesk.platform.hide());
   await Promise.all([refreshRuns(), refreshProviderAuth()]); if (activeProject) { ui.execution = activeProject.executionMode; selectExecution(ui.execution); } if (ui.platformId && state.workspace === 'chat') await selectPlatform(ui.platformId, ui.splitPlatformId); else await selectWorkspace(state.workspace); applyMode(); if (!state.onboardingComplete) await openOnboarding();
 }
