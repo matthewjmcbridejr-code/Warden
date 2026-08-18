@@ -27,11 +27,11 @@ def test_installed_electron_app_team_chat_and_persistence():
 
             # Close onboarding dialog if modal
             page1.evaluate("() => { const d = document.getElementById('onboarding-dialog'); if (d) d.close(); }")
-            time.sleep(0.5)
+            page1.wait_for_timeout(2000)
 
-            # 1. Click Team Chat workspace button
+            # 1. Click Team Chat workspace button and wait for section visibility
             page1.click("button[data-workspace='team-chat']")
-            page1.wait_for_timeout(1000)
+            page1.wait_for_selector("#team-chat-workspace:not([hidden])", timeout=10000)
 
             # 2. Verify active workspace button is team-chat
             active_workspace = page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace")
