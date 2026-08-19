@@ -11,4 +11,24 @@ describe('Codex event normalization', () => {
     const event = mapCodexNotification('turn/completed', { threadId: 't', turn: { id: 'u', status: 'completed', items: [{ type: 'agentMessage', text: 'finished' }] } }, 'run-1')!;
     expect(event.type).toBe('run.completed'); expect(event.payload.finalMessage).toBe('finished');
   });
+  it('extracts structured error messages and avoids [object Object]', () => {
+    const event = mapCodexNotification('turn/completed', {
+      threadId: 't',
+      turn: {
+        id: 'u',
+        status: 'failed',
+        error: { message: 'Rate limit exceeded on model endpoint', code: 'rate_limit' }
+      }
+    }, 'run-1')!;
+    expect(event.type).toBe('run.failed');
+    expect(event.payload.error).toBe('Rate limit exceeded on model endpoint');
+    expect(String(event.payload.error)).not.toContain('[object Object]');
+  });
+  it('extracts nested error object correctly', () => {
+    const event = mapCodexNotification('error', {
+      error: { error: { message: 'Failed to initialize workspace' } }
+    }, 'run-1')!;
+    expect(event.type).toBe('run.failed');
+    expect(event.payload.error).toBe('Failed to initialize workspace');
+  });
 });

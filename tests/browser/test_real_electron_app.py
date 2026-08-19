@@ -62,34 +62,53 @@ def test_real_electron_app_lifecycle_and_team_chat():
             stream = frame.wait_for_selector("#chat-messages-stream", state="attached", timeout=10000)
             assert stream is not None
 
-            # 4. Real user send interaction inside iframe
+            # 4. Real user send interaction inside iframe: Captain Planning Prompt
             textarea = frame.wait_for_selector("#chat-input-textarea", state="attached", timeout=10000)
             assert textarea is not None
-            frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!", force=True)
+            frame.fill("#chat-input-textarea", "Captain, make me a plan for improving Warden based on what we've built this week.", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
 
-            # 5. Verify event text appears in stream
-            stream_text = ""
+            # 5. Verify Captain plan card appears as latest response without fake agent events
+            latest_card_text = ""
             for _ in range(20):
-                stream_text = frame.locator("#chat-messages-stream").text_content()
-                if "Hello from Real Electron Integration Test!" in stream_text:
-                    break
+                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+                if cards:
+                    latest_card_text = cards[-1].text_content()
+                    if "Formulated Captain Plan" in latest_card_text:
+                        break
                 page1.wait_for_timeout(500)
-            assert "Hello from Real Electron Integration Test!" in stream_text
-            assert frame.input_value("#chat-input-textarea") == ""
+            assert "Formulated Captain Plan" in latest_card_text
+            assert "improving Warden based on what we've built this week" in latest_card_text
+            assert "split this work across the team" not in latest_card_text
+            assert "Claude UX" not in latest_card_text
 
-            # 6. Switch to Web Platforms workspace
-            page1.click("button[data-workspace='chat']", force=True)
-            page1.wait_for_timeout(500)
-            assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "chat"
+            # 6. Real user send interaction: Browsing History Prompt
+            frame.fill("#chat-input-textarea", "what have I been browsing tonight", force=True)
+            frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
+            browsing_card_text = ""
+            for _ in range(20):
+                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+                if cards:
+                    browsing_card_text = cards[-1].text_content()
+                    if "Browser" in browsing_card_text:
+                        break
+                page1.wait_for_timeout(500)
+            assert "Browser" in browsing_card_text
+            assert "split this work across the team" not in browsing_card_text
+            assert "Claude UX" not in browsing_card_text
 
-            # 7. Switch back to Team Chat
+            # 7. Switch to Build workspace and verify Brain connectivity
+            page1.click("button[data-workspace='build']", force=True)
+            page1.wait_for_timeout(1000)
+            assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "build"
+
+            # 8. Switch back to Team Chat
             page1.click("button[data-workspace='team-chat']", force=True)
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
-            # 8. Capture Real Electron Window Screenshot
+            # 9. Capture Real Electron Window Screenshot
             electron_screenshot_path = SCREENSHOT_DIR / "real_electron_team_chat_window.png"
             page1.screenshot(path=str(electron_screenshot_path))
             print(f"\n[CAPTURED REAL ELECTRON WINDOW SCREENSHOT]: {electron_screenshot_path}")
@@ -118,7 +137,9 @@ def test_real_electron_app_lifecycle_and_team_chat():
             frame2 = frame_element2.content_frame()
             assert frame2 is not None
             assert frame2.wait_for_selector("#chat-messages-stream") is not None
-            print("[PERSISTENCE PROOF PASSED]: Team Chat workspace survived app close & relaunch!")
+            relaunch_stream = frame2.locator("#chat-messages-stream").text_content()
+            assert "Formulated Captain Plan" in relaunch_stream
+            print("\n[VERIFIED PERSISTENCE ON RELAUNCH]: Plan survived reboot.")
 
     finally:
         proc2.terminate()

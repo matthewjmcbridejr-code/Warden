@@ -6,6 +6,7 @@ import { StateStore } from './state-store';
 import { TerminalManager } from './terminal-manager';
 import { RunManager } from './run-manager';
 import { PlatformManager } from './platform-manager';
+import { ServerSupervisor } from './server-supervisor';
 import { PLATFORM_PRESETS, presetInput } from './web-platforms';
 import { initializeGitRepository } from './git-safe-loop';
 import { startOAuthSmokeFixture } from './oauth-smoke';
@@ -15,6 +16,7 @@ let store: StateStore;
 let terminals: TerminalManager;
 let runs: RunManager;
 let platforms: PlatformManager;
+let supervisor: ServerSupervisor;
 let tray: Tray | null = null;
 let isQuitting = false;
 app.enableSandbox();
@@ -23,6 +25,8 @@ function stringId(value: unknown): value is string { return typeof value === 'st
 function requireMainRenderer(event: Electron.IpcMainInvokeEvent): void { if (!mainWindow || event.sender.id !== mainWindow.webContents.id || event.senderFrame?.url !== mainWindow.webContents.getURL()) throw new Error('Untrusted IPC sender.'); }
 function registerIpc(): void {
   ipcMain.handle('app:info', (event) => { requireMainRenderer(event); return { name: 'Warden AI Desk', version: app.getVersion(), platform: process.platform, arch: process.arch }; });
+  ipcMain.handle('warden:server-health', () => supervisor.isHealthy());
+  ipcMain.handle('warden:ensure-server', () => supervisor.ensureRunning());
   ipcMain.handle('state:get', () => ({ state: store.state, warning: store.warning }));
   ipcMain.handle('state:update', (_event, patch: unknown) => { if (!patch || typeof patch !== 'object') throw new Error('Invalid state update.'); const value = patch as Record<string, unknown>; const clean: Record<string, unknown> = {}; if (value.workspace === 'team-chat' || value.workspace === 'chat' || value.workspace === 'build') clean.workspace = value.workspace; if (typeof value.selectedPlatformId === 'string' && store.state.platforms.some((item) => item.id === value.selectedPlatformId)) clean.selectedPlatformId = value.selectedPlatformId; if (typeof value.activeProjectId === 'string' && store.state.projects.some((item) => item.id === value.activeProjectId)) clean.activeProjectId = value.activeProjectId; if (typeof value.onboardingComplete === 'boolean') clean.onboardingComplete = value.onboardingComplete; if (value.mode === 'simple' || value.mode === 'developer') clean.mode = value.mode; return store.patch(clean); });
   ipcMain.handle('platform:list', () => store.state.platforms.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order));
@@ -247,12 +251,19 @@ function createWindow(): void {
       } catch (error) { console.error(`WARDEN_PLATFORM_DIALOG_SMOKE failed=${error instanceof Error ? error.stack : String(error)}`); } finally { app.quit(); }
     });
   }
-  mainWindow.on('close', (event) => { if (!isQuitting && !process.argv.some((argument) => argument.startsWith('--warden-desk-'))) { event.preventDefault(); mainWindow?.hide(); return; } if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); platforms.shutdown(); terminals.shutdown(); runs.shutdown(); });
+  mainWindow.on('close', (event) => { if (!isQuitting && !process.argv.some((argument) => argument.startsWith('--warden-desk-'))) { event.preventDefault(); mainWindow?.hide(); return; } if (mainWindow) store.patch({ windowBounds: mainWindow.getBounds() }); platforms.shutdown(); terminals.shutdown(); runs.shutdown(); supervisor?.shutdown(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-app.whenReady().then(() => { store = new StateStore(app.getPath('userData')); registerIpc(); createWindow(); globalShortcut.register('CommandOrControl+Alt+W', () => { if (!mainWindow) return; if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); } }); });
-app.on('before-quit', () => { isQuitting = true; });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); tray?.destroy(); tray = null; });
+app.whenReady().then(async () => {
+  store = new StateStore(app.getPath('userData'));
+  supervisor = new ServerSupervisor();
+  void supervisor.ensureRunning();
+  registerIpc();
+  createWindow();
+  globalShortcut.register('CommandOrControl+Alt+W', () => { if (!mainWindow) return; if (mainWindow.isVisible()) mainWindow.hide(); else { mainWindow.show(); mainWindow.focus(); } });
+});
+app.on('before-quit', () => { isQuitting = true; supervisor?.shutdown(); });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); tray?.destroy(); tray = null; supervisor?.shutdown(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

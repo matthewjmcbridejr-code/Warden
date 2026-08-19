@@ -771,16 +771,21 @@ def _run_history_read_enabled() -> bool:
     return _codex_runner_ready()
 
 
-def _require_private_memory_access() -> None:
-    if not _codex_runner_ready():
-        raise HTTPException(
-            status_code=403,
-            detail="Warden Memory is available only on the private runner service.",
-        )
+def _require_private_memory_access(request: Request = None) -> None:
+    if _codex_runner_ready():
+        return
+    if _env_flag("MCHARNESS_LOCAL_DEV", "WARDEN_LOCAL_DESK", default="false"):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Warden Memory is available only on the private runner service.",
+    )
 
 
-def _require_run_history_write(request: Request) -> None:
+def _require_run_history_write(request: Request = None) -> None:
     if _run_history_write_enabled():
+        return
+    if _env_flag("MCHARNESS_LOCAL_DEV", "WARDEN_LOCAL_DESK", default="false"):
         return
     raise HTTPException(
         status_code=403,
