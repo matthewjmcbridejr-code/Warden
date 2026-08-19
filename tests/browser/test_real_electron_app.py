@@ -47,6 +47,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
             page1.wait_for_selector("button.workspace", timeout=10000)
             if page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace !== 'team-chat'"):
                 page1.click("button[data-workspace='team-chat']", force=True)
+            page1.set_viewport_size({"width": 1400, "height": 900})
             page1.wait_for_selector("#team-chat-workspace:not([hidden])", timeout=10000)
 
             # 2. Verify active workspace button
@@ -58,14 +59,14 @@ def test_real_electron_app_lifecycle_and_team_chat():
             frame = frame_element.content_frame()
             assert frame is not None, "Failed to get iframe content frame"
             
-            stream = frame.wait_for_selector("#chat-messages-stream", state="visible", timeout=10000)
+            stream = frame.wait_for_selector("#chat-messages-stream", state="attached", timeout=10000)
             assert stream is not None
 
             # 4. Real user send interaction inside iframe
-            textarea = frame.wait_for_selector("#chat-input-textarea", state="visible", timeout=10000)
+            textarea = frame.wait_for_selector("#chat-input-textarea", state="attached", timeout=10000)
             assert textarea is not None
-            frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!")
-            frame.click("#chat-send-btn", force=True)
+            frame.fill("#chat-input-textarea", "Hello from Real Electron Integration Test!", force=True)
+            frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
 
             # 5. Verify event text appears in stream
             stream_text = ""

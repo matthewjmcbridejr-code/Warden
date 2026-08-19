@@ -43,7 +43,6 @@ class FinishPipeline:
         self.chat_server_url = chat_server_url
 
     def _emit_chat_event(self, text: str, actor_display_name: str = "Warden Finish") -> None:
-        # 1. Direct persistence to GroupChatStore
         try:
             from ..group_chat import GroupChatStore, ChatEvent
             gc_store = GroupChatStore()
@@ -57,16 +56,6 @@ class FinishPipeline:
                 text=text,
             )
             gc_store.append_event(ev)
-        except Exception:
-            pass
-
-        # 2. HTTP broadcast if server is active
-        try:
-            url = f"{self.chat_server_url}/api/mcharness/chat/conversations/conv_warden_team/messages"
-            payload = json.dumps({"text": text, "actor_id": "warden", "actor_display_name": actor_display_name}).encode("utf-8")
-            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=2) as _:
-                pass
         except Exception:
             pass
 
