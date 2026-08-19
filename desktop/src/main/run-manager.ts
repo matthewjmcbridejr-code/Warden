@@ -10,6 +10,17 @@ import { createHandoff } from './handoff';
 import { RunStore } from './run-store';
 import { validateDirectory } from './terminal-manager';
 
+export async function resolveWardenBaseUrl(): Promise<string> {
+  if (process.env.WARDEN_PRIVATE_URL) return process.env.WARDEN_PRIVATE_URL;
+  for (const candidate of ['http://127.0.0.1:6969', 'http://127.0.0.1:8125']) {
+    try {
+      const response = await fetch(`${candidate}/api/mcharness/health`, { signal: AbortSignal.timeout(500) });
+      if (response.ok) return candidate;
+    } catch {}
+  }
+  return 'http://127.0.0.1:6969';
+}
+
 export class RunManager {
   readonly store: RunStore;
   readonly providers: Record<StructuredProviderId, BuildProvider>;
@@ -37,7 +48,7 @@ export class RunManager {
   private providerFor(run: WardenRun): BuildProvider { const provider = this.providers[run.provider as StructuredProviderId]; if (!provider) throw new Error(`No structured adapter for ${run.provider}.`); return provider; }
 
   async previewContext(cwd: string, prompt = ''): Promise<ContextPack> {
-    const pack = await assembleContext(cwd); const base = process.env.WARDEN_PRIVATE_URL || 'http://127.0.0.1:8125'; const projectId = basename(cwd).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 160) || 'project';
+    const pack = await assembleContext(cwd); const base = await resolveWardenBaseUrl(); const projectId = basename(cwd).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 160) || 'project';
     try {
       const response = await fetch(`${base}/api/mcharness/memory/context-pack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project_id: projectId, repo_path: cwd, agent: 'warden_ai_desk', prompt, branch: pack.branch, max_memories: 8, max_chars: 6000 }), signal: AbortSignal.timeout(2500) });
       const body = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -110,7 +121,7 @@ export class RunManager {
   async saveProof(id: string): Promise<ProofState> {
     let run = this.get(id); run = this.store.update(id, { evidence: await collectEvidence(run) });
     const content = [`Warden AI Desk proof`, `Run: ${run.id}`, `Provider: ${run.provider}`, `Authentication: ${run.auth?.source || 'unknown'} (${run.auth?.entitlement || run.auth?.state || 'unreported'})`, `Status: ${run.status}`, `Project: ${run.project}`, `Branch: ${run.evidence.branch || run.context?.branch || 'unknown'}`, `Changed files: ${run.evidence.changedFiles.join(', ') || 'none'}`, `Tests: ${run.evidence.tests.map((test) => `${test.command} => ${test.exitCode}`).join('; ') || 'none recorded'}`, `Result: ${run.evidence.finalMessage || run.error || 'none'}`].join('\n');
-    const path = this.store.saveArtifact(id, 'proof.txt', content); let proof: ProofState = { local: 'saved', brain: 'unavailable', path, detail: 'Saved locally. Warden private Brain service is unavailable.' }; const base = process.env.WARDEN_PRIVATE_URL || 'http://127.0.0.1:8125';
+    const path = this.store.saveArtifact(id, 'proof.txt', content); let proof: ProofState = { local: 'saved', brain: 'unavailable', path, detail: 'Saved locally. Warden private Brain service is unavailable.' }; const base = await resolveWardenBaseUrl();
     try {
       const response = await fetch(`${base}/api/mcharness/memory/remember`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scope: 'warden', content, source: 'warden_ai_desk', title: `Proof: ${run.project} ${run.id}`, tags: ['desktop', run.provider, 'proof'], kind: 'proof', project_id: run.project, repo_path: run.cwd, branch: run.evidence.branch || run.context?.branch, agent_id: run.provider, metadata: { run_id: run.id, thread_id: run.threadId, auth_source: run.auth?.source } }), signal: AbortSignal.timeout(3000) });
       const body = await response.json().catch(() => ({})) as Record<string, unknown>;

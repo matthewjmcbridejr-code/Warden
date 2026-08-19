@@ -111,15 +111,13 @@ def test_agent_inbox_mentions(tmp_path):
     assert "Hello @Codex" in codex_inbox[0].text
 
 
-def test_process_human_message_routes_to_team(tmp_path):
+def test_process_human_message_routes_authoritative(tmp_path):
     db_file = tmp_path / "group_chat.sqlite"
     store = GroupChatStore(db_path=db_file)
 
-    h_evt, responses = store.process_human_message("Finish the settings screen and make sure we are not missing anything.")
+    h_evt, responses = store.process_human_message("What can you help me with?")
     assert h_evt.actor_id == "matt"
-    assert len(responses) == 4
+    assert len(responses) == 1
     assert responses[0].actor_id == "warden"
-    assert "Claude has UX" in responses[0].text
-    assert responses[1].actor_display_name == "Claude UX"
-    assert responses[2].actor_display_name == "Spark Research"
-    assert responses[3].actor_display_name == "Codex Builder"
+    assert "Plan Work" in responses[0].text
+    assert "Recall Memory" in responses[0].text

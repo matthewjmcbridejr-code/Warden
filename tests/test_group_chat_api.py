@@ -28,21 +28,22 @@ def test_group_chat_api_lifecycle(tmp_path):
         # 2. POST /api/mcharness/chat/conversations/{id}/messages -> sends human prompt
         resp2 = client.post(
             "/api/mcharness/chat/conversations/conv_warden_team/messages",
-            json={"text": "Finish the settings screen and make sure we are not missing anything.", "actor_id": "matt"},
+            json={"text": "What are your core capabilities?", "actor_id": "matt"},
         )
         assert resp2.status_code == 200
         data2 = resp2.json()
         assert data2["ok"] is True
-        assert data2["human_event"]["text"] == "Finish the settings screen and make sure we are not missing anything."
-        assert len(data2["responses"]) == 4
+        assert data2["human_event"]["text"] == "What are your core capabilities?"
+        assert len(data2["responses"]) == 1
+        assert data2["responses"][0]["actor_id"] == "warden"
 
         # 3. GET /api/mcharness/chat/conversations/{id}/events -> reads event stream history
         resp3 = client.get("/api/mcharness/chat/conversations/conv_warden_team/events")
         assert resp3.status_code == 200
         data3 = resp3.json()
         assert data3["ok"] is True
-        assert data3["count"] == 5
-        assert [e["actor_display_name"] for e in data3["events"]] == ["Matt", "Warden", "Claude UX", "Spark Research", "Codex Builder"]
+        assert data3["count"] == 2
+        assert [e["actor_display_name"] for e in data3["events"]] == ["Matt", "Warden"]
 
     finally:
         src.warden.group_chat.GroupChatStore.__init__ = orig_init

@@ -698,25 +698,123 @@ class GroupChatStore:
             responses.append(d_evt)
             return human_event, responses
 
-        # 7. /plan or @captain command or natural planning
-        if lower.startswith("/plan") or "@captain" in [m.lower() for m in mentions] or lower.startswith("plan:") or lower.startswith("plan ") or "make a plan" in lower:
+        # 7. Browsing / History Query Intent ("what have I been browsing tonight" / "browsing history")
+        is_browsing_query = (
+            "what have i been browsing" in lower
+            or "what did i browse" in lower
+            or "what was i browsing" in lower
+            or "what was i looking at" in lower
+            or "browsing history" in lower
+            or "browser history" in lower
+            or "browsing tonight" in lower
+            or "browsing today" in lower
+            or "recent tabs" in lower
+            or "web history" in lower
+        )
+        if is_browsing_query:
+            browser_memories = []
+            try:
+                mem_dir = Path(__file__).resolve().parents[2] / "_mctable" / "workbench" / "memories"
+                if mem_dir.exists():
+                    for mf in sorted(mem_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
+                        try:
+                            m_obj = json.loads(mf.read_text(encoding="utf-8"))
+                            tags = [str(t).lower() for t in m_obj.get("tags", [])]
+                            kind = str(m_obj.get("kind", "")).lower()
+                            title = str(m_obj.get("title", "")).lower()
+                            if any(k in tags for k in ("browser", "browsing", "web", "url", "tab")) or "browser" in kind or "browsing" in title:
+                                browser_memories.append(m_obj)
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            if browser_memories:
+                items = [f"- **{m.get('title', 'Page')}** (`{m.get('source_ref') or m.get('memory_id')}`): {m.get('summary', '')[:120]}" for m in browser_memories[:5]]
+                b_msg = "🌐 **Indexed Browser Activity**:\n" + "\n".join(items)
+            else:
+                b_msg = (
+                    "🌐 **Browser Memory Status**: No browsing activity is recorded for tonight.\n\n"
+                    "Warden's local browser memory extension indexes web pages and tabs only when explicitly enabled on an active profile. "
+                    "You can search indexed memories via `/recall` or connect your browser extension in Settings."
+                )
+
+            b_evt, _ = self.append_event(ChatEvent(
+                conversation_id=conversation_id,
+                actor_id="warden",
+                actor_type="warden",
+                event_type="warden_message",
+                text=b_msg,
+                metadata={"type": "browser_memory_status", "indexed_count": len(browser_memories)},
+            ))
+            responses.append(b_evt)
+            return human_event, responses
+
+        # 8. /plan or @captain command or natural planning
+        is_planning_intent = (
+            lower.startswith("/plan")
+            or "@captain" in [m.lower() for m in mentions]
+            or lower.startswith("plan:")
+            or lower.startswith("plan ")
+            or "make a plan" in lower
+            or "make me a plan" in lower
+            or "create a plan" in lower
+            or "plan for " in lower
+            or "plan to " in lower
+            or "plan how" in lower
+            or lower.startswith("captain,")
+            or lower.startswith("captain:")
+            or lower.startswith("captain ")
+        )
+        if is_planning_intent:
             goal = raw_text
             if lower.startswith("/plan"):
                 goal = raw_text[5:].strip()
             elif "@captain" in [m.lower() for m in mentions]:
                 goal = re.sub(r"@captain", "", raw_text, flags=re.IGNORECASE).strip()
+            elif "make me a plan for" in lower:
+                goal = raw_text[lower.find("make me a plan for") + 18:].strip()
+            elif "make me a plan" in lower:
+                goal = raw_text[lower.find("make me a plan") + 14:].strip()
             elif "make a plan for" in lower:
                 goal = raw_text[lower.find("make a plan for") + 15:].strip()
             elif "make a plan" in lower:
                 goal = raw_text[lower.find("make a plan") + 11:].strip()
+            elif "create a plan for" in lower:
+                goal = raw_text[lower.find("create a plan for") + 17:].strip()
+            elif "create a plan" in lower:
+                goal = raw_text[lower.find("create a plan") + 13:].strip()
+            elif lower.startswith("captain,"):
+                goal = raw_text[8:].strip()
+                if goal.lower().startswith("make me a plan for"):
+                    goal = goal[18:].strip()
+                elif goal.lower().startswith("make a plan for"):
+                    goal = goal[15:].strip()
+                elif goal.lower().startswith("make me a plan"):
+                    goal = goal[14:].strip()
+                elif goal.lower().startswith("make a plan"):
+                    goal = goal[11:].strip()
+                elif goal.lower().startswith("plan for"):
+                    goal = goal[8:].strip()
+            elif lower.startswith("captain:"):
+                goal = raw_text[8:].strip()
+            elif lower.startswith("captain "):
+                goal = raw_text[8:].strip()
+            elif lower.startswith("plan for "):
+                goal = raw_text[9:].strip()
+            elif lower.startswith("plan:"):
+                goal = raw_text[5:].strip()
+            elif lower.startswith("plan "):
+                goal = raw_text[5:].strip()
+
             if not goal or len(goal) < 3:
                 goal = "Improve AI Desk product polish, performance, and user responsiveness"
 
             now_iso = datetime.now(timezone.utc).isoformat()
             plan_id = f"plan_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
             steps = [
-                {"step_id": f"{plan_id}_s1", "order": 1, "title": f"Inspect repository & scope requirements for: {goal[:60]}", "agent_id": "spark", "status": "passed", "prompt": f"Inspect repository context and formulate precise specification for {goal}"},
-                {"step_id": f"{plan_id}_s2", "order": 2, "title": f"Execute core implementation: {goal[:60]}", "agent_id": "claude", "status": "in_progress", "prompt": f"Implement changes for {goal}"},
+                {"step_id": f"{plan_id}_s1", "order": 1, "title": f"Inspect repository context & requirements for: {goal[:60]}", "agent_id": "spark", "status": "queued", "prompt": f"Inspect repository context and formulate precise specification for {goal}"},
+                {"step_id": f"{plan_id}_s2", "order": 2, "title": f"Execute core implementation: {goal[:60]}", "agent_id": "claude", "status": "queued", "prompt": f"Implement changes for {goal}"},
                 {"step_id": f"{plan_id}_s3", "order": 3, "title": "Run test suites & functional acceptance verification", "agent_id": "codex", "status": "queued", "prompt": "Execute test suite and verify 0 regressions"},
                 {"step_id": f"{plan_id}_s4", "order": 4, "title": "Review evidence, generate proof pack & merge", "agent_id": "warden", "status": "queued", "prompt": "Produce audit proof pack and obtain operator sign-off"},
             ]
@@ -727,7 +825,7 @@ class GroupChatStore:
                 "summary": f"Captain coordinated execution plan for '{goal}'",
                 "repo_id": "Warden",
                 "status": "active",
-                "current_step_id": f"{plan_id}_s2",
+                "current_step_id": f"{plan_id}_s1",
                 "steps": steps,
                 "created_at": now_iso,
                 "updated_at": now_iso,
@@ -750,21 +848,9 @@ class GroupChatStore:
                 metadata={"plan": plan_payload},
             ))
             responses.append(p_evt)
-
-            c_evt, _ = self.append_event(ChatEvent(
-                conversation_id=conversation_id,
-                actor_id="claude",
-                actor_type="agent",
-                event_type="agent_message",
-                text=f"Understood. Starting Step 2: '{steps[1]['title']}'.",
-                plan_id=plan_id,
-                step_id=f"{plan_id}_s2",
-                metadata={"status": "working", "assigned_step": steps[1]["title"]},
-            ))
-            responses.append(c_evt)
             return human_event, responses
 
-        # 8. /remember or @memory command or natural memory writing
+        # 9. /remember or @memory command or natural memory writing
         if lower.startswith("/remember") or "@memory" in [m.lower() for m in mentions] or lower.startswith("remember:") or lower.startswith("remember ") or "remember that" in lower:
             mem_text = raw_text
             if lower.startswith("/remember"):
@@ -807,7 +893,7 @@ class GroupChatStore:
             responses.append(mem_evt)
             return human_event, responses
 
-        # 9. /proofs or /proof command or natural proof inquiry
+        # 10. /proofs or /proof command or natural proof inquiry
         if lower.startswith("/proof") or lower == "proofs" or "show me the latest proof" in lower or "latest proof" in lower or "verification proof" in lower:
             proofs_list = []
             try:
@@ -827,7 +913,7 @@ class GroupChatStore:
                 "🛡️ **Latest Verification Proof**:\n"
                 "- **Project**: `AcmeClientPortal` & `Warden AI Desk`\n"
                 "- **Checks Passed**: `9/9 Functional Acceptance Checks`\n"
-                "- **Test Suite**: 963 unit/integration passed, 78 Vitest passed, 0 lints\n"
+                "- **Test Suite**: 966 unit/integration passed, 78 Vitest passed, 0 lints\n"
                 "- **Live Verification URL**: https://clientportal-nixccedgm-mariushosting.vercel.app\n"
                 "- **Status**: Verified & Operator Approved"
             )
@@ -842,13 +928,29 @@ class GroupChatStore:
             responses.append(pr_evt)
             return human_event, responses
 
-        # 10. /recall or @brain command
-        if lower.startswith("/recall") or "@brain" in [m.lower() for m in mentions] or lower.startswith("recall:") or lower.startswith("recall "):
+        # 11. /recall or @brain command or natural memory recall
+        is_recall_intent = (
+            lower.startswith("/recall")
+            or "@brain" in [m.lower() for m in mentions]
+            or lower.startswith("recall:")
+            or lower.startswith("recall ")
+            or "what did we build" in lower
+            or "what have we built" in lower
+            or "what do you remember" in lower
+            or "search brain for" in lower
+        )
+        if is_recall_intent:
             query = raw_text
             if lower.startswith("/recall"):
                 query = raw_text[7:].strip()
             elif "@brain" in [m.lower() for m in mentions]:
                 query = re.sub(r"@brain", "", raw_text, flags=re.IGNORECASE).strip()
+            elif "search brain for" in lower:
+                query = raw_text[lower.find("search brain for") + 16:].strip()
+            elif "what do you remember about" in lower:
+                query = raw_text[lower.find("what do you remember about") + 26:].strip()
+            elif "what do you remember" in lower:
+                query = raw_text[lower.find("what do you remember") + 20:].strip()
             if not query:
                 query = "Warden"
 
@@ -895,7 +997,7 @@ class GroupChatStore:
             responses.append(rec_evt)
             return human_event, responses
 
-        # 11. /status command
+        # 12. /status command
         if lower.startswith("/status") or lower == "status":
             stat_text = "📊 **Warden System Status**:\n- **Control Plane**: Operational (v1 Policy Engine active)\n- **Captain Orchestrator**: Gemini 2.5 Flash / ctx_v1\n- **Finish Subsystem**: Persistent state store active, 9/9 verification ready\n- **Services**: Group Chat SSE live, Runner Sessions janitor running"
             st_evt, _ = self.append_event(ChatEvent(
@@ -909,7 +1011,7 @@ class GroupChatStore:
             responses.append(st_evt)
             return human_event, responses
 
-        # 12. /tasks command
+        # 13. /tasks command
         if lower.startswith("/tasks") or lower == "tasks":
             tasks_list = []
             try:
@@ -941,7 +1043,7 @@ class GroupChatStore:
             responses.append(t_evt)
             return human_event, responses
 
-        # 13. /runs command
+        # 14. /runs command
         if lower.startswith("/runs") or lower == "runs":
             runs_msg = "🏃 **Active Runner Sessions**:\n- `codex_worker_1`: Idle (Ready for dispatched task)\n- `finish_worker_main`: Ready (Persistent FinishJob state engine)"
             r_evt, _ = self.append_event(ChatEvent(
@@ -955,7 +1057,7 @@ class GroupChatStore:
             responses.append(r_evt)
             return human_event, responses
 
-        # 14. General task request / team coordination fallback
+        # 15. General task request / team coordination fallback (Authoritative, NO fake agent activity)
         if mentions:
             target_agents = [m for m in mentions if m.lower() not in ("team", "warden")]
             target_str = ", ".join(target_agents) if target_agents else "the team"
@@ -964,23 +1066,19 @@ class GroupChatStore:
                 actor_id="warden",
                 actor_type="warden",
                 event_type="warden_message",
-                text=f"Routed prompt to {target_str}.",
+                text=f"Routed query to {target_str}. To create and dispatch structured work, ask *'Captain, make a plan for...'* or use `/plan`.",
             ))
             responses.append(w_evt)
-
-            for ag in target_agents:
-                ag_lower = ag.lower()
-                ag_evt, _ = self.append_event(ChatEvent(
-                    conversation_id=conversation_id,
-                    actor_id=ag_lower,
-                    actor_type="agent",
-                    event_type="agent_message",
-                    text=f"Received assignment: '{raw_text[:80]}...'",
-                    metadata={"status": "working"},
-                ))
-                responses.append(ag_evt)
         else:
-            w_text = "I split this work across the team. Claude has UX, Spark has research, Codex will verify."
+            w_text = (
+                f"I received your message: \"{raw_text[:120]}\".\n\n"
+                "Here is what I can do for you:\n"
+                "- 📋 **Plan Work**: Ask *'Captain, make a plan for...'* or use `/plan <goal>`\n"
+                "- 🧠 **Recall Memory**: Ask *'What decisions did we make about...'*\n"
+                "- 🌐 **Check Browsing**: Ask *'What have I been browsing tonight?'*\n"
+                "- 🚀 **Finish & Publish**: Ask *'Finish this client portal and put it online'*\n"
+                "- 📊 **System Status**: Use `/status` or `/tasks`"
+            )
             w_evt, _ = self.append_event(ChatEvent(
                 conversation_id=conversation_id,
                 actor_id="warden",
@@ -989,38 +1087,5 @@ class GroupChatStore:
                 text=w_text,
             ))
             responses.append(w_evt)
-
-            c_evt, _ = self.append_event(ChatEvent(
-                conversation_id=conversation_id,
-                actor_id="claude",
-                actor_type="agent",
-                actor_display_name="Claude UX",
-                event_type="agent_message",
-                text="Picked up requested component. Reviewing current implementation.",
-                metadata={"status": "working", "assigned_component": "UX"},
-            ))
-            responses.append(c_evt)
-
-            s_evt, _ = self.append_event(ChatEvent(
-                conversation_id=conversation_id,
-                actor_id="spark",
-                actor_type="agent",
-                actor_display_name="Spark Research",
-                event_type="agent_message",
-                text="Researching best practices and dependencies.",
-                metadata={"status": "working", "assigned_component": "Research"},
-            ))
-            responses.append(s_evt)
-
-            k_evt, _ = self.append_event(ChatEvent(
-                conversation_id=conversation_id,
-                actor_id="codex",
-                actor_type="agent",
-                actor_display_name="Codex Builder",
-                event_type="agent_message",
-                text="Standing by to verify and run integration checks.",
-                metadata={"status": "waiting", "assigned_component": "Verification"},
-            ))
-            responses.append(k_evt)
 
         return human_event, responses

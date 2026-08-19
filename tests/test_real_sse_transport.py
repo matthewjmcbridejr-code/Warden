@@ -50,7 +50,7 @@ def test_real_sse_transport_reconnect_and_zero_duplicates():
     # 4. Strengthened SSE Assertions
     replayed_seqs = [e["seq"] for e in replayed_events]
     replayed_ids = [e["id"] for e in replayed_events]
-    offline_events = [e for e in replayed_events if "Real SSE Wire Test Message 2 (offline)" in e.get("text", "")]
+    offline_human_events = [e for e in replayed_events if e.get("event_type") == "human_message" and "Real SSE Wire Test Message 2 (offline)" in e.get("text", "")]
 
     # Exact expected sequence IDs & strictly increasing order
     assert len(replayed_events) >= 2
@@ -62,6 +62,6 @@ def test_real_sse_transport_reconnect_and_zero_duplicates():
     # Zero duplicate event IDs
     assert len(replayed_ids) == len(set(replayed_ids)), f"Duplicate event IDs found: {replayed_ids}"
 
-    # Offline event is definitely present exactly once
-    assert len(offline_events) == 1, f"Offline event expected once, got {len(offline_events)}"
-    assert offline_events[0]["seq"] > seq1
+    # Offline human event is definitely present exactly once
+    assert len(offline_human_events) == 1, f"Offline human event expected once, got {len(offline_human_events)}"
+    assert offline_human_events[0]["seq"] > seq1
