@@ -51,6 +51,5 @@ tests/marius_test_data/
 ~/.local/share/warden/connectors/
 configs/warden_resident.env
 .claude/
-*.tar.gz
-google-cloud-sdk/
 .vercel
+docs/proofs/

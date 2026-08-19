@@ -5979,13 +5979,24 @@
           <h3 class="empty-state-title">Your team is ready.</h3>
           <p class="empty-state-subtitle">Tell us what you want done. Warden will route the work, carry the context, and bring you in only when necessary.</p>
           <div class="starter-prompts-list">
-            <button type="button" class="starter-prompt-chip" data-prompt="/plan Finish and verify client portal deployment">"/plan Finish and verify client portal deployment"</button>
-            <button type="button" class="starter-prompt-chip" data-prompt="/recall Warden Finish verification">"/recall Warden Finish verification"</button>
-            <button type="button" class="starter-prompt-chip" data-prompt="/status">"/status"</button>
-            <button type="button" class="starter-prompt-chip" data-prompt="@Spark research the best multi-account approach before we build it.">"@Spark research the best multi-account approach before we build it."</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="What were we working on last night?">"What were we working on last night?"</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="What is AGY doing?">"What is AGY doing?"</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="Finish this client portal and put it online.">"Finish this client portal and put it online."</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="Captain, make a plan for improving this UI.">"Captain, make a plan for improving this UI."</button>
+            <button type="button" class="starter-prompt-chip" data-prompt="Show me the latest proof.">"Show me the latest proof."</button>
           </div>
         </div>
       `;
+      container.querySelectorAll(".starter-prompt-chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const p = btn.getAttribute("data-prompt");
+          const textarea = document.getElementById("chat-input-textarea");
+          if (textarea && p) {
+            textarea.value = p;
+            sendHumanChatMessage();
+          }
+        });
+      });
       return;
     }
 
@@ -6061,20 +6072,32 @@
         `;
       }
 
-      // 4. Task Progress / Finish Job Card
-      else if (e.event_type === "task_progress" && e.metadata && (e.metadata.job_id || e.metadata.stage)) {
-        const meta = e.metadata;
+      // 4. Finish Card / Task Progress
+      else if (e.event_type === "finish_card" || (e.event_type === "task_progress" && e.metadata && (e.metadata.job_id || e.metadata.stage))) {
+        const meta = e.metadata || {};
+        const isReadyToPublish = meta.stage === "READY_TO_PUBLISH" || meta.status === "Ready to publish";
+        const isComplete = meta.stage === "COMPLETE" || meta.status === "Live & Verified";
+        const badgeClass = isComplete ? "badge-proof" : (isReadyToPublish ? "badge-finish" : "badge-plan");
+        const statusText = meta.status || (isComplete ? "Live & Verified" : (isReadyToPublish ? "Ready to publish" : meta.stage));
+
         richCardHtml = `
           <div class="finish-card-chat">
             <div class="card-header-chat">
-              <span class="card-title-chat">🚀 Warden Finish Engine</span>
-              <span class="card-badge-chat badge-finish">${escapeHtml(meta.stage || "IN_PROGRESS")}</span>
+              <span class="card-title-chat">🚀 Warden Finish & Release</span>
+              <span class="card-badge-chat ${badgeClass}">${escapeHtml(statusText)}</span>
             </div>
             <div class="finish-meta-row">
-              <span class="finish-meta-item">Project: <strong>${escapeHtml(meta.project || "AcmePortal")}</strong></span>
-              <span class="finish-meta-item">Score: <strong>${escapeHtml(meta.passed_checks || "9/9 Passed")}</strong></span>
-              ${meta.preview_url ? `<span class="finish-meta-item"><a href="${meta.preview_url}" target="_blank" style="color:#60a5fa; text-decoration:underline;">Live Preview ↗</a></span>` : ""}
+              <span class="finish-meta-item">Project: <strong>${escapeHtml(meta.project || "AcmeClientPortal")}</strong></span>
+              <span class="finish-meta-item">Verification: <strong>${escapeHtml(meta.passed_checks || "9/9 Passed")}</strong></span>
+              ${meta.production_url ? `<span class="finish-meta-item"><a href="${meta.production_url}" target="_blank" style="color:#34d399; font-weight:bold; text-decoration:underline;">Public Live ↗</a></span>` : ""}
+              ${meta.preview_url && !meta.production_url ? `<span class="finish-meta-item"><a href="${meta.preview_url}" target="_blank" style="color:#60a5fa; text-decoration:underline;">Preview URL ↗</a></span>` : ""}
             </div>
+            ${isReadyToPublish ? `
+              <div class="card-actions-chat" style="margin-top:12px; display:flex; gap:8px;">
+                <button type="button" class="btn primary small finish-publish-btn" onclick="publishFinishJob('${meta.job_id || ''}')">Publish</button>
+                ${meta.preview_url ? `<a href="${meta.preview_url}" target="_blank" class="btn small" style="display:inline-flex; align-items:center;">Review Preview</a>` : ""}
+              </div>
+            ` : ""}
           </div>
         `;
       }
@@ -6118,8 +6141,42 @@
       `;
     }).join("");
 
+    container.querySelectorAll(".starter-prompt-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const p = btn.getAttribute("data-prompt");
+        const textarea = document.getElementById("chat-input-textarea");
+        if (textarea && p) {
+          textarea.value = p;
+          sendHumanChatMessage();
+        }
+      });
+    });
+
     container.scrollTop = container.scrollHeight;
   }
+
+  async function publishFinishJob(jobId) {
+    const btn = document.querySelector(".finish-publish-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Publishing...";
+    }
+    try {
+      if (jobId) {
+        await fetch(`/api/mcharness/finish/jobs/${encodeURIComponent(jobId)}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision: "APPROVED", operator_id: "operator" })
+        });
+      }
+      const textarea = document.getElementById("chat-input-textarea");
+      if (textarea) textarea.value = "Publish";
+      await sendHumanChatMessage();
+    } catch (err) {
+      console.error("Publish error:", err);
+    }
+  }
+  window.publishFinishJob = publishFinishJob;
 
   async function sendHumanChatMessage() {
     if (isSendingHumanMessage) return;

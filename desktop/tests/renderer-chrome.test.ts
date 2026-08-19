@@ -40,7 +40,7 @@ describe('quiet native browser chrome', () => {
 
   it('reports release metadata without weakening the renderer boundary', () => {
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string; license: string };
-    expect(packageJson.version).toBe('0.5.0-rc.1'); expect(packageJson.license).toBe('Apache-2.0');
+    expect(packageJson.version).toBe('0.6.0-rc.1'); expect(packageJson.license).toBe('Apache-2.0');
     expect(main).toContain("ipcMain.handle('app:info'"); expect(main).toContain('requireMainRenderer(event)');
   });
 });
