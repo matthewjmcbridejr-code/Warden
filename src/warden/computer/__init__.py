@@ -16,12 +16,17 @@ from .executors.base import BaseComputerExecutor
 from .executors.playwright_executor import PlaywrightBrowserExecutor
 from .executors.linux_desktop_executor import LinuxDesktopExecutor
 
+from .confirmations import ConfirmationStore, default_confirmation_store, check_confirmation_required
+
 __all__ = [
     "ActionType",
     "ComputerAction",
     "ComputerObservation",
     "ComputerSession",
     "ConfirmationRequest",
+    "ConfirmationStore",
+    "default_confirmation_store",
+    "check_confirmation_required",
     "SessionStatus",
     "ComputerUseService",
     "BaseComputerProvider",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -15,7 +16,11 @@ from .models import (
     ConfirmationRequest,
     SessionStatus,
 )
-from .confirmations import check_confirmation_required
+from .confirmations import (
+    ConfirmationStore,
+    check_confirmation_required,
+    default_confirmation_store,
+)
 from .screenshots import save_screenshot
 from .executors.base import BaseComputerExecutor
 from .executors.playwright_executor import PlaywrightBrowserExecutor
@@ -33,9 +38,23 @@ class ComputerUseService:
         self,
         default_provider: Optional[BaseComputerProvider] = None,
         default_executor: Optional[BaseComputerExecutor] = None,
+        confirmation_store: Optional[ConfirmationStore] = None,
+        confirmation_timeout: float = 300.0,
     ):
         self.default_provider = default_provider
         self.default_executor = default_executor
+        self.confirmation_store = confirmation_store or default_confirmation_store
+        self.confirmation_timeout = confirmation_timeout
+        self._active_sessions: Dict[str, ComputerSession] = {}
+        self._lock = threading.Lock()
+
+    def get_session(self, session_id: str) -> Optional[ComputerSession]:
+        with self._lock:
+            return self._active_sessions.get(session_id)
+
+    def list_sessions(self) -> List[ComputerSession]:
+        with self._lock:
+            return list(self._active_sessions.values())
 
     def run(
         self,
@@ -45,11 +64,15 @@ class ComputerUseService:
         max_steps: int = 30,
         provider: Optional[BaseComputerProvider] = None,
         executor: Optional[BaseComputerExecutor] = None,
+        confirmation_store: Optional[ConfirmationStore] = None,
+        confirmation_timeout: Optional[float] = None,
         event_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """Execute a full visual computer use mission and return structured evidence."""
         session_id = f"computer-{int(time.time() * 1000)}"
         clean_env = environment.lower().strip() if environment else "browser"
+        active_confirmation_store = confirmation_store or self.confirmation_store
+        active_timeout = confirmation_timeout if confirmation_timeout is not None else self.confirmation_timeout
 
         # 1. Environment validation
         if clean_env == "desktop":
@@ -79,6 +102,9 @@ class ComputerUseService:
             model_name=getattr(active_provider, "model", "default"),
             max_steps=max_steps,
         )
+
+        with self._lock:
+            self._active_sessions[session_id] = session
 
         if not is_avail:
             session.status = SessionStatus.FAILED
@@ -126,12 +152,72 @@ class ComputerUseService:
                 # Plan next action
                 action = active_provider.plan_next_action(session, obs)
 
-                # Check confirmation boundary
+                # Check confirmation boundary BEFORE execution
                 if check_confirmation_required(action, obs):
+                    conf = active_confirmation_store.create_confirmation(
+                        session_id=session.session_id,
+                        action=action,
+                        step_idx=step_idx,
+                        description=action.summary or f"Action requires confirmation: {action.action_type}",
+                    )
+                    session.status = SessionStatus.WAITING_FOR_CONFIRMATION
+                    session.active_confirmation_id = conf.confirmation_id
+
                     _emit("computer_confirmation_required", {
                         "step": step_idx,
-                        "action": action.action_type.value if isinstance(action.action_type, ActionType) else str(action.action_type),
-                        "description": action.summary or f"Action requires confirmation: {action.action_type}",
+                        "confirmation_id": conf.confirmation_id,
+                        "action_id": conf.action_id,
+                        "action_type": action.action_type.value if isinstance(action.action_type, ActionType) else str(action.action_type),
+                        "description": conf.description,
+                        "parameters": action.to_dict(),
+                        "url": obs.url,
+                        "title": obs.title,
+                        "screenshot_path": obs.screenshot_path,
+                    })
+
+                    # Block execution until operator resolves the confirmation
+                    status, resolved_conf = active_confirmation_store.wait_for_decision(
+                        confirmation_id=conf.confirmation_id,
+                        timeout_seconds=active_timeout,
+                    )
+                    session.active_confirmation_id = None
+
+                    if status != "approved":
+                        # Operator denied or confirmation expired/cancelled: DO NOT EXECUTE ACTION
+                        denial_msg = f"Action '{action.summary}' was {status} by operator {resolved_conf.operator_id if resolved_conf else ''}".strip()
+                        session.evidence.append({
+                            "kind": "confirmation_denied",
+                            "step": step_idx,
+                            "confirmation_id": conf.confirmation_id,
+                            "status": status,
+                            "summary": denial_msg,
+                            "url": obs.url,
+                            "title": obs.title,
+                        })
+                        _emit("computer_confirmation_resolved", {
+                            "step": step_idx,
+                            "confirmation_id": conf.confirmation_id,
+                            "status": status,
+                            "decision": resolved_conf.decision if resolved_conf else status,
+                            "executed": False,
+                            "summary": denial_msg,
+                        })
+                        session.status = SessionStatus.COMPLETED if status == "denied" else SessionStatus.FAILED
+                        if status == "denied":
+                            session.final_result = f"Action prevented: {denial_msg}"
+                        else:
+                            session.error = f"Action prevented: {denial_msg}"
+                        break
+
+                    # Approved: resume execution
+                    session.status = SessionStatus.RUNNING
+                    _emit("computer_confirmation_resolved", {
+                        "step": step_idx,
+                        "confirmation_id": conf.confirmation_id,
+                        "status": "approved",
+                        "decision": "approve",
+                        "executed": True,
+                        "summary": f"Approved by {resolved_conf.operator_id if resolved_conf else 'operator'}. Executing action.",
                     })
 
                 session.actions.append(action)
@@ -166,7 +252,7 @@ class ComputerUseService:
                     })
                     break
 
-                # Execute action
+                # Execute action (only reached if safe or explicitly approved)
                 obs_after = active_executor.execute_action(action)
                 session.evidence.append({
                     "kind": "observation",
@@ -194,6 +280,9 @@ class ComputerUseService:
 
         finally:
             active_executor.stop()
+            if session.active_confirmation_id:
+                active_confirmation_store.cancel_confirmation(session.active_confirmation_id)
+                session.active_confirmation_id = None
             session.completed_at = datetime.now(timezone.utc).isoformat()
             _emit("computer_session_completed", {
                 "status": session.status.value if isinstance(session.status, SessionStatus) else str(session.status),
