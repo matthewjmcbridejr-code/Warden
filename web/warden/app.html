@@ -106,12 +106,12 @@
               <div class="chat-header-info">
                 <div class="chat-header-title-row">
                   <h2 id="chat-room-title">Warden Team</h2>
-                  <span class="chat-working-badge">● 3 working</span>
+                  <span class="chat-working-badge idle" id="chat-working-badge">● Ready</span>
                 </div>
                 <div class="chat-header-participants" id="chat-header-participants">
-                  <span class="p-badge online"><span class="dot">●</span> Claude UX</span>
-                  <span class="p-badge online"><span class="dot">●</span> Codex Builder</span>
-                  <span class="p-badge online"><span class="dot">●</span> Spark Research</span>
+                  <span class="p-badge ready"><span class="dot">●</span> Claude</span>
+                  <span class="p-badge ready"><span class="dot">●</span> Codex</span>
+                  <span class="p-badge ready"><span class="dot">●</span> Spark</span>
                   <span class="p-badge warden"><span class="dot">●</span> Warden</span>
                 </div>
               </div>
@@ -149,7 +149,7 @@
                 <div class="mention-item" data-command="/stop"><strong>/stop</strong> — Pause team execution</div>
               </div>
               <div class="chat-composer-input-row">
-                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Talk to Warden... (@mention, /command, or ask anything)"></textarea>
+                <textarea id="chat-input-textarea" class="chat-input-textarea" rows="2" placeholder="Ask Warden anything or tell it what you want done…"></textarea>
                 <button type="button" id="chat-send-btn" class="btn primary chat-send-btn" data-testid="chat-send-btn">Send</button>
               </div>
             </div>

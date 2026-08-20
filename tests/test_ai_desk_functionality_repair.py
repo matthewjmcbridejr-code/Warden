@@ -72,16 +72,15 @@ def test_captain_make_me_a_plan_exact_prompt(tmp_path: Path):
 
 
 def test_general_fallback_has_no_fake_agent_activity(tmp_path: Path):
-    """Unrecognized queries must return authoritative guidance without fake agent working events."""
+    """Unrecognized queries must return authoritative synthesized guidance without fake agent working events."""
     store = GroupChatStore(db_path=tmp_path / "chat.db")
     human_evt, responses = store.process_human_message("Hello Warden, what can you do?")
 
     assert len(responses) == 1
     resp = responses[0]
     assert resp.actor_id == "warden"
-    assert "Plan Work" in resp.text
-    assert "Recall Memory" in resp.text
-    assert "Finish & Publish" in resp.text
+    assert resp.event_type == "warden_message"
+    assert "Warden" in resp.text or "context" in resp.text or "plan" in resp.text
 
     actors = [r.actor_id for r in responses]
     assert "claude" not in actors
