@@ -342,6 +342,32 @@ def handle_finish_project(objective: str = "Finish and publish current project")
         return {"ok": False, "error": str(exc)}
 
 
+def handle_computer_use(
+    objective: str,
+    environment: str = "browser",
+    start_url: Optional[str] = None,
+    max_steps: int = 30,
+) -> dict[str, Any]:
+    """Execute visual Computer Use to operate a web or desktop application when visual interaction is required."""
+    try:
+        from .computer import ComputerUseService
+        service = ComputerUseService()
+        return service.run(
+            objective=objective,
+            environment=environment,
+            start_url=start_url,
+            max_steps=max_steps,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "objective": objective,
+            "environment": environment,
+            "error": f"Computer Use execution error: {exc}",
+            "evidence": [],
+        }
+
+
 # ---------------------------------------------------------------------------
 # Warden Tool Registry
 # ---------------------------------------------------------------------------
@@ -449,6 +475,41 @@ class WardenToolRegistry:
                 },
             },
             handler=handle_finish_project,
+        ))
+
+        self.register(ToolDefinition(
+            name="computer_use",
+            description=(
+                "Use visual Computer Use to operate a browser or desktop application when information "
+                "is behind a graphical user interface, requires navigating websites, clicking, typing, "
+                "or when no CLI/API exists. Do not use for local filesystem, git, or standard terminal tasks."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "The exact goal or outcome to accomplish using visual computer control."
+                    },
+                    "environment": {
+                        "type": "string",
+                        "enum": ["browser", "desktop"],
+                        "default": "browser",
+                        "description": "Execution environment (default 'browser')."
+                    },
+                    "start_url": {
+                        "type": "string",
+                        "description": "Optional initial web URL to navigate to."
+                    },
+                    "max_steps": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Maximum number of visual action steps."
+                    }
+                },
+                "required": ["objective"]
+            },
+            handler=handle_computer_use,
         ))
 
     def register(self, tool_def: ToolDefinition) -> None:
@@ -612,6 +673,9 @@ class WardenAgentRuntime:
             initial_tool_calls.append({"name": "captain_plan", "arguments": {"goal": goal}})
         elif any(phrase in lower_msg for phrase in ("finish this project", "finish and publish", "publish project")):
             initial_tool_calls.append({"name": "finish_project", "arguments": {"objective": clean_msg}})
+        elif re.search(r"^(use\s+(the\s+)?browser\s+to|open\s+(the\s+)?browser\s+and|using\s+computer\s+use|use\s+computer\s+(use|control)\s+to)\s+", clean_msg, re.I):
+            obj = re.sub(r"^(use\s+(the\s+)?browser\s+to|open\s+(the\s+)?browser\s+and|using\s+computer\s+use|use\s+computer\s+(use|control)\s+to)\s+", "", clean_msg, flags=re.I).strip() or clean_msg
+            initial_tool_calls.append({"name": "computer_use", "arguments": {"objective": obj}})
 
         turn = 0
         final_reply = ""
@@ -659,6 +723,20 @@ class WardenAgentRuntime:
                             "metadata": res.result,
                         })
                         sources.append("Finish Subsystem")
+                    elif fn_name == "computer_use":
+                        sources.append("Gemini Computer Use")
+                        if res.result.get("ok"):
+                            rich_events.append({
+                                "event_type": "computer_session_completed",
+                                "text": f"🖥️ **Computer Use Session Completed** ({res.result.get('steps', 0)} steps in {res.result.get('environment', 'browser')}): {res.result.get('result', '')}",
+                                "metadata": res.result,
+                            })
+                        elif res.result.get("error"):
+                            rich_events.append({
+                                "event_type": "computer_session_failed",
+                                "text": f"⚠️ **Computer Use Session Failed**: {res.result.get('error')}",
+                                "metadata": res.result,
+                            })
                     elif fn_name == "activity_search":
                         sources.append("Browser & Activity History")
                     elif fn_name == "project_inspect":
