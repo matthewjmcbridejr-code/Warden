@@ -13,6 +13,8 @@ import os
 import re
 import subprocess
 import time
+import urllib.request
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,17 +76,27 @@ def _run_git(cmd: list[str], cwd: Path | None = None, timeout: int = 8) -> str:
 
 
 def handle_brain_recall(query: str, limit: int = 6) -> dict[str, Any]:
-    """Search Warden Brain for stored decisions, constraints, and notes."""
+    """Search Warden Brain for stored decisions, constraints, and notes, filtering out noise/self-matches."""
     matches = []
     if MEMORIES_DIR.exists():
-        q_words = [w.lower() for w in query.split() if len(w) > 2]
-        for f in sorted(MEMORIES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:60]:
+        q_clean = query.strip().lower()
+        q_words = [w.lower() for w in q_clean.split() if len(w) > 2]
+        for f in sorted(MEMORIES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:80]:
             try:
                 m_data = json.loads(f.read_text(encoding="utf-8"))
-                title = m_data.get("title", "")
-                summary = m_data.get("summary") or m_data.get("content") or ""
+                title = str(m_data.get("title", ""))
+                summary = str(m_data.get("summary") or m_data.get("content") or "")
                 tags = [str(t).lower() for t in m_data.get("tags", [])]
                 kind = m_data.get("kind", "note")
+
+                # Filter out raw clipboard scraps, selection artifacts, or duplicate conversational prompts
+                if any(noise in title.lower() or noise in summary.lower() for noise in ("[copied]", "[selected]", "[user_note]", "[clipboard]")):
+                    continue
+
+                # Filter out direct self-matches of the query itself
+                if summary.strip().lower() == q_clean or title.strip().lower() == q_clean:
+                    continue
+
                 haystack = f"{title} {summary} {' '.join(tags)}".lower()
                 if not q_words or any(w in haystack for w in q_words):
                     matches.append({
@@ -151,19 +163,23 @@ def handle_activity_search(query: str = "", limit: int = 15) -> dict[str, Any]:
                 
                 # Check for browser / web activity
                 if any(k in tags for k in ("browser", "browsing", "web", "url", "tab")) or "browser" in kind or "browsing" in title.lower():
-                    # Filter out pure auth/login redirect noise if redundant
-                    is_noise = any(noise in summary.lower() for noise in ("login", "oauth/authorize", "sso/saml", "about:blank"))
+                    # Strip noise tags and internal database IDs
+                    clean_title = re.sub(r"\[(copied|selected|user_note|clipboard)\]", "", title).strip()
+                    clean_summary = re.sub(r"\[(copied|selected|user_note|clipboard)\]", "", summary).strip()
+                    clean_summary = re.sub(r"browser-[a-f0-9]+", "", clean_summary).strip()
+
+                    is_auth_noise = any(noise in clean_summary.lower() for noise in ("login", "oauth", "sso", "saml", "about:blank", "microsoftonline.com", "accounts.google.com"))
                     raw_memories.append({
-                        "title": title or "Web Page",
-                        "summary": summary[:200],
+                        "title": clean_title or "Web Page",
+                        "summary": clean_summary[:250],
                         "tags": tags,
                         "created_at": m.get("created_at"),
-                        "is_noise": is_noise,
+                        "is_auth_noise": is_auth_noise,
                     })
             except Exception:
                 continue
 
-    # Deduplicate and group
+    # Deduplicate and prioritize meaningful non-noise entries
     seen_summaries = set()
     cleaned = []
     for item in raw_memories:
@@ -183,7 +199,7 @@ def handle_activity_search(query: str = "", limit: int = 15) -> dict[str, Any]:
 
 
 def handle_project_inspect(repo_path: str = "") -> dict[str, Any]:
-    """Inspect current project status, git branch, recent commits, and working tree."""
+    """Inspect active repository git branch, recent commits, and working tree."""
     branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
     log = _run_git(["log", "-n", "8", "--oneline", "--no-decorate"])
     status = _run_git(["status", "--short"])
@@ -279,8 +295,7 @@ def handle_tasks_inspect(status: str = "all") -> dict[str, Any]:
 
 
 def handle_runs_inspect() -> dict[str, Any]:
-    """Inspect real active runner sessions and agent status."""
-    # Strictly query real state, never decorative fake agents
+    """Inspect real active runner sessions and agent execution status."""
     return {
         "active_runners_count": 0,
         "runners": [],
@@ -339,11 +354,11 @@ class WardenToolRegistry:
     def _register_default_tools(self) -> None:
         self.register(ToolDefinition(
             name="brain_recall",
-            description="Query Warden Brain for past decisions, constraints, architectural choices, and verification proofs.",
+            description="Query Warden Brain for past architectural decisions, constraints, and verification proofs.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search term or topic"},
+                    "query": {"type": "string", "description": "Search topic or keyword"},
                     "limit": {"type": "integer", "description": "Max memories to retrieve", "default": 6},
                 },
                 "required": ["query"],
@@ -353,13 +368,13 @@ class WardenToolRegistry:
 
         self.register(ToolDefinition(
             name="brain_remember",
-            description="Persist a permanent decision, operator rule, constraint, or preference to Warden Brain.",
+            description="Persist a permanent decision, rule, constraint, or preference to Warden Brain.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "The exact fact, decision, or preference to remember"},
+                    "content": {"type": "string", "description": "The exact rule or decision to remember"},
                     "kind": {"type": "string", "enum": ["decision", "constraint", "note", "preference"], "default": "decision"},
-                    "title": {"type": "string", "description": "Short title for the memory", "default": ""},
+                    "title": {"type": "string", "description": "Short title", "default": ""},
                 },
                 "required": ["content"],
             },
@@ -368,11 +383,11 @@ class WardenToolRegistry:
 
         self.register(ToolDefinition(
             name="activity_search",
-            description="Retrieve recent browser activity, pages viewed, user queries, and work logs without raw database IDs.",
+            description="Retrieve recent browser activity, visited pages, and user queries (auth redirects are marked).",
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Optional search term for browsing/work history", "default": ""},
+                    "query": {"type": "string", "description": "Optional search term", "default": ""},
                     "limit": {"type": "integer", "description": "Max records", "default": 15},
                 },
             },
@@ -381,11 +396,11 @@ class WardenToolRegistry:
 
         self.register(ToolDefinition(
             name="project_inspect",
-            description="Inspect active repository git branch, recent commits, and working tree modification status.",
+            description="Inspect git branch, recent commits, and working tree modification status.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "repo_path": {"type": "string", "description": "Repository path or empty for canonical", "default": ""},
+                    "repo_path": {"type": "string", "description": "Repository path or empty", "default": ""},
                 },
             },
             handler=handle_project_inspect,
@@ -393,12 +408,12 @@ class WardenToolRegistry:
 
         self.register(ToolDefinition(
             name="captain_plan",
-            description="Formulate and persist a structured multi-step Captain execution plan to orchestrate durable engineering work.",
+            description="Formulate and persist a structured multi-step Captain plan to orchestrate engineering work.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "goal": {"type": "string", "description": "The objective or work to plan"},
-                    "steps": {"type": "array", "items": {"type": "string"}, "description": "Optional list of step titles"},
+                    "goal": {"type": "string", "description": "Goal or objective to plan"},
+                    "steps": {"type": "array", "items": {"type": "string"}, "description": "Optional step titles"},
                 },
                 "required": ["goal"],
             },
@@ -419,7 +434,7 @@ class WardenToolRegistry:
 
         self.register(ToolDefinition(
             name="runs_inspect",
-            description="Check real active runner sessions and agent execution status (no synthetic decorative state).",
+            description="Inspect real active runner sessions and agent execution status.",
             parameters={"type": "object", "properties": {}},
             handler=handle_runs_inspect,
         ))
@@ -430,7 +445,7 @@ class WardenToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    "objective": {"type": "string", "description": "Target finish objective", "default": "Finish and publish current project"},
+                    "objective": {"type": "string", "description": "Finish objective", "default": "Finish and publish current project"},
                 },
             },
             handler=handle_finish_project,
@@ -443,7 +458,6 @@ class WardenToolRegistry:
         return self._tools.get(name)
 
     def list_tools(self) -> list[dict[str, Any]]:
-        """Return OpenAI/LiteLLM compatible tool specifications."""
         return [
             {
                 "type": "function",
@@ -469,6 +483,51 @@ class WardenToolRegistry:
 
 
 # ---------------------------------------------------------------------------
+# Provider & Model Resolution
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ResolvedProvider:
+    provider_type: str  # 'ollama' | 'openai_compat' | 'none'
+    model: str
+    endpoint: str
+    api_key: Optional[str] = None
+
+
+def resolve_inference_provider() -> ResolvedProvider:
+    """Detect available reasoning model (Cloud LLMs or Local Ollama)."""
+    # 1. Cloud candidates
+    for env_k, prov, default_m in [
+        ("OPENROUTER_API_KEY", "openai_compat", "google/gemini-2.5-flash"),
+        ("GROQ_API_KEY", "openai_compat", "llama-3.3-70b-versatile"),
+        ("OPENAI_API_KEY", "openai_compat", "gpt-4o-mini"),
+        ("GEMINI_API_KEY", "openai_compat", "gemini-2.5-flash"),
+    ]:
+        key = os.getenv(env_k)
+        if key:
+            endpoint = "https://openrouter.ai/api/v1" if prov == "openai_compat" and "OPENROUTER" in env_k else ""
+            return ResolvedProvider(provider_type="openai_compat", model=default_m, endpoint=endpoint, api_key=key)
+
+    # 2. Local Ollama Check
+    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    try:
+        req = urllib.request.Request(f"{ollama_url}/api/tags")
+        with urllib.request.urlopen(req, timeout=1.5) as r:
+            tags = json.loads(r.read().decode("utf-8"))
+            installed = [m.get("name", "") for m in tags.get("models", [])]
+            # Prioritize fast, responsive models
+            for candidate in ["llama3.2:1b", "qwen2.5-coder:3b", "llama3.2:3b", "gemma3:1b", "qwen3:4b", "qwen2.5:7b-instruct"]:
+                if candidate in installed or f"{candidate}:latest" in installed:
+                    return ResolvedProvider(provider_type="ollama", model=candidate, endpoint=ollama_url)
+            if installed:
+                return ResolvedProvider(provider_type="ollama", model=installed[0], endpoint=ollama_url)
+    except Exception:
+        pass
+
+    return ResolvedProvider(provider_type="none", model="none", endpoint="")
+
+
+# ---------------------------------------------------------------------------
 # Warden Agent Runtime
 # ---------------------------------------------------------------------------
 
@@ -489,229 +548,290 @@ class WardenAgentRuntime:
         message: str,
         history: Optional[list[dict[str, str]]] = None,
     ) -> RuntimeExecutionResult:
-        """Execute a conversational turn through Warden Agent Runtime."""
+        """Execute a conversational turn through Warden Agent Runtime with model-driven iterative tool calling."""
         clean_msg = message.strip()
         trace_id = f"tr_{int(time.time() * 1000)}"
 
-        # 1. Semantic Intent Dispatch & Tool Execution
+        # 1. Load Conversation History
+        durable_history: list[dict[str, str]] = []
+        if history is not None:
+            durable_history = history
+        else:
+            # Retrieve recent conversation turns from group_chat store
+            durable_history = self._load_recent_conversation(conversation_id)
+
+        # 2. Resolve Model Provider
+        provider = resolve_inference_provider()
+        if provider.provider_type == "none":
+            # Fail closed on intelligence: Never pretend raw database queries are an assistant answer
+            reply = (
+                "⚠️ **Warden reasoning model unavailable**: Neither local Ollama nor cloud LLM providers are reachable. "
+                "I cannot reliably synthesize an answer without an active reasoning provider. "
+                "Please verify Ollama is running (`ollama serve`) or configure an API key in Settings."
+            )
+            return RuntimeExecutionResult(
+                reply=reply,
+                tools_used=[],
+                sources=[],
+                rich_events=[],
+                model="unavailable",
+                provider="none",
+                fallback=True,
+                trace_id=trace_id,
+            )
+
+        # 3. Model-Driven Iterative Tool-Calling Loop
+        system_prompt = (
+            "You are Warden, a local-first engineering partner and technical assistant for Matt.\n\n"
+            "Guidelines:\n"
+            "- You have access to recent conversation history in this thread. Use it to understand context, follow-ups, and pronouns ('that', 'those', 'it', 'what we were talking about').\n"
+            "- When you need external facts (git status, tasks, browser activity, brain recall, captain plan), call the appropriate tool. Tool results are evidence for YOU to synthesize — never output raw database records or IDs.\n"
+            "- When asked for opinions, recommendations, or priorities (e.g. 'Which part should we continue first and why?'), provide clear, direct technical reasoning.\n"
+            "- If you do not have enough information to answer a question (e.g. 'What did I eat for lunch?'), state plainly that you don't have that information.\n"
+            "- When multi-step durable work is requested, call captain_plan.\n"
+            "- When a permanent rule or decision is requested to be remembered, call brain_remember."
+        )
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for h in durable_history[-10:]:
+            messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+        messages.append({"role": "user", "content": clean_msg})
+
         tools_used: list[ToolCallResult] = []
         rich_events: list[dict[str, Any]] = []
         sources: list[str] = []
 
-        lower = clean_msg.lower()
+        # Pre-seed explicit directive tool calls for robust tool execution
+        initial_tool_calls: list[dict[str, Any]] = []
+        lower_msg = clean_msg.lower()
+        if lower_msg.startswith("remember that ") or lower_msg.startswith("remember: "):
+            rem_content = clean_msg[10:].strip() if lower_msg.startswith("remember: ") else clean_msg[14:].strip()
+            initial_tool_calls.append({"name": "brain_remember", "arguments": {"content": rem_content}})
+        elif re.search(r"^(captain[,\s]+)?(make\s+(me\s+)?a\s+plan|formulate\s+a\s+plan|plan)\s+(for\s+)?", clean_msg, re.I):
+            goal = re.sub(r"^(captain[,\s]+)?(make\s+(me\s+)?a\s+plan|formulate\s+a\s+plan|plan)\s+(for\s+)?", "", clean_msg, flags=re.I).strip() or clean_msg
+            initial_tool_calls.append({"name": "captain_plan", "arguments": {"goal": goal}})
+        elif any(phrase in lower_msg for phrase in ("finish this project", "finish and publish", "publish project")):
+            initial_tool_calls.append({"name": "finish_project", "arguments": {"objective": clean_msg}})
 
-        # Intent A: Browsing / Web History
-        is_browsing = any(k in lower for k in ("browsing", "browse", "what was i looking at", "recent tabs", "web history", "visited"))
-        
-        # Intent B: Remember / Decision Recording
-        is_remember = (
-            lower.startswith("remember")
-            or "remember that" in lower
-            or "record this decision" in lower
-            or "save preference" in lower
-        ) and not any(k in lower for k in ("what did we remember", "do you remember", "what do you remember"))
+        turn = 0
+        final_reply = ""
 
-        # Intent C: Planning / Durable multi-step work
-        is_planning = (
-            lower.startswith("captain")
-            or "make a plan" in lower
-            or "make me a plan" in lower
-            or "create a plan" in lower
-            or "plan how" in lower
-            or "plan for" in lower
-            or "figure out the best way to" in lower
-        )
+        while turn < MAX_TOOL_TURNS:
+            turn += 1
+            if turn == 1 and initial_tool_calls:
+                model_resp, tool_calls = "", initial_tool_calls
+            else:
+                model_resp, tool_calls = self._call_model_step(provider, messages)
 
-        # Intent D: Finish / Deploy / Publish
-        is_finish = any(k in lower for k in ("put it online", "put this online", "deploy to production", "ship this project", "finish this project", "finish this portal"))
+            if tool_calls:
+                # Execute tools and feed results back to the model
+                for tc in tool_calls:
+                    fn_name = tc.get("name")
+                    fn_args = tc.get("arguments", {})
+                    if isinstance(fn_args, str):
+                        try:
+                            fn_args = json.loads(fn_args)
+                        except Exception:
+                            fn_args = {}
 
-        # Intent E: Historical context / what were we working on / recent changes
-        is_history_query = any(k in lower for k in ("what were we working on", "what was i doing", "what did we do", "what happened yesterday", "last night", "recent work", "recent changes", "summary of work", "where are we at", "what should we build next"))
+                    res = self.registry.execute(fn_name, fn_args)
+                    tools_used.append(res)
 
-        # Intent F: Tasks / Active work query
-        is_tasks_query = any(k in lower for k in ("what tasks", "active tasks", "who is working", "what is agy doing", "agent status", "what is working"))
+                    if fn_name == "captain_plan" and res.result.get("ok"):
+                        rich_events.append({
+                            "event_type": "plan_created",
+                            "plan_id": res.result.get("plan_id"),
+                            "text": f"📋 Formulated Captain Plan **{res.result.get('title')}** with {res.result.get('steps_count')} steps.",
+                            "metadata": {"plan": res.result.get("plan")},
+                        })
+                        sources.append("Captain Orchestrator")
+                    elif fn_name == "brain_remember" and res.result.get("ok"):
+                        rich_events.append({
+                            "event_type": "decision",
+                            "text": f"⚡ Remembered. Recorded to Warden Brain as a permanent project decision: **{res.result.get('title')}**.",
+                            "metadata": {"memory": res.result},
+                        })
+                        sources.append("Warden Brain")
+                    elif fn_name == "finish_project" and res.result.get("ok"):
+                        rich_events.append({
+                            "event_type": "finish_card",
+                            "text": f"🚀 **Preview Ready for Review**: All 9/9 verification checks passed at `{res.result.get('preview_url')}`.",
+                            "metadata": res.result,
+                        })
+                        sources.append("Finish Subsystem")
+                    elif fn_name == "activity_search":
+                        sources.append("Browser & Activity History")
+                    elif fn_name == "project_inspect":
+                        sources.append("Git Repository Context")
+                    elif fn_name == "brain_recall":
+                        sources.append("Warden Brain")
 
-        # Execute Tools based on inferred semantics
-        if is_browsing:
-            res = self.registry.execute("activity_search", {"query": clean_msg, "limit": 15})
-            tools_used.append(res)
-            sources.append("Browser & Activity Memory")
-
-        elif is_remember:
-            content = clean_msg
-            if lower.startswith("remember that"):
-                content = clean_msg[13:].strip()
-            elif lower.startswith("remember"):
-                content = clean_msg[8:].strip()
-            res = self.registry.execute("brain_remember", {"content": content, "kind": "decision", "project": project})
-            tools_used.append(res)
-            sources.append("Warden Brain")
-            if res.result.get("ok"):
-                rich_events.append({
-                    "event_type": "decision",
-                    "text": f"⚡ Remembered. Recorded to Warden Brain as a permanent project decision: **{res.result['title']}**.",
-                    "metadata": {"memory": res.result},
-                })
-
-        elif is_planning:
-            goal = clean_msg
-            for prefix in ("captain, make me a plan for", "captain, make a plan for", "captain, make me a plan", "captain, make a plan", "make me a plan for", "make a plan for", "create a plan for", "captain:", "captain"):
-                if lower.startswith(prefix):
-                    goal = clean_msg[len(prefix):].strip(" :,-")
+                    # Add tool execution evidence back to model context
+                    messages.append({
+                        "role": "tool",
+                        "name": fn_name,
+                        "content": json.dumps(res.result, ensure_ascii=False),
+                    })
+            else:
+                # Check if model text accidentally contains tool tags or JSON
+                if any(tag in model_resp for tag in ("<tool_call>", "<tool_response>", "</tool_call>", "</tool_response>")) or model_resp.startswith("{") and "}" in model_resp:
+                    # Run synthesis turn
+                    messages.append({"role": "assistant", "content": model_resp})
+                    messages.append({
+                        "role": "user",
+                        "content": "Now answer the user directly in natural Markdown without any tool tags or raw database keys. If no records or relevant facts were found in the tool results, state plainly that you do not have reliable information about that.",
+                    })
+                    final_reply, _ = self._call_model_step(provider, messages, enable_tools=False)
                     break
-            if not goal or len(goal) < 3:
-                goal = "Improve AI Desk product polish, performance, and user responsiveness"
+                else:
+                    final_reply = model_resp
+                    break
 
-            res = self.registry.execute("captain_plan", {"goal": goal, "project": project})
-            tools_used.append(res)
-            sources.append("Captain Orchestrator")
-            if res.result.get("ok") and res.result.get("plan"):
-                rich_events.append({
-                    "event_type": "plan_created",
-                    "plan_id": res.result["plan_id"],
-                    "text": f"📋 Formulated Captain Plan **{res.result['title']}** with {res.result['steps_count']} steps.",
-                    "metadata": {"plan": res.result["plan"]},
-                })
+        if not final_reply and tools_used:
+            # Run synthesis turn
+            messages.append({
+                "role": "user",
+                "content": "Synthesize a concise, direct, natural Markdown answer for the user based on the tool evidence above without dumping raw record IDs. If no information was found, state that you do not have that information.",
+            })
+            final_reply, _ = self._call_model_step(provider, messages, enable_tools=False)
 
-        elif is_finish:
-            res = self.registry.execute("finish_project", {"objective": clean_msg})
-            tools_used.append(res)
-            sources.append("Warden Finish Subsystem")
-            if res.result.get("ok"):
-                rich_events.append({
-                    "event_type": "finish_card",
-                    "text": f"🚀 **Preview Ready for Review**: All 9/9 verification checks passed at `{res.result['preview_url']}`.",
-                    "metadata": res.result,
-                })
-
-        elif is_history_query:
-            # Query Brain recall + project inspect for rich synthesis
-            m_res = self.registry.execute("brain_recall", {"query": clean_msg, "limit": 6})
-            tools_used.append(m_res)
-            sources.append("Warden Brain")
-            p_res = self.registry.execute("project_inspect", {})
-            tools_used.append(p_res)
-            sources.append("Git Repository Context")
-
-        elif is_tasks_query:
-            t_res = self.registry.execute("tasks_inspect", {})
-            tools_used.append(t_res)
-            sources.append("Warden Task Board")
-            r_res = self.registry.execute("runs_inspect", {})
-            tools_used.append(r_res)
-
-        else:
-            # Default / general question -> inspect project context and recall relevant knowledge
-            m_res = self.registry.execute("brain_recall", {"query": clean_msg, "limit": 4})
-            tools_used.append(m_res)
-            sources.append("Warden Brain")
-            p_res = self.registry.execute("project_inspect", {})
-            tools_used.append(p_res)
-            sources.append("Git Repository Context")
-
-        # 2. Synthesis of Natural Language Reply
-        reply = self._synthesize_response(clean_msg, tools_used, rich_events)
+        # Final cleanup: ensure no raw tool tags remain
+        final_reply = re.sub(r"</?(tool_call|tool_response)>", "", final_reply).strip()
+        if not final_reply:
+            final_reply = "I don't have reliable information about that."
 
         return RuntimeExecutionResult(
-            reply=reply,
+            reply=final_reply,
             tools_used=tools_used,
             sources=sources,
             rich_events=rich_events,
-            model="warden-agent-runtime-v1",
-            provider="warden",
+            model=provider.model,
+            provider=provider.provider_type,
             trace_id=trace_id,
         )
 
-    def _synthesize_response(
+    def _load_recent_conversation(self, conversation_id: str) -> list[dict[str, str]]:
+        """Load durable conversation turns from SQLite store."""
+        try:
+            from .group_chat import GroupChatStore
+            store = GroupChatStore()
+            events = store.get_events(conversation_id, limit=20)
+            turns = []
+            for ev in events:
+                if ev.event_type == "human_message":
+                    turns.append({"role": "user", "content": f"Matt: {ev.text}"})
+                elif ev.event_type in ("warden_message", "plan_created", "decision", "finish_card"):
+                    turns.append({"role": "assistant", "content": ev.text})
+            return turns
+        except Exception:
+            return []
+
+    def _call_model_step(
         self,
-        user_message: str,
-        tools_used: list[ToolCallResult],
-        rich_events: list[dict[str, Any]],
-    ) -> str:
-        """Synthesize gathered evidence into an authoritative, helpful response without leaking raw IDs."""
-        lower = user_message.lower()
+        provider: ResolvedProvider,
+        messages: list[dict[str, Any]],
+        enable_tools: bool = True,
+    ) -> Tuple[str, list[dict[str, Any]]]:
+        """Perform a single model inference step, returning (content, tool_calls)."""
+        tools_spec = self.registry.list_tools() if enable_tools else []
 
-        # 1. Activity / Browsing Synthesis
-        for call in tools_used:
-            if call.tool_name == "activity_search":
-                res = call.result
-                activities = res.get("activity", [])
-                if not activities:
-                    return (
-                        "🌐 **Browser Memory Status**: No browsing activity is recorded for tonight.\n\n"
-                        "Warden's local browser memory extension indexes web pages and tabs only when explicitly enabled on an active profile. "
-                        "You can search indexed memories via `/recall` or connect your browser extension in Settings."
-                    )
-                lines = []
-                for item in activities[:5]:
-                    title = item.get("title", "Web Page")
-                    summary = item.get("summary", "")
-                    clean_summary = summary.replace("\n", " ")[:140]
-                    lines.append(f"- **{title}**: {clean_summary}")
-                return "🌐 **Indexed Browser Activity**:\n" + "\n".join(lines)
+        if provider.provider_type == "ollama":
+            # Sanitize messages for Ollama API
+            clean_msgs = []
+            for m in messages:
+                role = m.get("role", "user")
+                if role == "tool":
+                    clean_msgs.append({
+                        "role": "user",
+                        "content": f"[Tool Result for {m.get('name', 'tool')}]:\n{m.get('content', '')}",
+                    })
+                else:
+                    clean_msgs.append({
+                        "role": role,
+                        "content": m.get("content", ""),
+                    })
 
-        # 2. Plan Created Synthesis
-        for call in tools_used:
-            if call.tool_name == "captain_plan":
-                res = call.result
-                if res.get("ok"):
-                    return f"📋 Formulated Captain Plan **{res.get('title')}** with {res.get('steps_count')} steps."
+            payload: dict[str, Any] = {
+                "model": provider.model,
+                "messages": clean_msgs,
+                "stream": False,
+                "options": {"temperature": 0.2},
+            }
+            if enable_tools and tools_spec:
+                payload["tools"] = tools_spec
 
-        # 3. Brain Remember Synthesis
-        for call in tools_used:
-            if call.tool_name == "brain_remember":
-                res = call.result
-                if res.get("ok"):
-                    return f"⚡ Remembered. Recorded to Warden Brain as a permanent project decision: **{res.get('summary')}**."
+            try:
+                req = urllib.request.Request(
+                    f"{provider.endpoint}/api/chat",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=75) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    msg = data.get("message", {})
+                    content = msg.get("content", "").strip()
+                    tool_calls = msg.get("tool_calls", []) if enable_tools else []
 
-        # 4. Finish Project Synthesis
-        for call in tools_used:
-            if call.tool_name == "finish_project":
-                res = call.result
-                if res.get("ok"):
-                    return f"🚀 **Preview Ready for Review**: All 9/9 verification checks passed at `{res.get('preview_url')}`. Ready for operator decision to publish."
+                    # Also check if model emitted tool call JSON in content
+                    if enable_tools and not tool_calls and "{" in content and "}" in content:
+                        parsed_tc = self._extract_json_tool_call(content)
+                        if parsed_tc:
+                            return "", [parsed_tc]
 
-        # 5. History / Where We At / Progress Synthesis
-        is_history = any(k in lower for k in ("yesterday", "last night", "what were we doing", "what was i doing", "recent work", "recent changes", "what did we do"))
-        is_where_we_at = any(k in lower for k in ("where are we at", "what should we build next", "status", "next steps"))
+                    return content, tool_calls
+            except Exception as exc:
+                logger.warning("Ollama call failed: %s", exc)
+                return "", []
 
-        if is_history:
-            return (
-                "Last night and today we accomplished two core milestones:\n\n"
-                "1. **Warden Finish Subsystem (PR #52)**: Implemented persistent 9-point verification, self-healing repair loops, Vercel/Supabase connectors, and audit proof pack generators.\n"
-                "2. **AI Desk 'Talk to Warden' Surface (PR #53)**: Delivered rich cards for plans, memories, decisions, and finish progress, plus the Warden Context drawer.\n\n"
-                "All 973 Python tests and 80 desktop Vitest tests passed. We are currently dogfooding and shipping **Warden AI Desk 0.6.1**."
-            )
+        elif provider.provider_type == "openai_compat":
+            payload = {
+                "model": provider.model,
+                "messages": messages,
+                "tools": tools_spec,
+                "temperature": 0.2,
+            }
+            try:
+                req = urllib.request.Request(
+                    f"{provider.endpoint}/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {provider.api_key}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=35) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    choice = data.get("choices", [{}])[0].get("message", {})
+                    content = choice.get("content", "").strip()
+                    tool_calls_raw = choice.get("tool_calls", [])
+                    tool_calls = []
+                    for tc in tool_calls_raw:
+                        fn = tc.get("function", {})
+                        tool_calls.append({
+                            "name": fn.get("name"),
+                            "arguments": fn.get("arguments", {}),
+                        })
+                    return content, tool_calls
+            except Exception as exc:
+                logger.warning("OpenAI compat call failed: %s", exc)
+                return "", []
 
-        if is_where_we_at:
-            p_call = next((c for c in tools_used if c.tool_name == "project_inspect"), None)
-            branch = p_call.result.get("branch", "master") if p_call else "master"
-            return (
-                f"📊 **Warden Current Status & Roadmap** (on `{branch}`):\n\n"
-                "- **Active Focus**: Real Agent Runtime 0.6.1 (unifying Talk to Warden with model-driven tool execution).\n"
-                "- **Verified Systems**: Finish subsystem with 9/9 verification, Control Plane v1 policy engine, local Electron supervisor.\n"
-                "- **Recommended Next Work**: Expand Mission Runtime v2 and multi-step autonomous execution with durable checkpoints."
-            )
+        return "", []
 
-        # 6. Tasks / Agents query
-        for call in tools_used:
-            if call.tool_name == "tasks_inspect":
-                tasks = call.result.get("tasks", [])
-                if tasks:
-                    items = [f"- `[{t.get('priority', 'normal').upper()}]` **{t.get('title')}** (assigned: `{t.get('agent')}`)" for t in tasks[:8]]
-                    return f"📌 **Active Tasks ({len(tasks)})**:\n" + "\n".join(items)
-                return "📌 **Tasks**: No active assigned tasks on the board."
-
-        # 7. General Knowledge / Brain Synthesis
-        for call in tools_used:
-            if call.tool_name == "brain_recall":
-                mems = call.result.get("memories", [])
-                if mems:
-                    items = [f"- **{m.get('title')}** ({m.get('kind')}): {m.get('summary')[:140]}" for m in mems[:4]]
-                    return f"🧠 Recalled relevant context from Warden Brain:\n" + "\n".join(items)
-
-        # Default conversational synthesis
-        return (
-            f"Understood. I checked current project context and Brain memory for \"{user_message[:100]}\". "
-            "Let me know if you would like me to create a plan, recall past architectural decisions, or execute a verification run."
-        )
+    def _extract_json_tool_call(self, content: str) -> Optional[dict[str, Any]]:
+        """Extract tool call if model outputted JSON structure."""
+        try:
+            # Match {"name": "...", "parameters": {...}} or {"tool": "...", "arguments": {...}}
+            match = re.search(r"\{[\s\S]*\}", content)
+            if not match:
+                return None
+            obj = json.loads(match.group(0))
+            name = obj.get("name") or obj.get("tool") or obj.get("function")
+            params = obj.get("parameters") or obj.get("arguments") or obj.get("args") or {}
+            if name and self.registry.get(name):
+                return {"name": name, "arguments": params}
+        except Exception:
+            pass
+        return None
