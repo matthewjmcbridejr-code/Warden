@@ -141,11 +141,13 @@ router.include_router(workbench_router)
 from .projects import router as projects_router
 from .webstudio.api import router as webstudio_router
 from .finish.api import router as finish_router
+from .computer.api import router as computer_router
 
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
 mcharness_router.include_router(projects_router)
 mcharness_router.include_router(webstudio_router)
 mcharness_router.include_router(finish_router)
+mcharness_router.include_router(computer_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
 _CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -6570,8 +6572,12 @@ async def api_stream_chat_events(conversation_id: str, request: Request, last_ev
     store = GroupChatStore()
 
     since_seq = 0
-    if last_event_id and last_event_id.isdigit():
+    if last_event_id and str(last_event_id).isdigit():
         since_seq = int(last_event_id)
+    else:
+        hdr = request.headers.get("last-event-id") or request.headers.get("Last-Event-ID")
+        if hdr and str(hdr).isdigit():
+            since_seq = int(hdr)
 
     async def sse_generator():
         # 1. Replay past events since cursor

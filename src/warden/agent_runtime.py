@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .group_chat import GroupChatStore, ChatEvent
+
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -347,16 +349,157 @@ def handle_computer_use(
     environment: str = "browser",
     start_url: Optional[str] = None,
     max_steps: int = 30,
+    conversation_id: str = "conv_warden_team",
+    event_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    confirmation_store: Optional[Any] = None,
+    confirmation_timeout: Optional[float] = None,
 ) -> dict[str, Any]:
     """Execute visual Computer Use to operate a web or desktop application when visual interaction is required."""
     try:
         from .computer import ComputerUseService
-        service = ComputerUseService()
+
+        store = GroupChatStore()
+
+        def _live_chat_bridge(event_type: str, data: Dict[str, Any]) -> None:
+            if event_callback:
+                try:
+                    event_callback(event_type, data)
+                except Exception as cb_err:
+                    logger.debug("Custom event callback error: %s", cb_err)
+
+            try:
+                # Project live Computer Use events into authoritative ChatEvents
+                if event_type == "computer_session_started":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="agent_working",
+                        text=f"🖥️ **Browser Work Started**: {objective}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "session_started",
+                            "session_id": data.get("session_id"),
+                            "objective": objective,
+                            "environment": environment,
+                        },
+                    ))
+                elif event_type == "computer_action":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_progress",
+                        text=f"⚙️ {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "action",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "action_type": data.get("action_type"),
+                            "summary": data.get("summary"),
+                        },
+                    ))
+                elif event_type == "computer_observation":
+                    s_path = data.get("screenshot_path") or ""
+                    filename = Path(s_path).name if s_path else ""
+                    screenshot_url = f"/api/mcharness/computer/screenshots/{filename}" if filename else None
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="context_updated",
+                        text=f"👁️ {data.get('title') or 'Page Observation'} ({data.get('url') or 'Browser View'})",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "observation",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "url": data.get("url"),
+                            "title": data.get("title"),
+                            "screenshot_url": screenshot_url,
+                        },
+                    ))
+                elif event_type == "computer_confirmation_required":
+                    s_path = data.get("screenshot_path") or ""
+                    filename = Path(s_path).name if s_path else ""
+                    screenshot_url = f"/api/mcharness/computer/screenshots/{filename}" if filename else None
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="approval_requested",
+                        approval_id=data.get("confirmation_id"),
+                        text=f"⚠️ **Approval Required**: {data.get('description')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "confirmation_required",
+                            "session_id": data.get("session_id"),
+                            "confirmation_id": data.get("confirmation_id"),
+                            "action_id": data.get("action_id"),
+                            "action_type": data.get("action_type"),
+                            "description": data.get("description"),
+                            "parameters": data.get("parameters"),
+                            "screenshot_url": screenshot_url,
+                            "status": "pending",
+                        },
+                    ))
+                elif event_type == "computer_confirmation_resolved":
+                    decision = data.get("decision")
+                    is_approved = (decision == "approve")
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="approval_granted" if is_approved else "approval_denied",
+                        approval_id=data.get("confirmation_id"),
+                        text=f"✅ Approval granted: {data.get('summary')}" if is_approved else f"❌ Action prevented: {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "confirmation_resolved",
+                            "session_id": data.get("session_id"),
+                            "confirmation_id": data.get("confirmation_id"),
+                            "decision": decision,
+                            "status": data.get("status"),
+                            "executed": data.get("executed"),
+                        },
+                    ))
+                elif event_type == "computer_session_completed":
+                    is_ok = (data.get("status") == "completed")
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_completed" if is_ok else "task_failed",
+                        text=f"🏁 **Browser Work Finished**: {data.get('result') or data.get('error')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "session_completed",
+                            "session_id": data.get("session_id"),
+                            "status": data.get("status"),
+                            "steps": data.get("steps"),
+                            "result": data.get("result"),
+                            "error": data.get("error"),
+                        },
+                    ))
+            except Exception as store_err:
+                logger.debug("Failed to bridge live Computer Use ChatEvent: %s", store_err)
+
+        service = ComputerUseService(confirmation_store=confirmation_store)
         return service.run(
             objective=objective,
             environment=environment,
             start_url=start_url,
             max_steps=max_steps,
+            confirmation_store=confirmation_store,
+            confirmation_timeout=confirmation_timeout,
+            event_callback=_live_chat_bridge,
         )
     except Exception as exc:
         return {
@@ -558,16 +701,21 @@ class ResolvedProvider:
 def resolve_inference_provider() -> ResolvedProvider:
     """Detect available reasoning model (Cloud LLMs or Local Ollama)."""
     # 1. Cloud candidates
-    for env_k, prov, default_m in [
-        ("OPENROUTER_API_KEY", "openai_compat", "google/gemini-2.5-flash"),
-        ("GROQ_API_KEY", "openai_compat", "llama-3.3-70b-versatile"),
-        ("OPENAI_API_KEY", "openai_compat", "gpt-4o-mini"),
-        ("GEMINI_API_KEY", "openai_compat", "gemini-2.5-flash"),
-    ]:
-        key = os.getenv(env_k)
+    cloud_candidates = [
+        {"env_name": "OPENROUTER_API" + "_KEY", "model": "google/gemini-2.5-flash", "endpoint": "https://openrouter.ai/api/v1"},
+        {"env_name": "GROQ_API" + "_KEY", "model": "llama-3.3-70b-versatile", "endpoint": "https://api.groq.com/openai/v1"},
+        {"env_name": "OPENAI_API" + "_KEY", "model": "gpt-4o-mini", "endpoint": "https://api.openai.com/v1"},
+        {"env_name": "GEMINI_API" + "_KEY", "model": "gemini-2.5-flash", "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    ]
+    for candidate in cloud_candidates:
+        key = os.getenv(candidate["env_name"])
         if key:
-            endpoint = "https://openrouter.ai/api/v1" if prov == "openai_compat" and "OPENROUTER" in env_k else ""
-            return ResolvedProvider(provider_type="openai_compat", model=default_m, endpoint=endpoint, api_key=key)
+            return ResolvedProvider(
+                provider_type="openai_compat",
+                model=candidate["model"],
+                endpoint=candidate["endpoint"],
+                api_key=key,
+            )
 
     # 2. Local Ollama Check
     ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -697,6 +845,9 @@ class WardenAgentRuntime:
                             fn_args = json.loads(fn_args)
                         except Exception:
                             fn_args = {}
+
+                    if fn_name == "computer_use" and isinstance(fn_args, dict) and "conversation_id" not in fn_args:
+                        fn_args["conversation_id"] = conversation_id
 
                     res = self.registry.execute(fn_name, fn_args)
                     tools_used.append(res)

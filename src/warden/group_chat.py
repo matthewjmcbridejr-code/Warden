@@ -432,7 +432,11 @@ class GroupChatStore:
     def _notify_listeners(self, event: ChatEvent) -> None:
         for q in list(self._listeners):
             try:
-                q.put_nowait(event)
+                loop = getattr(q, "_loop", None)
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(q.put_nowait, event)
+                else:
+                    q.put_nowait(event)
             except Exception:
                 pass
 

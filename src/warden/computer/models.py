@@ -79,11 +79,30 @@ class ComputerObservation:
 class ConfirmationRequest:
     confirmation_id: str
     session_id: str
-    description: str
+    action_id: str
     action_type: str
+    description: str
     parameters: Dict[str, Any]
-    status: str = "pending"
+    status: str = "pending"  # "pending", "approved", "denied", "expired", "cancelled"
+    decision: Optional[str] = None  # "approve", "deny"
+    operator_id: Optional[str] = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    resolved_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "confirmation_id": self.confirmation_id,
+            "session_id": self.session_id,
+            "action_id": self.action_id,
+            "action_type": self.action_type,
+            "description": self.description,
+            "parameters": self.parameters,
+            "status": self.status,
+            "decision": self.decision,
+            "operator_id": self.operator_id,
+            "created_at": self.created_at,
+            "resolved_at": self.resolved_at,
+        }
 
 
 @dataclass
@@ -96,12 +115,17 @@ class ComputerSession:
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: Optional[str] = None
     status: SessionStatus = SessionStatus.RUNNING
+    active_confirmation_id: Optional[str] = None
     step_count: int = 0
     max_steps: int = 30
     actions: List[ComputerAction] = field(default_factory=list)
     evidence: List[Dict[str, Any]] = field(default_factory=list)
     final_result: Optional[str] = None
     error: Optional[str] = None
+
+    @property
+    def is_waiting_for_confirmation(self) -> bool:
+        return self.status == SessionStatus.WAITING_FOR_CONFIRMATION
 
     def to_summary_dict(self) -> Dict[str, Any]:
         return {
@@ -112,6 +136,8 @@ class ComputerSession:
             "provider": self.provider_name,
             "model": self.model_name,
             "status": self.status.value if isinstance(self.status, SessionStatus) else str(self.status),
+            "active_confirmation_id": self.active_confirmation_id,
+            "is_waiting_for_confirmation": self.is_waiting_for_confirmation,
             "steps": self.step_count,
             "max_steps": self.max_steps,
             "started_at": self.started_at,
