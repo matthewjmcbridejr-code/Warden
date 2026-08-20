@@ -119,5 +119,5 @@ def test_process_human_message_routes_authoritative(tmp_path):
     assert h_evt.actor_id == "matt"
     assert len(responses) == 1
     assert responses[0].actor_id == "warden"
-    assert "Plan Work" in responses[0].text
-    assert "Recall Memory" in responses[0].text
+    assert responses[0].event_type == "warden_message"
+    assert "Warden" in responses[0].text or "context" in responses[0].text or "plan" in responses[0].text

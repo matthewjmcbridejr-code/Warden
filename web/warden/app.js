@@ -5779,6 +5779,38 @@
   wireGroupChatListeners();
   loadGroupChatEvents(currentChatRoomId);
   connectGroupChatSSE(currentChatRoomId);
+  updateHeaderActiveStatus();
+
+  async function updateHeaderActiveStatus() {
+    try {
+      const resp = await fetch("/api/mcharness/runs");
+      const data = await resp.json();
+      const badge = document.getElementById("chat-working-badge");
+      const participants = document.getElementById("chat-header-participants");
+      if (!badge) return;
+
+      const activeRuns = (data && data.runs) ? data.runs.filter(r => r.status === "running" || r.status === "starting") : [];
+      if (activeRuns.length > 0) {
+        badge.className = "chat-working-badge working";
+        badge.textContent = `● ${activeRuns.length} working`;
+      } else {
+        badge.className = "chat-working-badge idle";
+        badge.textContent = "● Ready";
+      }
+
+      if (participants) {
+        const activeProviders = new Set(activeRuns.map(r => (r.provider || "").toLowerCase()));
+        participants.innerHTML = `
+          <span class="p-badge ${activeProviders.has("claude") ? "working" : "ready"}"><span class="dot">●</span> Claude</span>
+          <span class="p-badge ${activeProviders.has("codex") ? "working" : "ready"}"><span class="dot">●</span> Codex</span>
+          <span class="p-badge ${activeProviders.has("spark") ? "working" : "ready"}"><span class="dot">●</span> Spark</span>
+          <span class="p-badge warden"><span class="dot">●</span> Warden</span>
+        `;
+      }
+    } catch (err) {
+      // Quietly fallback
+    }
+  }
 
   function wireGroupChatListeners() {
     console.error("WIRE GROUP CHAT LISTENERS CALLED, ALREADY WIRED?:", Boolean(window._groupChatListenersWired));

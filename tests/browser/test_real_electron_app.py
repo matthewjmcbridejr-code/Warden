@@ -62,13 +62,33 @@ def test_real_electron_app_lifecycle_and_team_chat():
             stream = frame.wait_for_selector("#chat-messages-stream", state="attached", timeout=10000)
             assert stream is not None
 
-            # 4. Real user send interaction inside iframe: Captain Planning Prompt
+            # 4. Verify Truthful Header Badge (Ready, not fake 3 working)
+            badge_text = frame.locator("#chat-working-badge").text_content()
+            assert "Ready" in badge_text or "Available" in badge_text, f"Expected Ready badge, got {badge_text}"
+            assert "3 working" not in badge_text
+
+            # 5. Real user send interaction: Yesterday Work Prompt
             textarea = frame.wait_for_selector("#chat-input-textarea", state="attached", timeout=10000)
             assert textarea is not None
+            frame.fill("#chat-input-textarea", "tell me what i was doing yesterday", force=True)
+            frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
+
+            # Verify yesterday work synthesis (no capability menu)
+            yesterday_text = ""
+            for _ in range(20):
+                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+                if cards:
+                    yesterday_text = cards[-1].text_content()
+                    if "Finish Subsystem" in yesterday_text or "milestones" in yesterday_text or "AI Desk" in yesterday_text:
+                        break
+                page1.wait_for_timeout(500)
+            assert "Finish Subsystem" in yesterday_text or "milestones" in yesterday_text
+            assert "Here is what I can do for you:" not in yesterday_text
+
+            # 6. Real user send interaction: Captain Planning Prompt
             frame.fill("#chat-input-textarea", "Captain, make me a plan for improving Warden based on what we've built this week.", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
 
-            # 5. Verify Captain plan card appears as latest response without fake agent events
             latest_card_text = ""
             for _ in range(20):
                 cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
@@ -82,7 +102,7 @@ def test_real_electron_app_lifecycle_and_team_chat():
             assert "split this work across the team" not in latest_card_text
             assert "Claude UX" not in latest_card_text
 
-            # 6. Real user send interaction: Browsing History Prompt
+            # 7. Real user send interaction: Browsing History Prompt
             frame.fill("#chat-input-textarea", "what have I been browsing tonight", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
             browsing_card_text = ""
@@ -96,22 +116,25 @@ def test_real_electron_app_lifecycle_and_team_chat():
             assert "Browser" in browsing_card_text
             assert "split this work across the team" not in browsing_card_text
             assert "Claude UX" not in browsing_card_text
+            assert "browser-f7ccfc0f8d4a" not in browsing_card_text
 
-            # 7. Switch to Build workspace and verify Brain connectivity
+            # 8. Switch to Build workspace and verify Brain connectivity
             page1.click("button[data-workspace='build']", force=True)
             page1.wait_for_timeout(1000)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "build"
 
-            # 8. Switch back to Team Chat
+            # 9. Switch back to Team Chat
             page1.click("button[data-workspace='team-chat']", force=True)
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
-            # 9. Capture Real Electron Window Screenshot
+            # 10. Capture Real Electron Window Screenshots
             electron_screenshot_path = SCREENSHOT_DIR / "real_electron_team_chat_window.png"
             page1.screenshot(path=str(electron_screenshot_path))
-            print(f"\n[CAPTURED REAL ELECTRON WINDOW SCREENSHOT]: {electron_screenshot_path}")
+            runtime_screenshot_path = SCREENSHOT_DIR / "real_electron_agent_runtime.png"
+            page1.screenshot(path=str(runtime_screenshot_path))
+            print(f"\n[CAPTURED REAL ELECTRON WINDOW SCREENSHOTS]: {electron_screenshot_path}, {runtime_screenshot_path}")
 
     finally:
         proc1.terminate()
