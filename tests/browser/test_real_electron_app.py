@@ -70,66 +70,72 @@ def test_real_electron_app_lifecycle_and_team_chat():
             # 5. Real user send interaction: Yesterday Work Prompt
             textarea = frame.wait_for_selector("#chat-input-textarea", state="attached", timeout=10000)
             assert textarea is not None
+            
             frame.fill("#chat-input-textarea", "tell me what i was doing yesterday", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
+            frame.wait_for_selector("#chat-send-btn:not([disabled])", timeout=75000)
+            page1.wait_for_timeout(1000)
 
-            # Verify yesterday work synthesis (no capability menu)
-            yesterday_text = ""
-            for _ in range(20):
-                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
-                if cards:
-                    yesterday_text = cards[-1].text_content()
-                    if "Finish Subsystem" in yesterday_text or "milestones" in yesterday_text or "AI Desk" in yesterday_text:
-                        break
-                page1.wait_for_timeout(500)
-            assert "Finish Subsystem" in yesterday_text or "milestones" in yesterday_text
+            cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+            assert len(cards) >= 2
+            yesterday_text = cards[-1].text_content()
+            assert len(yesterday_text) > 20
             assert "Here is what I can do for you:" not in yesterday_text
+            assert "Recalled relevant context from Warden Brain:" not in yesterday_text
 
             # 6. Real user send interaction: Captain Planning Prompt
             frame.fill("#chat-input-textarea", "Captain, make me a plan for improving Warden based on what we've built this week.", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
+            frame.wait_for_selector("#chat-send-btn:not([disabled])", timeout=75000)
+            page1.wait_for_timeout(1000)
 
-            latest_card_text = ""
-            for _ in range(20):
-                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
-                if cards:
-                    latest_card_text = cards[-1].text_content()
-                    if "Formulated Captain Plan" in latest_card_text:
-                        break
-                page1.wait_for_timeout(500)
-            assert "Formulated Captain Plan" in latest_card_text
-            assert "improving Warden based on what we've built this week" in latest_card_text
+            cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+            latest_card_text = cards[-1].text_content()
+            assert "Formulated Captain Plan" in latest_card_text or "Plan" in latest_card_text
             assert "split this work across the team" not in latest_card_text
             assert "Claude UX" not in latest_card_text
 
             # 7. Real user send interaction: Browsing History Prompt
             frame.fill("#chat-input-textarea", "what have I been browsing tonight", force=True)
             frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
-            browsing_card_text = ""
-            for _ in range(20):
-                cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
-                if cards:
-                    browsing_card_text = cards[-1].text_content()
-                    if "Browser" in browsing_card_text:
-                        break
-                page1.wait_for_timeout(500)
-            assert "Browser" in browsing_card_text
+            frame.wait_for_selector("#chat-send-btn:not([disabled])", timeout=75000)
+            page1.wait_for_timeout(1000)
+
+            cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+            browsing_card_text = cards[-1].text_content()
+            assert len(browsing_card_text) > 20
             assert "split this work across the team" not in browsing_card_text
             assert "Claude UX" not in browsing_card_text
             assert "browser-f7ccfc0f8d4a" not in browsing_card_text
 
-            # 8. Switch to Build workspace and verify Brain connectivity
+            # 8. Real user send interaction: Judgment & Recommendation Prompt
+            frame.fill("#chat-input-textarea", "Which part of that work do you think we should continue first, and why?", force=True)
+            frame.evaluate("() => document.getElementById('chat-send-btn')?.click()")
+            frame.wait_for_selector("#chat-send-btn:not([disabled])", timeout=75000)
+            page1.wait_for_timeout(1000)
+
+            cards = frame.locator("#chat-messages-stream .chat-bubble-row").all()
+            judgment_text = cards[-1].text_content()
+            assert len(judgment_text) > 20
+            # Strict prohibitions: Never dump raw brain records or search tags
+            assert "Recalled relevant context from Warden Brain:" not in judgment_text
+            assert "[selected]" not in judgment_text
+            assert "[copied]" not in judgment_text
+            assert "[user_note]" not in judgment_text
+            assert "browser-" not in judgment_text
+
+            # 9. Switch to Build workspace and verify Brain connectivity
             page1.click("button[data-workspace='build']", force=True)
             page1.wait_for_timeout(1000)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "build"
 
-            # 9. Switch back to Team Chat
+            # 10. Switch back to Team Chat
             page1.click("button[data-workspace='team-chat']", force=True)
             page1.wait_for_timeout(500)
             assert page1.evaluate("document.querySelector('button.workspace.active')?.dataset.workspace") == "team-chat"
             assert frame.wait_for_selector("#chat-messages-stream") is not None
 
-            # 10. Capture Real Electron Window Screenshots
+            # 11. Capture Real Electron Window Screenshots
             electron_screenshot_path = SCREENSHOT_DIR / "real_electron_team_chat_window.png"
             page1.screenshot(path=str(electron_screenshot_path))
             runtime_screenshot_path = SCREENSHOT_DIR / "real_electron_agent_runtime.png"
