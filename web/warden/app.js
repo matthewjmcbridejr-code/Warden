@@ -5599,7 +5599,7 @@
 
     if (activeTasksList) {
       const realItems = [
-        ...activeBrowserMissions.map(mission => ({ name: mission.objective, detail: mission.currentAction, status: missionStatusLabel(mission.status) })),
+        ...activeBrowserMissions.map(mission => ({ name: mission.title, detail: mission.currentAction, status: missionStatusLabel(mission.status) })),
         ...workingAgents.map(agent => ({ name: agent.display_name || agent.name || agent.agent_id, detail: agent.current_task || "Runtime reports this agent is working", status: "Working" })),
       ];
       activeTasksList.innerHTML = realItems.length ? realItems.map(item => `
@@ -6084,9 +6084,19 @@
         selectedMissionId = event.metadata.session_id;
         if (event.metadata.phase === "confirmation_required") missionDecisionError = null;
       }
+      if (event.metadata?.phase === "session_started") releaseComposerForMission();
     }
     currentChatEvents = [...merged.values()].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
     renderGroupChatEvents(currentChatEvents);
+  }
+
+  function releaseComposerForMission() {
+    isSendingHumanMessage = false;
+    const sendBtn = document.getElementById("chat-send-btn");
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Send";
+    }
   }
 
   function buildMissionPresentation() {
@@ -6101,6 +6111,10 @@
 
   function missionStatusLabel(status) {
     return ({ working: "Working", needs_user: "Needs You", completed: "Done", failed: "Failed" })[status] || "Working";
+  }
+
+  function browserCardStatusLabel(status) {
+    return status === "needs_user" ? "Paused" : missionStatusLabel(status);
   }
 
   function renderMissionControl() {
@@ -6119,7 +6133,7 @@
       railList.innerHTML = missions.length ? [...missions].reverse().map(mission => `
         <button type="button" class="mission-rail-mission ${mission.id === selectedMissionId ? "active" : ""}" data-session-id="${escapeHtml(mission.id)}">
           <span class="mission-rail-mission-copy">
-            <span class="mission-rail-mission-title">${escapeHtml(mission.objective)}</span>
+            <span class="mission-rail-mission-title">${escapeHtml(mission.title)}</span>
             <span class="mission-rail-mission-status">${escapeHtml(missionStatusLabel(mission.status))}</span>
           </span>
           ${mission.needsUser ? '<span class="mission-count">1</span>' : ""}
@@ -6143,7 +6157,9 @@
     region.hidden = false;
     const objective = document.getElementById("mission-current-objective");
     const status = document.getElementById("mission-current-status");
-    if (objective) objective.textContent = mission.objective;
+    if (objective) objective.textContent = mission.title;
+    const description = document.getElementById("mission-current-description");
+    if (description) description.textContent = mission.objective;
     if (status) {
       status.textContent = missionStatusLabel(mission.status);
       status.className = `mission-status status-${mission.status.replace("_", "-")}`;
@@ -6183,7 +6199,7 @@
               <span class="browser-card-icon" aria-hidden="true">B</span>
               <div><div class="browser-card-title">Browser</div><div class="browser-card-provider">${escapeHtml(mission.provider)}</div></div>
             </div>
-            <span class="browser-card-status status-${mission.status.replace("_", "-")}">${escapeHtml(missionStatusLabel(mission.status))}</span>
+            <span class="browser-card-status status-${mission.status.replace("_", "-")}">${escapeHtml(browserCardStatusLabel(mission.status))}</span>
           </div>
           <div class="browser-card-body">
             <div>
@@ -6216,6 +6232,7 @@
         <div class="browser-surface-field" style="grid-column:1/-1"><span class="browser-surface-label">Current URL</span><span class="browser-surface-value">${escapeHtml(mission.currentUrl || "Not observed yet")}</span></div>
         <div class="browser-surface-field" style="grid-column:1/-1"><span class="browser-surface-label">Current action</span><span class="browser-surface-value">${escapeHtml(summary || "Preparing browser work…")}</span></div>
       </div>
+      ${mission.activity.length ? `<div class="browser-activity"><div class="browser-surface-label">Recent activity</div>${mission.activity.slice(-6).map(item => `<div class="browser-activity-item ${escapeHtml(item.kind)}"><span aria-hidden="true">${item.kind === "warning" ? "!" : item.kind === "success" ? "✓" : "•"}</span><span>${escapeHtml(item.label)}</span></div>`).join("")}</div>` : ""}
       ${mission.evidence.length ? `<div class="browser-proof"><strong>${mission.status === "completed" ? "Completion evidence" : "Failure evidence"}</strong><br>${escapeHtml(mission.evidence[0].summary)}<br>${mission.currentStep} step${mission.currentStep === 1 ? "" : "s"}${mission.pageTitle ? ` · Final page: ${escapeHtml(mission.pageTitle)}` : ""}</div>` : ""}
     `;
   }

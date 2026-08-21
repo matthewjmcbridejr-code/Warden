@@ -6903,6 +6903,7 @@ body {
 
 .mission-section-heading h3,
 .browser-surface-header h3 { margin: 3px 0 0; color: #f8fafc; font-size: 0.96rem; }
+.mission-current-description { max-width: 700px; margin-top: 5px; color: #8190a7; font-size: 0.73rem; line-height: 1.35; }
 
 .mission-status,
 .browser-card-status {
@@ -6979,6 +6980,11 @@ body {
 .browser-surface-label { display: block; color: #68778e; font-size: 0.64rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
 .browser-surface-value { display: block; margin-top: 4px; color: #dce6f4; font-size: 0.76rem; line-height: 1.4; overflow-wrap: anywhere; }
 .browser-proof { margin-top: 14px; padding: 12px; border: 1px solid rgba(52, 211, 153, 0.24); border-radius: 9px; background: rgba(5, 150, 105, 0.07); color: #b9ead7; font-size: 0.78rem; line-height: 1.45; }
+.browser-activity { margin-top: 14px; padding-top: 13px; border-top: 1px solid #202d40; }
+.browser-activity-item { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; color: #b8c5d8; font-size: 0.76rem; line-height: 1.35; }
+.browser-activity-item > span:first-child { width: 15px; color: #7d8da5; font-weight: 800; text-align: center; }
+.browser-activity-item.success > span:first-child { color: #6ee7b7; }
+.browser-activity-item.warning > span:first-child { color: #fbbf24; }
 
 .chat-rooms-sidebar {
   background: var(--bg);

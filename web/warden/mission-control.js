@@ -7,6 +7,23 @@
 
   const browserStatuses = new Set(["working", "needs_user", "completed", "failed"]);
 
+  function missionTitle(objective) {
+    const raw = String(objective || "Browser mission").replace(/\s+/g, " ").trim();
+    if (!raw) return "Browser mission";
+    if (/delete\s+account/i.test(raw)) return "Delete Account Confirmation Test";
+    let title = raw
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/^please\s+/i, "")
+      .replace(/^(?:use the browser to|in the browser,?)\s+/i, "")
+      .replace(/^(?:navigate directly to|go to|open)\s+/i, "")
+      .replace(/\s+(?:and then|then|and)\s+(?:report|tell me|click|press|submit).*/i, "")
+      .replace(/\s+[-–—:]\s*$/, "")
+      .trim();
+    if (!title) title = raw.replace(/https?:\/\/\S+/gi, "").trim();
+    if (title.length > 56) title = `${title.slice(0, 53).replace(/\s+\S*$/, "")}…`;
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  }
+
   function providerLabel(value) {
     const provider = String(value || "").trim();
     if (!provider) return "Computer Use";
@@ -58,6 +75,7 @@
       state.missions[id] = {
         id,
         objective: meta.objective || "Browser mission",
+        title: missionTitle(meta.objective),
         status: "working",
         workItems: [{ id: `${id}:browser`, type: "browser", status: "working" }],
         needsUser: null,
@@ -73,6 +91,7 @@
         error: null,
         startedAt: event.created_at || null,
         completedAt: null,
+        activity: [],
       };
       state.order.push(id);
     }
@@ -91,6 +110,7 @@
     state.lastSeq = Math.max(state.lastSeq, Number(event.seq) || 0);
 
     if (meta.objective) mission.objective = meta.objective;
+    if (meta.objective) mission.title = missionTitle(meta.objective);
     if (meta.provider) mission.provider = providerLabel(meta.provider);
     if (meta.step != null) mission.currentStep = Number(meta.step) || mission.currentStep;
 
@@ -98,20 +118,24 @@
       case "session_started":
         setWorkStatus(mission, "working");
         mission.currentAction = "Opening the browser…";
+        mission.activity.push({ kind: "start", label: "Started browser mission", step: mission.currentStep });
         break;
       case "observation":
         mission.currentUrl = meta.url || mission.currentUrl;
         mission.pageTitle = meta.title || mission.pageTitle;
         mission.screenshotUrl = meta.screenshot_url || mission.screenshotUrl;
+        mission.activity.push({ kind: "observation", label: mission.pageTitle ? `Observed ${mission.pageTitle}` : "Captured page observation", step: mission.currentStep });
         if (mission.status !== "needs_user") setWorkStatus(mission, "working");
         break;
       case "action":
         mission.currentAction = meaningfulAction(meta);
+        mission.activity.push({ kind: "action", label: mission.currentAction, step: mission.currentStep });
         if (mission.status !== "needs_user") setWorkStatus(mission, "working");
         break;
       case "action_executed":
         mission.currentAction = meaningfulAction(meta);
         mission.lastExecutedActionId = meta.executed === true ? meta.action_id : mission.lastExecutedActionId;
+        if (meta.executed === true) mission.activity.push({ kind: "success", label: `Completed: ${meaningfulAction(meta)}`, step: mission.currentStep });
         if (mission.status !== "needs_user") setWorkStatus(mission, "working");
         break;
       case "confirmation_required":
@@ -132,6 +156,7 @@
           screenshotUrl: meta.screenshot_url || mission.screenshotUrl,
           status: "pending",
         };
+        mission.activity.push({ kind: "approval", label: "Approval required for this action", step: mission.currentStep });
         break;
       case "confirmation_resolved":
         if (!mission.needsUser || mission.needsUser.confirmationId === meta.confirmation_id) {
@@ -140,8 +165,10 @@
         if (meta.decision === "approve") {
           setWorkStatus(mission, "working");
           mission.currentAction = "Approval recorded. Resuming browser work…";
+          mission.activity.push({ kind: "success", label: "Approval granted; resuming work", step: mission.currentStep });
         } else {
           mission.currentAction = meta.status === "expired" ? "Approval expired; action was not run." : "Action denied; it was not run.";
+          mission.activity.push({ kind: "warning", label: meta.status === "expired" ? "Approval expired" : "Action denied; action was not run", step: mission.currentStep });
         }
         break;
       case "session_completed": {
@@ -160,6 +187,7 @@
           pageTitle: mission.pageTitle,
           screenshotUrl: mission.screenshotUrl,
         }];
+        mission.activity.push({ kind: succeeded ? "success" : "warning", label: succeeded ? "Mission completed" : "Mission failed", step: mission.currentStep });
         break;
       }
       default:
@@ -197,6 +225,7 @@
       };
       const mission = ensureMission(state, event);
       mission.objective = snapshot.objective || mission.objective;
+      mission.title = missionTitle(snapshot.objective || mission.title);
       mission.provider = providerLabel(snapshot.provider || mission.provider);
       mission.currentStep = Number(snapshot.current_step || snapshot.steps) || mission.currentStep;
       mission.maxSteps = snapshot.max_steps || mission.maxSteps;
@@ -251,5 +280,5 @@
     return state;
   }
 
-  return { blankState, failureLabel, isBrowserEvent, meaningfulAction, outcomeLabel, providerLabel, reduceEvents, recoverState };
+  return { blankState, failureLabel, isBrowserEvent, meaningfulAction, missionTitle, outcomeLabel, providerLabel, reduceEvents, recoverState };
 });

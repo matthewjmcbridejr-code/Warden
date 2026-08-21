@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const presentation = require('../../web/warden/mission-control.js') as {
   failureLabel: (value: string) => string;
   outcomeLabel: (value: string) => string;
+  missionTitle: (value: string) => string;
   reduceEvents: (events: unknown[]) => any;
   recoverState: (state: any, sessions: unknown[], confirmations: unknown[]) => any;
 };
@@ -21,6 +22,13 @@ function browserEvent(seq: number, phase: string, metadata: Record<string, unkno
 }
 
 describe('Mission Control browser presentation', () => {
+  it('turns raw browser objectives into concise mission titles', () => {
+    expect(presentation.missionTitle('navigate directly to http://127.0.0.1:8777/warden-confirmation-test.html and click the Delete account button once'))
+      .toBe('Delete Account Confirmation Test');
+    expect(presentation.missionTitle('find the Gemini Computer Use documentation'))
+      .toBe('Find the Gemini Computer Use documentation');
+  });
+
   it('reduces authentic runtime events into one evolving browser work item', () => {
     const state = presentation.reduceEvents([
       browserEvent(1, 'session_started', { objective: 'Find the Computer Use docs', provider: 'GeminiVertexComputerProvider', max_steps: 12 }),
@@ -29,11 +37,13 @@ describe('Mission Control browser presentation', () => {
     ]);
     const mission = state.missions['session-1'];
     expect(state.order).toEqual(['session-1']);
+    expect(mission.title).toBe('Find the Computer Use docs');
     expect(mission.workItems).toHaveLength(1);
     expect(mission.provider).toBe('Gemini Computer Use');
     expect(mission.pageTitle).toBe('Google');
     expect(mission.currentAction).toBe('Open the documentation result');
     expect(mission.status).toBe('working');
+    expect(mission.activity.length).toBeGreaterThan(0);
   });
 
   it('restores Needs You exactly once after replay and binds the pending action', () => {
