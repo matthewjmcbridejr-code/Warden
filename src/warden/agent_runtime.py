@@ -383,6 +383,8 @@ def handle_computer_use(
                             "session_id": data.get("session_id"),
                             "objective": objective,
                             "environment": environment,
+                            "provider": data.get("provider"),
+                            "max_steps": data.get("max_steps"),
                         },
                     ))
                 elif event_type == "computer_action":
@@ -399,7 +401,27 @@ def handle_computer_use(
                             "session_id": data.get("session_id"),
                             "step": data.get("step"),
                             "action_type": data.get("action_type"),
+                            "action_id": data.get("action_id"),
                             "summary": data.get("summary"),
+                        },
+                    ))
+                elif event_type == "computer_action_executed":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_progress",
+                        text=f"Executed: {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "action_executed",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "action_id": data.get("action_id"),
+                            "action_type": data.get("action_type"),
+                            "summary": data.get("summary"),
+                            "executed": data.get("executed") is True,
                         },
                     ))
                 elif event_type == "computer_observation":
@@ -443,7 +465,11 @@ def handle_computer_use(
                             "action_id": data.get("action_id"),
                             "action_type": data.get("action_type"),
                             "description": data.get("description"),
+                            "reason": data.get("reason") or data.get("description"),
+                            "risk_level": data.get("risk_level") or "high",
                             "parameters": data.get("parameters"),
+                            "url": data.get("url"),
+                            "title": data.get("title"),
                             "screenshot_url": screenshot_url,
                             "status": "pending",
                         },
@@ -464,6 +490,7 @@ def handle_computer_use(
                             "phase": "confirmation_resolved",
                             "session_id": data.get("session_id"),
                             "confirmation_id": data.get("confirmation_id"),
+                            "action_id": data.get("action_id"),
                             "decision": decision,
                             "status": data.get("status"),
                             "executed": data.get("executed"),
@@ -876,18 +903,6 @@ class WardenAgentRuntime:
                         sources.append("Finish Subsystem")
                     elif fn_name == "computer_use":
                         sources.append("Gemini Computer Use")
-                        if res.result.get("ok"):
-                            rich_events.append({
-                                "event_type": "computer_session_completed",
-                                "text": f"🖥️ **Computer Use Session Completed** ({res.result.get('steps', 0)} steps in {res.result.get('environment', 'browser')}): {res.result.get('result', '')}",
-                                "metadata": res.result,
-                            })
-                        elif res.result.get("error"):
-                            rich_events.append({
-                                "event_type": "computer_session_failed",
-                                "text": f"⚠️ **Computer Use Session Failed**: {res.result.get('error')}",
-                                "metadata": res.result,
-                            })
                     elif fn_name == "activity_search":
                         sources.append("Browser & Activity History")
                     elif fn_name == "project_inspect":

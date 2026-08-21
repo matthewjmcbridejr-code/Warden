@@ -32,6 +32,13 @@ def check_confirmation_required(
     observation: Optional[ComputerObservation] = None
 ) -> bool:
     """Determine if an action requires explicit operator approval before execution."""
+    # Terminal control signals only report an outcome; they do not interact with
+    # the computer.  Their result text may accurately mention a sensitive action
+    # that was already approved and executed, so keyword matching them would
+    # create a second, spurious execution boundary after the work is complete.
+    if action.action_type in (ActionType.COMPLETE, ActionType.FAIL):
+        return False
+
     if action.requires_confirmation:
         return True
 
@@ -108,16 +115,16 @@ class ConfirmationStore:
         self,
         confirmation_id: str,
         decision: str,
-        operator_id: str = "matt",
-        expected_session_id: Optional[str] = None,
-        expected_action_id: Optional[str] = None,
+        operator_id: str = "operator",
+        expected_session_id: str = "",
+        expected_action_id: str = "",
     ) -> Tuple[bool, str, Optional[ConfirmationRequest]]:
         """Resolve a pending confirmation request.
 
         Enforces that:
         - decision is either 'approve' or 'deny'
         - confirmation exists and is currently 'pending' (prevents stale / replayed resolutions)
-        - session_id and action_id match exactly if provided (prevents cross-action authorization)
+        - session_id and action_id are required and match exactly (prevents cross-action authorization)
         """
         clean_dec = decision.lower().strip()
         if clean_dec not in ("approve", "deny"):
@@ -131,10 +138,13 @@ class ConfirmationStore:
             if conf.status != "pending":
                 return False, f"Confirmation request '{confirmation_id}' is already resolved as '{conf.status}'.", conf
 
-            if expected_session_id and conf.session_id != expected_session_id:
+            if not expected_session_id or not expected_action_id:
+                return False, "Both expected_session_id and expected_action_id are required.", conf
+
+            if conf.session_id != expected_session_id:
                 return False, f"Mismatched session ID: expected '{expected_session_id}', got '{conf.session_id}'.", conf
 
-            if expected_action_id and conf.action_id != expected_action_id:
+            if conf.action_id != expected_action_id:
                 return False, f"Mismatched action ID: expected '{expected_action_id}', got '{conf.action_id}'.", conf
 
             conf.decision = clean_dec
