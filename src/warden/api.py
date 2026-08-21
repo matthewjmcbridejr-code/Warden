@@ -6580,23 +6580,36 @@ async def api_stream_chat_events(conversation_id: str, request: Request, last_ev
             since_seq = int(hdr)
 
     async def sse_generator():
-        # 1. Replay past events since cursor
-        initial_events = store.list_events(conversation_id=conversation_id, since_seq=since_seq)
-        for evt in initial_events:
-            payload = json.dumps(evt.model_dump(mode="json"))
-            yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
-
-        # 2. Subscribe to live events stream
+        # Subscribe before replaying so an event cannot fall into the replay/live gap.
         q = store.subscribe()
+        last_sent_seq = since_seq
         try:
+            replay_cursor = since_seq
+            while True:
+                initial_events = store.list_events(
+                    conversation_id=conversation_id,
+                    since_seq=replay_cursor,
+                    limit=500,
+                )
+                for evt in initial_events:
+                    if evt.seq <= last_sent_seq:
+                        continue
+                    payload = json.dumps(evt.model_dump(mode="json"))
+                    yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                    last_sent_seq = evt.seq
+                if len(initial_events) < 500:
+                    break
+                replay_cursor = last_sent_seq
+
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=15.0)
-                    if evt.conversation_id == conversation_id:
+                    if evt.conversation_id == conversation_id and evt.seq > last_sent_seq:
                         payload = json.dumps(evt.model_dump(mode="json"))
                         yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                        last_sent_seq = evt.seq
                 except asyncio.TimeoutError:
                     # Heartbeat keepalive
                     yield f": heartbeat {int(time.time())}\n\n"

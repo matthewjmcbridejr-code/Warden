@@ -29,7 +29,7 @@ from src.warden.computer.executors.playwright_executor import PlaywrightBrowserE
 from src.warden.computer.executors.linux_desktop_executor import LinuxDesktopExecutor
 from src.warden.computer.providers.mock_provider import MockComputerProvider
 from src.warden.computer.providers.gemini_vertex import GeminiVertexComputerProvider
-from src.warden.computer.service import ComputerUseService
+from src.warden.computer.service import ComputerUseService, default_session_registry
 from src.warden.agent_runtime import WardenToolRegistry, WardenAgentRuntime, handle_computer_use
 from src.warden.group_chat import GroupChatStore
 
@@ -38,8 +38,10 @@ from src.warden.group_chat import GroupChatStore
 def clean_stores(tmp_path):
     """Ensure clean confirmation store and group chat db per test."""
     default_confirmation_store.clear()
+    default_session_registry.clear()
     yield
     default_confirmation_store.clear()
+    default_session_registry.clear()
 
 
 def test_registry_contains_computer_use():
@@ -94,6 +96,13 @@ def test_confirmation_policy():
     explicit_action = ComputerAction(action_type=ActionType.CLICK, requires_confirmation=True)
     assert check_confirmation_required(explicit_action)
 
+    completed_sensitive_action = ComputerAction(
+        action_type=ActionType.COMPLETE,
+        text="The delete account test action executed once.",
+        summary="Finished after the approved delete account action.",
+    )
+    assert not check_confirmation_required(completed_sensitive_action)
+
 
 def test_screenshot_saving_and_encoding(tmp_path):
     dummy_bytes = b"fake-jpeg-data"
@@ -145,6 +154,17 @@ def test_playwright_executor_lifecycle():
 
     executor.stop()
     assert not executor.is_active()
+
+
+def test_playwright_executor_does_not_swallow_action_failure():
+    executor = PlaywrightBrowserExecutor(headless=True)
+    page = MagicMock()
+    page.is_closed.return_value = False
+    page.mouse.click.side_effect = RuntimeError("target detached")
+    executor._page = page
+
+    with pytest.raises(RuntimeError, match="Browser action 'click' failed"):
+        executor.execute_action(ComputerAction(action_type=ActionType.CLICK, x=20, y=30))
 
 
 def test_computer_use_service_full_mock_run():
@@ -234,7 +254,14 @@ def test_approved_action_executes_exactly_once():
         for _ in range(20):
             pending = store.list_pending()
             if pending:
-                ok, msg, conf = store.resolve_confirmation(pending[0].confirmation_id, decision="approve", operator_id="matt")
+                request = pending[0]
+                ok, msg, conf = store.resolve_confirmation(
+                    request.confirmation_id,
+                    decision="approve",
+                    operator_id="matt",
+                    expected_session_id=request.session_id,
+                    expected_action_id=request.action_id,
+                )
                 assert ok is True
                 break
             time.sleep(0.05)
@@ -278,7 +305,14 @@ def test_denied_action_never_executes():
         for _ in range(20):
             pending = store.list_pending()
             if pending:
-                ok, msg, conf = store.resolve_confirmation(pending[0].confirmation_id, decision="deny", operator_id="matt")
+                request = pending[0]
+                ok, msg, conf = store.resolve_confirmation(
+                    request.confirmation_id,
+                    decision="deny",
+                    operator_id="matt",
+                    expected_session_id=request.session_id,
+                    expected_action_id=request.action_id,
+                )
                 assert ok is True
                 break
             time.sleep(0.05)
@@ -308,12 +342,12 @@ def test_stale_mismatched_approval_cannot_authorize_action():
     conf = store.create_confirmation(session_id="session_A", action=act, step_idx=1)
 
     # 1. Mismatched session ID
-    ok1, msg1, _ = store.resolve_confirmation(conf.confirmation_id, decision="approve", expected_session_id="session_B")
+    ok1, msg1, _ = store.resolve_confirmation(conf.confirmation_id, decision="approve", expected_session_id="session_B", expected_action_id="session_A_step_1")
     assert ok1 is False
     assert "Mismatched session ID" in msg1
 
     # 2. Mismatched action ID
-    ok2, msg2, _ = store.resolve_confirmation(conf.confirmation_id, decision="approve", expected_action_id="session_A_step_99")
+    ok2, msg2, _ = store.resolve_confirmation(conf.confirmation_id, decision="approve", expected_session_id="session_A", expected_action_id="session_A_step_99")
     assert ok2 is False
     assert "Mismatched action ID" in msg2
 
@@ -323,7 +357,12 @@ def test_stale_mismatched_approval_cannot_authorize_action():
     assert resolved.status == "approved"
 
     # 4. Replay attempt on already resolved confirmation
-    ok4, msg4, _ = store.resolve_confirmation(conf.confirmation_id, decision="approve")
+    ok4, msg4, _ = store.resolve_confirmation(
+        conf.confirmation_id,
+        decision="approve",
+        expected_session_id="session_A",
+        expected_action_id="session_A_step_1",
+    )
     assert ok4 is False
     assert "already resolved" in msg4
 
@@ -388,7 +427,12 @@ def test_pending_confirmation_produces_authoritative_needs_user_state():
                 session = service.get_session(conf.session_id)
                 if session:
                     observed_session_state.append((session.status, session.is_waiting_for_confirmation, conf.status))
-                    store.resolve_confirmation(conf.confirmation_id, decision="deny")
+                    store.resolve_confirmation(
+                        conf.confirmation_id,
+                        decision="deny",
+                        expected_session_id=conf.session_id,
+                        expected_action_id=conf.action_id,
+                    )
                     break
             time.sleep(0.05)
 
@@ -461,14 +505,23 @@ def test_computer_api_rest_endpoints(tmp_path):
     # 4. POST /api/mcharness/computer/confirmations/{id}/resolve (mismatched session fails)
     res_bad = client.post(
         f"/api/mcharness/computer/confirmations/{conf.confirmation_id}/resolve",
-        json={"decision": "approve", "session_id": "wrong_session"},
+        json={
+            "decision": "approve",
+            "expected_session_id": "wrong_session",
+            "expected_action_id": conf.action_id,
+        },
     )
     assert res_bad.status_code == 400
 
     # 5. POST /api/mcharness/computer/confirmations/{id}/resolve (success)
     res_ok = client.post(
         f"/api/mcharness/computer/confirmations/{conf.confirmation_id}/resolve",
-        json={"decision": "approve", "session_id": "comp_test_session", "operator_id": "matt"},
+        json={
+            "decision": "approve",
+            "expected_session_id": "comp_test_session",
+            "expected_action_id": conf.action_id,
+            "operator_id": "matt",
+        },
     )
     assert res_ok.status_code == 200
     assert res_ok.json()["ok"] is True
@@ -482,10 +535,153 @@ def test_computer_api_rest_endpoints(tmp_path):
         res_img = client.get("/api/mcharness/computer/screenshots/test_screen.jpg")
         assert res_img.status_code == 200
         assert res_img.content == b"jpeg-image-bytes"
+        assert "no-store" in res_img.headers["cache-control"]
+        assert "public" not in res_img.headers["cache-control"]
 
         # Traversal attempt returns 404 or sanitized
         res_trav = client.get("/api/mcharness/computer/screenshots/../../etc/passwd")
         assert res_trav.status_code in (400, 404)
+
+
+def test_live_service_session_is_returned_by_authoritative_session_api():
+    service = ComputerUseService()
+    executor = MagicMock(spec=BaseComputerExecutor)
+    executor.capture_screenshot.return_value = ComputerObservation(url="https://example.com", title="Example")
+    result = service.run(
+        objective="Inspect the real session registry",
+        provider=MockComputerProvider(actions=[ComputerAction(action_type=ActionType.COMPLETE, text="Done")]),
+        executor=executor,
+    )
+
+    client = TestClient(create_app())
+    listed = client.get("/api/mcharness/computer/sessions")
+    looked_up = client.get(f"/api/mcharness/computer/sessions/{result['session_id']}")
+
+    assert listed.status_code == 200
+    assert any(item["session_id"] == result["session_id"] for item in listed.json()["sessions"])
+    assert looked_up.status_code == 200
+    assert looked_up.json()["session"]["objective"] == "Inspect the real session registry"
+
+
+def test_confirmation_api_requires_complete_action_binding():
+    action = ComputerAction(action_type=ActionType.CLICK, summary="Click delete workspace")
+    conf = default_confirmation_store.create_confirmation("bound_session", action, step_idx=4)
+    client = TestClient(create_app())
+
+    missing = client.post(
+        f"/api/mcharness/computer/confirmations/{conf.confirmation_id}/resolve",
+        json={"decision": "approve"},
+    )
+    wrong_action = client.post(
+        f"/api/mcharness/computer/confirmations/{conf.confirmation_id}/resolve",
+        json={
+            "decision": "approve",
+            "expected_session_id": conf.session_id,
+            "expected_action_id": "another-action",
+        },
+    )
+
+    assert missing.status_code == 422
+    assert wrong_action.status_code == 400
+    assert default_confirmation_store.get_confirmation(conf.confirmation_id).status == "pending"
+
+
+def test_denial_cannot_be_replayed_as_approval_and_expired_confirmation_cannot_execute():
+    store = ConfirmationStore()
+    action = ComputerAction(action_type=ActionType.CLICK, summary="Click delete workspace")
+    denied = store.create_confirmation("session-denied", action, step_idx=1)
+    ok, _, _ = store.resolve_confirmation(
+        denied.confirmation_id,
+        decision="deny",
+        expected_session_id=denied.session_id,
+        expected_action_id=denied.action_id,
+    )
+    replay_ok, replay_message, _ = store.resolve_confirmation(
+        denied.confirmation_id,
+        decision="approve",
+        expected_session_id=denied.session_id,
+        expected_action_id=denied.action_id,
+    )
+
+    expired = store.create_confirmation("session-expired", action, step_idx=2)
+    status, _ = store.wait_for_decision(expired.confirmation_id, timeout_seconds=0.001)
+    expired_ok, expired_message, _ = store.resolve_confirmation(
+        expired.confirmation_id,
+        decision="approve",
+        expected_session_id=expired.session_id,
+        expected_action_id=expired.action_id,
+    )
+
+    assert ok is True
+    assert replay_ok is False
+    assert "already resolved" in replay_message
+    assert status == "expired"
+    assert expired_ok is False
+    assert "expired" in expired_message
+
+
+def test_approval_for_confirmation_a_cannot_unblock_action_b():
+    store = ConfirmationStore()
+    action = ComputerAction(action_type=ActionType.CLICK, summary="Click delete workspace")
+    conf_a = store.create_confirmation("session-A", action, step_idx=1)
+    conf_b = store.create_confirmation("session-B", action, step_idx=2)
+
+    wrong_ok, _, _ = store.resolve_confirmation(
+        conf_a.confirmation_id,
+        decision="approve",
+        expected_session_id=conf_b.session_id,
+        expected_action_id=conf_b.action_id,
+    )
+    right_ok, _, _ = store.resolve_confirmation(
+        conf_a.confirmation_id,
+        decision="approve",
+        expected_session_id=conf_a.session_id,
+        expected_action_id=conf_a.action_id,
+    )
+
+    assert wrong_ok is False
+    assert right_ok is True
+    assert store.get_confirmation(conf_b.confirmation_id).status == "pending"
+
+
+def test_executor_exception_after_approval_is_never_reported_as_executed():
+    store = ConfirmationStore()
+    executor = MagicMock(spec=BaseComputerExecutor)
+    executor.capture_screenshot.return_value = ComputerObservation(url="https://app.test", title="App")
+    executor.execute_action.side_effect = RuntimeError("browser rejected click")
+    action = ComputerAction(action_type=ActionType.CLICK, summary="Click delete workspace")
+    service = ComputerUseService(confirmation_store=store, confirmation_timeout=2.0)
+    emitted = []
+
+    def approve_exact_action():
+        for _ in range(40):
+            pending = store.list_pending()
+            if pending:
+                request = pending[0]
+                store.resolve_confirmation(
+                    request.confirmation_id,
+                    decision="approve",
+                    expected_session_id=request.session_id,
+                    expected_action_id=request.action_id,
+                )
+                return
+            time.sleep(0.025)
+
+    thread = threading.Thread(target=approve_exact_action)
+    thread.start()
+    result = service.run(
+        objective="Prove execution failure truth",
+        provider=MockComputerProvider(actions=[action]),
+        executor=executor,
+        event_callback=lambda name, payload: emitted.append((name, payload)),
+    )
+    thread.join()
+
+    assert result["status"] == "failed"
+    assert "browser rejected click" in result["error"]
+    assert not any(name == "computer_action_executed" for name, _ in emitted)
+    resolved = [payload for name, payload in emitted if name == "computer_confirmation_resolved"]
+    assert resolved and resolved[-1]["executed"] is False
 
 
 def test_agent_runtime_live_group_chat_bridge(tmp_path):

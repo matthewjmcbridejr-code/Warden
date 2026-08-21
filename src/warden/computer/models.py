@@ -120,6 +120,10 @@ class ComputerSession:
     max_steps: int = 30
     actions: List[ComputerAction] = field(default_factory=list)
     evidence: List[Dict[str, Any]] = field(default_factory=list)
+    current_url: Optional[str] = None
+    page_title: Optional[str] = None
+    latest_screenshot: Optional[str] = None
+    current_action_summary: Optional[str] = None
     final_result: Optional[str] = None
     error: Optional[str] = None
 
@@ -139,7 +143,12 @@ class ComputerSession:
             "active_confirmation_id": self.active_confirmation_id,
             "is_waiting_for_confirmation": self.is_waiting_for_confirmation,
             "steps": self.step_count,
+            "current_step": self.step_count,
             "max_steps": self.max_steps,
+            "current_url": self.current_url,
+            "page_title": self.page_title,
+            "latest_screenshot": self.latest_screenshot,
+            "current_action_summary": self.current_action_summary,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "result": self.final_result or ("Session completed" if self.status == SessionStatus.COMPLETED else None),

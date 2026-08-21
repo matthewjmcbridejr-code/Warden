@@ -8,7 +8,7 @@ from .models import (
     ConfirmationRequest,
     SessionStatus,
 )
-from .service import ComputerUseService
+from .service import ComputerSessionRegistry, ComputerUseService, default_session_registry
 from .providers.base import BaseComputerProvider
 from .providers.gemini_vertex import GeminiVertexComputerProvider
 from .providers.mock_provider import MockComputerProvider
@@ -29,6 +29,8 @@ __all__ = [
     "check_confirmation_required",
     "SessionStatus",
     "ComputerUseService",
+    "ComputerSessionRegistry",
+    "default_session_registry",
     "BaseComputerProvider",
     "GeminiVertexComputerProvider",
     "MockComputerProvider",

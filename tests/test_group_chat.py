@@ -1,6 +1,7 @@
 """Unit tests for GroupChatStore, monotonic event sequencing, and idempotency."""
 from __future__ import annotations
 
+import asyncio
 import pytest
 from pathlib import Path
 from src.warden.group_chat import GroupChatStore, ChatEvent, parse_mentions, map_agent_display_name
@@ -93,6 +94,29 @@ def test_group_chat_idempotency_deduplication(tmp_path):
     assert is_new2 is False
     assert evt1.id == evt2.id
     assert evt1.seq == evt2.seq
+
+
+def test_chat_event_ids_do_not_collide_within_same_millisecond():
+    events = [ChatEvent(text=f"event {index}") for index in range(50)]
+    assert len({event.id for event in events}) == len(events)
+
+
+def test_store_instances_share_live_listener_for_same_database(tmp_path):
+    db_file = tmp_path / "group_chat.sqlite"
+    writer = GroupChatStore(db_path=db_file)
+    subscriber = GroupChatStore(db_path=db_file)
+
+    async def exercise_live_delivery():
+        queue = subscriber.subscribe()
+        try:
+            event, _ = writer.append_event(ChatEvent(text="live browser update"))
+            delivered = await asyncio.wait_for(queue.get(), timeout=1.0)
+            assert delivered.id == event.id
+            assert delivered.seq == event.seq
+        finally:
+            subscriber.unsubscribe(queue)
+
+    asyncio.run(exercise_live_delivery())
 
 
 def test_agent_inbox_mentions(tmp_path):

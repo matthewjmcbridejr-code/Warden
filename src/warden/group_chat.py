@@ -10,6 +10,8 @@ import asyncio
 import json
 import re
 import sqlite3
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -70,7 +72,11 @@ class Conversation(BaseModel):
 
 
 class ChatEvent(BaseModel):
-    id: str = Field(default_factory=lambda: f"evt_{int(datetime.now(timezone.utc).timestamp() * 1000)}")
+    id: str = Field(
+        default_factory=lambda: (
+            f"evt_{int(datetime.now(timezone.utc).timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+        )
+    )
     seq: int = 0
     conversation_id: str = "conv_warden_team"
     project: str = "Warden"
@@ -130,9 +136,14 @@ def map_agent_display_name(actor_id: str) -> tuple[str, str]:
 
 
 class GroupChatStore:
+    _listener_lock = threading.Lock()
+    _listeners_by_db: dict[str, list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]]] = {}
+
     def __init__(self, db_path: Path | None = None) -> None:
         self._db_path = db_path or (Path.home() / ".config" / "warden-brain" / "group_chat.sqlite")
-        self._listeners: list[asyncio.Queue] = []
+        listener_key = str(self._db_path.expanduser().resolve())
+        with self._listener_lock:
+            self._listeners = self._listeners_by_db.setdefault(listener_key, [])
         self._init_db()
 
     def _init_db(self) -> None:
@@ -422,21 +433,22 @@ class GroupChatStore:
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue()
-        self._listeners.append(q)
+        loop = asyncio.get_running_loop()
+        with self._listener_lock:
+            self._listeners.append((q, loop))
         return q
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
-        if q in self._listeners:
-            self._listeners.remove(q)
+        with self._listener_lock:
+            self._listeners[:] = [(item_q, loop) for item_q, loop in self._listeners if item_q is not q]
 
     def _notify_listeners(self, event: ChatEvent) -> None:
-        for q in list(self._listeners):
+        with self._listener_lock:
+            listeners = list(self._listeners)
+        for q, loop in listeners:
             try:
-                loop = getattr(q, "_loop", None)
-                if loop and loop.is_running():
+                if loop.is_running():
                     loop.call_soon_threadsafe(q.put_nowait, event)
-                else:
-                    q.put_nowait(event)
             except Exception:
                 pass
 

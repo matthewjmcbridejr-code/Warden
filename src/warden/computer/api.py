@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .confirmations import default_confirmation_store
 from .screenshots import SCREENSHOT_DIR
+from .service import default_session_registry
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,9 @@ router = APIRouter(prefix="/computer", tags=["computer-use"])
 
 class ResolveConfirmationPayload(BaseModel):
     decision: str = Field(..., description="'approve' or 'deny'")
-    operator_id: str = Field(default="matt", description="Operator identity")
-    session_id: Optional[str] = Field(default=None, description="Expected session ID for correlation check")
-    action_id: Optional[str] = Field(default=None, description="Expected action ID for correlation check")
+    operator_id: str = Field(default="operator", description="Operator identity")
+    expected_session_id: str = Field(..., min_length=1, description="Session ID bound to this decision")
+    expected_action_id: str = Field(..., min_length=1, description="Action ID bound to this decision")
 
 
 @router.get("/confirmations/pending")
@@ -53,8 +54,8 @@ def resolve_confirmation(confirmation_id: str, body: ResolveConfirmationPayload)
         confirmation_id=confirmation_id,
         decision=body.decision,
         operator_id=body.operator_id,
-        expected_session_id=body.session_id,
-        expected_action_id=body.action_id,
+        expected_session_id=body.expected_session_id,
+        expected_action_id=body.expected_action_id,
     )
     if not success:
         raise HTTPException(status_code=400, detail=message)
@@ -69,9 +70,7 @@ def resolve_confirmation(confirmation_id: str, body: ResolveConfirmationPayload)
 @router.get("/sessions")
 def list_sessions():
     """Retrieve all active / recent Computer Use sessions."""
-    from .service import ComputerUseService
-    dummy_svc = ComputerUseService()
-    sessions = dummy_svc.list_sessions()
+    sessions = default_session_registry.list()
     return {
         "ok": True,
         "count": len(sessions),
@@ -82,9 +81,7 @@ def list_sessions():
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str):
     """Retrieve state and evidence for a specific Computer Use session."""
-    from .service import ComputerUseService
-    dummy_svc = ComputerUseService()
-    session = dummy_svc.get_session(session_id)
+    session = default_session_registry.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Computer Use session '{session_id}' not found.")
     return {
@@ -97,6 +94,8 @@ def get_session(session_id: str):
 def get_screenshot(filename: str):
     """Safely stream a captured JPEG/PNG screenshot without directory traversal or remote access leaks."""
     safe_name = Path(filename).name
+    if filename != safe_name or safe_name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid screenshot filename.")
     if not safe_name.lower().endswith((".jpg", ".jpeg", ".png")):
         raise HTTPException(status_code=400, detail="Invalid image file extension.")
 
@@ -109,5 +108,5 @@ def get_screenshot(filename: str):
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "private, no-store, max-age=0"},
     )

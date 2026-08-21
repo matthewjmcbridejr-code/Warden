@@ -47,7 +47,8 @@ class GeminiVertexComputerProvider(BaseComputerProvider):
         try:
             token = subprocess.check_output(
                 ["gcloud", "auth", "print-access-token"],
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                timeout=5,
             ).decode().strip()
             if token:
                 from google.oauth2.credentials import Credentials
@@ -69,7 +70,8 @@ class GeminiVertexComputerProvider(BaseComputerProvider):
             try:
                 project = subprocess.check_output(
                     ["gcloud", "config", "get-value", "project"],
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
                 ).decode().strip()
             except Exception:
                 project = "booming-key-500220-d9"
