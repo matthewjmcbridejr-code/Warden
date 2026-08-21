@@ -2,50 +2,58 @@
 from __future__ import annotations
 
 import json
-import urllib.request
+from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
+from fastapi.testclient import TestClient
+from src.warden.app import create_app
+from src.warden.api import api_stream_chat_events
+from src.warden.agent_runtime import RuntimeExecutionResult
+
+app = create_app()
+client = TestClient(app)
 
 
-def test_real_sse_transport_reconnect_and_zero_duplicates():
-    # 1. Post initial message
-    req1 = urllib.request.Request(
-        "http://127.0.0.1:6969/api/mcharness/chat/conversations/conv_warden_team/messages",
-        data=json.dumps({"text": "Real SSE Wire Test Message 1", "actor_id": "matt"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
+@pytest.mark.anyio
+async def test_real_sse_transport_reconnect_and_zero_duplicates():
+    dummy_result = RuntimeExecutionResult(
+        reply="Mock response for SSE test",
+        tools_used=[],
+        sources=[],
+        rich_events=[],
+        model="mock",
+        provider="mock",
     )
-    resp1 = urllib.request.urlopen(req1)
-    assert resp1.status == 200
-    data1 = json.loads(resp1.read().decode("utf-8"))
-    seq1 = data1["responses"][-1]["seq"]
+    with patch("src.warden.agent_runtime.WardenAgentRuntime.run", return_value=dummy_result):
+        # 1. Post initial message
+        resp1 = client.post(
+            "/api/mcharness/chat/conversations/conv_warden_team/messages",
+            json={"text": "Real SSE Wire Test Message 1", "actor_id": "matt"},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        seq1 = data1["responses"][-1]["seq"]
 
-    # 2. Client disconnects. Generate offline message while client is disconnected
-    req2 = urllib.request.Request(
-        "http://127.0.0.1:6969/api/mcharness/chat/conversations/conv_warden_team/messages",
-        data=json.dumps({"text": "Real SSE Wire Test Message 2 (offline)", "actor_id": "matt"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
-    )
-    resp2 = urllib.request.urlopen(req2)
-    assert resp2.status == 200
-    data2 = json.loads(resp2.read().decode("utf-8"))
-    seq2 = data2["responses"][-1]["seq"]
+        # 2. Client disconnects. Generate offline message while client is disconnected
+        resp2 = client.post(
+            "/api/mcharness/chat/conversations/conv_warden_team/messages",
+            json={"text": "Real SSE Wire Test Message 2 (offline)", "actor_id": "matt"},
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        seq2 = data2["responses"][-1]["seq"]
 
-    # 3. Reconnect to live SSE stream using Last-Event-ID header
-    sse_req = urllib.request.Request(
-        f"http://127.0.0.1:6969/api/mcharness/chat/conversations/conv_warden_team/stream?last_event_id={seq1}",
-        headers={"Last-Event-ID": str(seq1)}
-    )
-    sse_resp = urllib.request.urlopen(sse_req, timeout=3)
-    replayed_events = []
-    try:
-        for _ in range(20):
-            line = sse_resp.readline().decode("utf-8")
-            if line.startswith("data:"):
-                evt = json.loads(line.replace("data: ", "").strip())
-                replayed_events.append(evt)
-                if len(replayed_events) >= 2:
-                    break
-    finally:
-        sse_resp.close()
+        # 3. Reconnect to live SSE stream using Last-Event-ID header and last_event_id param
+        mock_request = MagicMock()
+        mock_request.headers = {"last-event-id": str(seq1)}
+        mock_request.is_disconnected = AsyncMock(return_value=True)
+
+        stream_resp = await api_stream_chat_events("conv_warden_team", mock_request, last_event_id=str(seq1))
+        replayed_events = []
+        async for chunk in stream_resp.body_iterator:
+            for line in chunk.split("\n"):
+                if line.startswith("data:"):
+                    evt = json.loads(line.replace("data:", "", 1).strip())
+                    replayed_events.append(evt)
 
     # 4. Strengthened SSE Assertions
     replayed_seqs = [e["seq"] for e in replayed_events]

@@ -32,49 +32,45 @@ class GeminiVertexComputerProvider(BaseComputerProvider):
             return self._client
 
         from google import genai
-        from google.genai import types
 
-        # 1. Check if direct GEMINI_API_KEY is present
+        # 1. Check if direct GEMINI_API_KEY mode is explicitly configured
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if api_key:
             self._client = genai.Client(api_key=api_key)
             return self._client
 
-        # 2. Vertex AI / Google Cloud ADC / gcloud path
-        project = self.project
+        # 2. Vertex AI / Google Cloud ADC path (refreshable Application Default Credentials)
+        project = self.project or os.environ.get("GOOGLE_CLOUD_PROJECT")
         credentials = None
 
         try:
-            token = subprocess.check_output(
-                ["gcloud", "auth", "print-access-token"],
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            ).decode().strip()
-            if token:
-                from google.oauth2.credentials import Credentials
-                credentials = Credentials(token)
-        except Exception:
-            pass
-
-        if not credentials:
-            try:
-                import google.auth
-                creds, default_proj = google.auth.default()
-                if not project:
-                    project = default_proj
-                credentials = creds
-            except Exception:
-                pass
+            import google.auth
+            creds, default_proj = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            credentials = creds
+            if not project and default_proj:
+                project = default_proj
+        except Exception as auth_err:
+            logger.debug("google.auth.default resolution error: %s", auth_err)
 
         if not project:
             try:
-                project = subprocess.check_output(
+                project_out = subprocess.check_output(
                     ["gcloud", "config", "get-value", "project"],
                     stderr=subprocess.DEVNULL,
                     timeout=5,
                 ).decode().strip()
+                if project_out and project_out != "(unset)":
+                    project = project_out
             except Exception:
-                project = "booming-key-500220-d9"
+                pass
+
+        if not project:
+            raise RuntimeError(
+                "Google Cloud project could not be resolved from constructor, GOOGLE_CLOUD_PROJECT, ADC, or gcloud. "
+                "Please configure a project via gcloud or environment."
+            )
 
         self.project = project
 
@@ -82,7 +78,7 @@ class GeminiVertexComputerProvider(BaseComputerProvider):
             vertexai=True,
             project=self.project,
             location=self.location,
-            credentials=credentials
+            credentials=credentials,
         )
         return self._client
 

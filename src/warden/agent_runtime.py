@@ -932,12 +932,47 @@ class WardenAgentRuntime:
                     break
 
         if not final_reply and tools_used:
-            # Run synthesis turn
-            messages.append({
-                "role": "user",
-                "content": "Synthesize a concise, direct, natural Markdown answer for the user based on the tool evidence above without dumping raw record IDs. If no information was found, state that you do not have that information.",
-            })
+            # Check if any tool failed to tailor synthesis instruction
+            has_failure = any(
+                (t.result or {}).get("ok") is False
+                or (t.result or {}).get("status") == "failed"
+                or (t.result or {}).get("error")
+                for t in tools_used
+            )
+            if has_failure:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "CRITICAL EXECUTION TRUTH INVARIANT: Tool execution encountered an error, stopped, or was prevented. "
+                        "You MUST NOT claim that any button was clicked, form was submitted, or action succeeded. "
+                        "State plainly and truthfully what stopped or failed based strictly on the tool evidence."
+                    ),
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": "Synthesize a concise, direct, natural Markdown answer for the user based on the tool evidence above without dumping raw record IDs. If no information was found, state that you do not have that information.",
+                })
             final_reply, _ = self._call_model_step(provider, messages, enable_tools=False)
+
+        # Structured Execution Truth Validation (Override hallucinated success on tool failure/denial)
+        for tool_res in tools_used:
+            if tool_res.tool_name == "computer_use":
+                c_data = tool_res.result or {}
+                c_status = c_data.get("status")
+                c_error = c_data.get("error")
+                c_result = str(c_data.get("result") or "")
+
+                if c_status == "failed" or c_data.get("ok") is False or c_error:
+                    err_text = c_error or "Provider execution failed"
+                    if "auth" in err_text.lower() or "google" in err_text.lower() or "vertex" in err_text.lower() or "credential" in err_text.lower():
+                        final_reply = f"Browser work stopped before the requested action executed because Google Cloud authentication is required: {err_text}"
+                    else:
+                        final_reply = f"Browser work stopped before the requested action executed: {err_text}"
+                    break
+                elif "denied" in c_result.lower() or "prevented" in c_result.lower():
+                    final_reply = f"The requested browser action was prevented and was not executed."
+                    break
 
         # Final cleanup: ensure no raw tool tags remain
         final_reply = re.sub(r"</?(tool_call|tool_response)>", "", final_reply).strip()
