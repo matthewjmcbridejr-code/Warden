@@ -8,7 +8,7 @@ test.describe('Warden Agentic Group Chat v1 Surface', () => {
 
     // 1. Verify Team Chat section navigation and header
     await expect(page.locator('#warden-section-group-chat')).toBeVisible();
-    await expect(page.locator('#chat-room-title')).toHaveText('Warden Team');
+    await expect(page.locator('#chat-room-title')).toHaveText('Mission Control');
 
     // 2. Type human message to team
     const textarea = page.locator('#chat-input-textarea');
@@ -18,10 +18,9 @@ test.describe('Warden Agentic Group Chat v1 Surface', () => {
     // 3. Verify event bubbles are displayed
     const stream = page.locator('#chat-messages-stream');
     await expect(stream).toContainText('Finish the settings screen');
-    await expect(stream).toContainText('Claude has UX');
-    await expect(stream).toContainText('Claude UX');
-    await expect(stream).toContainText('Spark Research');
-    await expect(stream).toContainText('Codex Builder');
+    await expect(page.locator('#chat-send-btn')).toBeEnabled({ timeout: 45_000 });
+    await expect(stream).not.toContainText('Claude has UX');
+    await expect(stream).not.toContainText('Spark Research');
   });
 
   test('mention autocomplete popup UI', async ({ page }) => {

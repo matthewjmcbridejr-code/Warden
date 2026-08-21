@@ -5588,27 +5588,38 @@
 
     const noticed = data.noticed || [];
     const needsYou = (data.needs_you && data.needs_you.items) || [];
+    const missionPresentation = buildMissionPresentation();
+    const browserMissions = missionPresentation.order.map(id => missionPresentation.missions[id]).filter(Boolean);
+    const activeBrowserMissions = browserMissions.filter(mission => ["working", "needs_user"].includes(mission.status));
+    const browserApprovals = browserMissions.filter(mission => mission.needsUser);
+    const workingAgents = (data.agents || []).filter(agent => String(agent.status || "").toLowerCase() === "working");
     
-    if (approvalsCount) approvalsCount.textContent = needsYou.length;
-    if (tasksCount) tasksCount.textContent = (data.agents || []).filter(a => a.status === "Working").length || 1;
+    if (approvalsCount) approvalsCount.textContent = needsYou.length + browserApprovals.length;
+    if (tasksCount) tasksCount.textContent = activeBrowserMissions.length + workingAgents.length;
 
     if (activeTasksList) {
-      activeTasksList.innerHTML = `
-        <div class="team-agent-card" style="margin-bottom:6px;">
-          <div class="agent-info">
-            <span class="team-agent-name">finish-ship-and-ai-desk-warden-surface</span>
-            <span class="agent-subtext">Phase B: Talk to Warden Desktop Surface</span>
+      const realItems = [
+        ...activeBrowserMissions.map(mission => ({ name: mission.objective, detail: mission.currentAction, status: missionStatusLabel(mission.status) })),
+        ...workingAgents.map(agent => ({ name: agent.display_name || agent.name || agent.agent_id, detail: agent.current_task || "Runtime reports this agent is working", status: "Working" })),
+      ];
+      activeTasksList.innerHTML = realItems.length ? realItems.map(item => `
+          <div class="team-agent-card" style="margin-bottom:6px;">
+            <div class="agent-info"><span class="team-agent-name">${escapeHtml(item.name)}</span><span class="agent-subtext">${escapeHtml(item.detail || "")}</span></div>
+            <span class="team-agent-status status-working">${escapeHtml(item.status)}</span>
           </div>
-          <span class="team-agent-status status-working">Active</span>
-        </div>
-      `;
+      `).join("") : '<div style="font-size:0.75rem; color:var(--muted);">No active runtime work.</div>';
     }
 
     if (approvalsList) {
-      if (needsYou.length === 0) {
+      if (needsYou.length === 0 && browserApprovals.length === 0) {
         approvalsList.innerHTML = `<div style="font-size:0.75rem; color:var(--muted);">No pending operator approvals.</div>`;
       } else {
-        approvalsList.innerHTML = needsYou.map(item => `
+        approvalsList.innerHTML = browserApprovals.map(mission => `
+          <div class="team-agent-card" style="margin-bottom:6px;">
+            <div class="agent-info"><span class="team-agent-name">${escapeHtml(mission.needsUser.description)}</span><span class="agent-subtext">Browser action is paused</span></div>
+            <button type="button" class="btn small primary mission-rail-mission" data-session-id="${escapeHtml(mission.id)}">Review</button>
+          </div>
+        `).join("") + needsYou.map(item => `
           <div class="team-agent-card" style="margin-bottom:6px;">
             <div class="agent-info">
               <span class="team-agent-name">${escapeHtml(item.summary || item.kind)}</span>
@@ -5621,27 +5632,11 @@
     }
 
     if (memoriesList) {
-      memoriesList.innerHTML = `
-        <div class="team-agent-card" style="margin-bottom:6px;">
-          <div class="agent-info">
-            <span class="team-agent-name">Warden Finish Commercial Reality</span>
-            <span class="agent-subtext">9/9 Playwright checks, Vercel live</span>
-          </div>
-          <span class="card-badge-chat badge-memory" style="font-size:0.65rem;">Memory</span>
-        </div>
-      `;
+      memoriesList.innerHTML = `<div style="font-size:0.75rem; color:var(--muted);">No memory records supplied by the current runtime response.</div>`;
     }
 
     if (proofsList) {
-      proofsList.innerHTML = `
-        <div class="team-agent-card" style="margin-bottom:6px;">
-          <div class="agent-info">
-            <span class="team-agent-name">Warden Finish Proof Pack</span>
-            <span class="agent-subtext">Score: 9/9 Passed · Preview Active</span>
-          </div>
-          <span class="card-badge-chat badge-proof" style="font-size:0.65rem;">Verified</span>
-        </div>
-      `;
+      proofsList.innerHTML = `<div style="font-size:0.75rem; color:var(--muted);">No proof records supplied by the current runtime response.</div>`;
     }
   }
 
@@ -5775,6 +5770,18 @@
   let currentChatRoomId = "conv_warden_team";
   let sseEventSource = null;
   let isSendingHumanMessage = false;
+  let currentChatEvents = [];
+  let missionRuntimeRecovery = { sessions: [], confirmations: [] };
+  let selectedMissionId = null;
+  let missionDecisionInFlight = null;
+  let missionDecisionError = null;
+
+  const missionCursorKey = (roomId) => `warden.mission.lastSeq.${roomId}`;
+  const readMissionCursor = (roomId) => Number(localStorage.getItem(missionCursorKey(roomId)) || 0) || 0;
+  const writeMissionCursor = (roomId, seq) => {
+    const current = readMissionCursor(roomId);
+    if (seq > current) localStorage.setItem(missionCursorKey(roomId), String(seq));
+  };
 
   wireGroupChatListeners();
   loadGroupChatEvents(currentChatRoomId);
@@ -5799,13 +5806,12 @@
       }
 
       if (participants) {
-        const activeProviders = new Set(activeRuns.map(r => (r.provider || "").toLowerCase()));
-        participants.innerHTML = `
-          <span class="p-badge ${activeProviders.has("claude") ? "working" : "ready"}"><span class="dot">●</span> Claude</span>
-          <span class="p-badge ${activeProviders.has("codex") ? "working" : "ready"}"><span class="dot">●</span> Codex</span>
-          <span class="p-badge ${activeProviders.has("spark") ? "working" : "ready"}"><span class="dot">●</span> Spark</span>
-          <span class="p-badge warden"><span class="dot">●</span> Warden</span>
-        `;
+        const labels = { claude: "Claude", codex: "Codex", gemini: "Gemini", grok: "Grok" };
+        const activeProviders = [...new Set(activeRuns.map(r => (r.provider || "").toLowerCase()).filter(Boolean))];
+        participants.innerHTML = [
+          '<span class="p-badge warden"><span class="dot">●</span> Warden</span>',
+          ...activeProviders.map(provider => `<span class="p-badge working"><span class="dot">●</span> ${escapeHtml(labels[provider] || provider)}</span>`),
+        ].join("");
       }
     } catch (err) {
       // Quietly fallback
@@ -5868,6 +5874,51 @@
           textarea.value = promptText;
           textarea.focus();
         }
+        return;
+      }
+
+      const browserWorkBtn = target.closest(".browser-work-open");
+      if (browserWorkBtn) {
+        e.preventDefault();
+        openBrowserWork(browserWorkBtn.dataset.sessionId);
+        return;
+      }
+
+      const missionDecisionBtn = target.closest(".mission-decision-btn");
+      if (missionDecisionBtn) {
+        e.preventDefault();
+        resolveMissionConfirmation(
+          missionDecisionBtn.dataset.confirmationId,
+          missionDecisionBtn.dataset.sessionId,
+          missionDecisionBtn.dataset.actionId,
+          missionDecisionBtn.dataset.decision,
+        );
+        return;
+      }
+
+      if (target.closest("#browser-work-close")) {
+        e.preventDefault();
+        closeBrowserWork();
+        return;
+      }
+
+      const missionRailItem = target.closest(".mission-rail-mission");
+      if (missionRailItem) {
+        selectedMissionId = missionRailItem.dataset.sessionId || selectedMissionId;
+        renderMissionControl();
+        return;
+      }
+
+      const missionView = target.closest("[data-mission-view]");
+      if (missionView) {
+        document.querySelectorAll("[data-mission-view]").forEach(item => item.classList.remove("active"));
+        missionView.classList.add("active");
+        if (missionView.dataset.missionView === "needs-you") {
+          const presentation = buildMissionPresentation();
+          const pending = presentation.order.map(id => presentation.missions[id]).find(mission => mission.needsUser);
+          if (pending) selectedMissionId = pending.id;
+        }
+        renderMissionControl();
         return;
       }
 
@@ -5980,6 +6031,10 @@
         const roomId = el.getAttribute("data-room-id");
         if (roomId && roomId !== currentChatRoomId) {
           currentChatRoomId = roomId;
+          currentChatEvents = [];
+          missionRuntimeRecovery = { sessions: [], confirmations: [] };
+          selectedMissionId = null;
+          missionDecisionError = null;
           renderGroupChatRooms(rooms);
           loadGroupChatEvents(currentChatRoomId);
           connectGroupChatSSE(currentChatRoomId);
@@ -5990,13 +6045,226 @@
 
   async function loadGroupChatEvents(roomId) {
     try {
-      const resp = await fetch(`/api/mcharness/chat/conversations/${roomId}/events?limit=300`);
-      const res = await resp.json();
-      if (res.ok && res.events) {
-        renderGroupChatEvents(res.events);
-      }
+      const [eventsResp] = await Promise.all([
+        fetch(`/api/mcharness/chat/conversations/${roomId}/events?limit=300`),
+        loadMissionRuntimeRecovery(),
+      ]);
+      const res = await eventsResp.json();
+      if (roomId !== currentChatRoomId) return;
+      if (res.ok && res.events) mergeGroupChatEvents(res.events);
     } catch (err) {
       console.error("load events error", err);
+    }
+  }
+
+  async function loadMissionRuntimeRecovery() {
+    try {
+      const [sessionsResp, confirmationsResp] = await Promise.all([
+        fetch("/api/mcharness/computer/sessions", { cache: "no-store" }),
+        fetch("/api/mcharness/computer/confirmations/pending", { cache: "no-store" }),
+      ]);
+      if (!sessionsResp.ok || !confirmationsResp.ok) return;
+      const [sessionsData, confirmationsData] = await Promise.all([sessionsResp.json(), confirmationsResp.json()]);
+      missionRuntimeRecovery = {
+        sessions: sessionsData.sessions || [],
+        confirmations: confirmationsData.confirmations || [],
+      };
+      renderMissionControl();
+    } catch (err) {
+      console.debug("Mission runtime recovery unavailable", err);
+    }
+  }
+
+  function mergeGroupChatEvents(events) {
+    const merged = new Map(currentChatEvents.map(event => [event.id || `seq:${event.seq}`, event]));
+    for (const event of events || []) {
+      merged.set(event.id || `seq:${event.seq}`, event);
+      writeMissionCursor(currentChatRoomId, Number(event.seq) || 0);
+      if (["session_started", "confirmation_required"].includes(event.metadata?.phase) && event.metadata?.session_id) {
+        selectedMissionId = event.metadata.session_id;
+        if (event.metadata.phase === "confirmation_required") missionDecisionError = null;
+      }
+    }
+    currentChatEvents = [...merged.values()].sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+    renderGroupChatEvents(currentChatEvents);
+  }
+
+  function buildMissionPresentation() {
+    const adapter = window.WardenMissionPresentation;
+    if (!adapter) return { lastSeq: 0, missions: {}, order: [] };
+    return adapter.recoverState(
+      adapter.reduceEvents(currentChatEvents),
+      missionRuntimeRecovery.sessions,
+      missionRuntimeRecovery.confirmations,
+    );
+  }
+
+  function missionStatusLabel(status) {
+    return ({ working: "Working", needs_user: "Needs You", completed: "Done", failed: "Failed" })[status] || "Working";
+  }
+
+  function renderMissionControl() {
+    const presentation = buildMissionPresentation();
+    const missions = presentation.order.map(id => presentation.missions[id]).filter(Boolean);
+    const region = document.getElementById("mission-browser-work");
+    const railList = document.getElementById("mission-rail-list");
+    const needsCount = document.getElementById("mission-needs-count");
+    const pendingCount = missions.filter(mission => mission.needsUser).length;
+
+    if (needsCount) {
+      needsCount.textContent = String(pendingCount);
+      needsCount.hidden = pendingCount === 0;
+    }
+    if (railList) {
+      railList.innerHTML = missions.length ? [...missions].reverse().map(mission => `
+        <button type="button" class="mission-rail-mission ${mission.id === selectedMissionId ? "active" : ""}" data-session-id="${escapeHtml(mission.id)}">
+          <span class="mission-rail-mission-copy">
+            <span class="mission-rail-mission-title">${escapeHtml(mission.objective)}</span>
+            <span class="mission-rail-mission-status">${escapeHtml(missionStatusLabel(mission.status))}</span>
+          </span>
+          ${mission.needsUser ? '<span class="mission-count">1</span>' : ""}
+        </button>
+      `).join("") : '<div class="mission-rail-empty">No browser missions yet</div>';
+    }
+
+    if (!missions.length || !region) {
+      if (region) region.hidden = true;
+      closeBrowserWork();
+      return;
+    }
+
+    if (!selectedMissionId || !presentation.missions[selectedMissionId]) {
+      const priority = [...missions].reverse().find(mission => mission.needsUser)
+        || [...missions].reverse().find(mission => mission.status === "working")
+        || missions[missions.length - 1];
+      selectedMissionId = priority.id;
+    }
+    const mission = presentation.missions[selectedMissionId];
+    region.hidden = false;
+    const objective = document.getElementById("mission-current-objective");
+    const status = document.getElementById("mission-current-status");
+    if (objective) objective.textContent = mission.objective;
+    if (status) {
+      status.textContent = missionStatusLabel(mission.status);
+      status.className = `mission-status status-${mission.status.replace("_", "-")}`;
+    }
+
+    const needsSurface = document.getElementById("mission-needs-you-surface");
+    if (needsSurface) {
+      const need = mission.needsUser;
+      needsSurface.innerHTML = need ? `
+        <div class="needs-you-card" data-testid="mission-needs-you-card">
+          <div class="needs-you-header">
+            <span class="needs-you-title">Needs You · Browser action paused</span>
+            <span class="needs-you-risk">${escapeHtml(need.riskLevel)} risk</span>
+          </div>
+          <div class="needs-you-action">${escapeHtml(need.description || "Approve this browser action?")}</div>
+          <div class="needs-you-reason">Why: ${escapeHtml(need.reason)}</div>
+          <div class="needs-you-context">${escapeHtml(need.pageTitle || "Current page")}${need.url ? ` · ${escapeHtml(need.url)}` : ""}</div>
+          <div class="needs-you-actions">
+            <button type="button" class="btn primary small mission-decision-btn" data-confirmation-id="${escapeHtml(need.confirmationId)}" data-session-id="${escapeHtml(need.sessionId)}" data-action-id="${escapeHtml(need.actionId)}" data-decision="approve" ${missionDecisionInFlight ? "disabled" : ""}>${missionDecisionInFlight === need.confirmationId ? "Resolving…" : "Approve"}</button>
+            <button type="button" class="btn small mission-decision-btn" data-confirmation-id="${escapeHtml(need.confirmationId)}" data-session-id="${escapeHtml(need.sessionId)}" data-action-id="${escapeHtml(need.actionId)}" data-decision="deny" ${missionDecisionInFlight ? "disabled" : ""}>Deny</button>
+          </div>
+          <div id="mission-action-error" class="mission-action-error" ${missionDecisionError ? "" : "hidden"}>${escapeHtml(missionDecisionError || "")}</div>
+        </div>
+      ` : "";
+    }
+
+    const cardList = document.getElementById("mission-browser-card-list");
+    if (cardList) {
+      const observation = mission.pageTitle || mission.currentUrl || "Waiting for the first page observation";
+      const outcome = mission.status === "completed" ? (mission.result || "Browser work completed.")
+        : mission.status === "failed" ? (mission.error || "Browser work failed.")
+        : mission.currentAction;
+      cardList.innerHTML = `
+        <article class="browser-work-card" data-testid="browser-work-card">
+          <div class="browser-card-header">
+            <div class="browser-card-identity">
+              <span class="browser-card-icon" aria-hidden="true">B</span>
+              <div><div class="browser-card-title">Browser</div><div class="browser-card-provider">${escapeHtml(mission.provider)}</div></div>
+            </div>
+            <span class="browser-card-status status-${mission.status.replace("_", "-")}">${escapeHtml(missionStatusLabel(mission.status))}</span>
+          </div>
+          <div class="browser-card-body">
+            <div>
+              <div class="browser-action-summary">${escapeHtml(outcome || "Working in the browser…")}</div>
+              <div class="browser-observation-summary">Latest observation: ${escapeHtml(observation)}</div>
+              <div class="browser-step">Step ${mission.currentStep || 0}${mission.maxSteps ? ` of ${mission.maxSteps}` : ""}</div>
+            </div>
+            <button type="button" class="btn small browser-work-open" data-session-id="${escapeHtml(mission.id)}">Open Browser Work</button>
+          </div>
+        </article>
+      `;
+    }
+    renderBrowserWorkSurface(mission);
+  }
+
+  function renderBrowserWorkSurface(mission) {
+    const surface = document.getElementById("browser-work-surface");
+    const body = document.getElementById("browser-work-surface-body");
+    if (!surface || !body || !mission || surface.dataset.sessionId !== mission.id) return;
+    const summary = mission.status === "completed" ? mission.result : mission.status === "failed" ? mission.error : mission.currentAction;
+    body.innerHTML = `
+      <div class="browser-screenshot-frame">
+        ${mission.screenshotUrl ? `<img src="${escapeHtml(mission.screenshotUrl)}" alt="Latest browser observation for ${escapeHtml(mission.objective)}" data-testid="browser-work-screenshot">` : '<span class="browser-screenshot-empty">Waiting for a browser screenshot…</span>'}
+      </div>
+      <div class="browser-surface-grid">
+        <div class="browser-surface-field"><span class="browser-surface-label">Status</span><span class="browser-surface-value">${escapeHtml(missionStatusLabel(mission.status))}</span></div>
+        <div class="browser-surface-field"><span class="browser-surface-label">Provider</span><span class="browser-surface-value">${escapeHtml(mission.provider)}</span></div>
+        <div class="browser-surface-field"><span class="browser-surface-label">Step</span><span class="browser-surface-value">${mission.currentStep || 0}${mission.maxSteps ? ` of ${mission.maxSteps}` : ""}</span></div>
+        <div class="browser-surface-field"><span class="browser-surface-label">Page title</span><span class="browser-surface-value">${escapeHtml(mission.pageTitle || "Not observed yet")}</span></div>
+        <div class="browser-surface-field" style="grid-column:1/-1"><span class="browser-surface-label">Current URL</span><span class="browser-surface-value">${escapeHtml(mission.currentUrl || "Not observed yet")}</span></div>
+        <div class="browser-surface-field" style="grid-column:1/-1"><span class="browser-surface-label">Current action</span><span class="browser-surface-value">${escapeHtml(summary || "Preparing browser work…")}</span></div>
+      </div>
+      ${mission.evidence.length ? `<div class="browser-proof"><strong>${mission.status === "completed" ? "Completion evidence" : "Failure evidence"}</strong><br>${escapeHtml(mission.evidence[0].summary)}<br>${mission.currentStep} step${mission.currentStep === 1 ? "" : "s"}${mission.pageTitle ? ` · Final page: ${escapeHtml(mission.pageTitle)}` : ""}</div>` : ""}
+    `;
+  }
+
+  function openBrowserWork(sessionId) {
+    const presentation = buildMissionPresentation();
+    const mission = presentation.missions[sessionId];
+    const surface = document.getElementById("browser-work-surface");
+    if (!mission || !surface) return;
+    selectedMissionId = sessionId;
+    surface.dataset.sessionId = sessionId;
+    surface.classList.add("open");
+    surface.setAttribute("aria-hidden", "false");
+    renderMissionControl();
+  }
+
+  function closeBrowserWork() {
+    const surface = document.getElementById("browser-work-surface");
+    if (!surface) return;
+    surface.classList.remove("open");
+    surface.setAttribute("aria-hidden", "true");
+    delete surface.dataset.sessionId;
+  }
+
+  async function resolveMissionConfirmation(confirmationId, sessionId, actionId, decision) {
+    if (!confirmationId || !sessionId || !actionId || !["approve", "deny"].includes(decision)) return;
+    missionDecisionInFlight = confirmationId;
+    missionDecisionError = null;
+    renderMissionControl();
+    try {
+      const resp = await fetch(`/api/mcharness/computer/confirmations/${encodeURIComponent(confirmationId)}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          operator_id: "operator",
+          expected_session_id: sessionId,
+          expected_action_id: actionId,
+        }),
+      });
+      const result = await resp.json();
+      if (!resp.ok || !result.ok) throw new Error(result.detail || result.error || "Could not resolve this browser action.");
+      missionDecisionError = null;
+      await loadMissionRuntimeRecovery();
+    } catch (err) {
+      missionDecisionError = err.message || String(err);
+    } finally {
+      missionDecisionInFlight = null;
+      renderMissionControl();
     }
   }
 
@@ -6004,7 +6272,10 @@
     const container = document.getElementById("chat-messages-stream");
     if (!container) return;
 
-    if (!events || events.length === 0) {
+    renderMissionControl();
+    const conversationEvents = (events || []).filter(event => !window.WardenMissionPresentation?.isBrowserEvent(event));
+
+    if (conversationEvents.length === 0) {
       container.innerHTML = `
         <div id="chat-empty-state" class="chat-empty-state">
           <div class="empty-avatar-icon">Warden</div>
@@ -6032,7 +6303,7 @@
       return;
     }
 
-    container.innerHTML = events.map(e => {
+    container.innerHTML = conversationEvents.map(e => {
       const isHuman = e.actor_type === "human";
       const isWarden = e.actor_type === "warden" || e.actor_id === "warden";
       const rowClass = isHuman ? "human-row" : (isWarden ? "warden-row" : "agent-row");
@@ -6266,19 +6537,24 @@
       sseEventSource.close();
     }
     const statusPill = document.getElementById("chat-stream-status");
-    sseEventSource = new EventSource(`/api/mcharness/chat/conversations/${roomId}/stream`);
+    const cursor = readMissionCursor(roomId);
+    sseEventSource = new EventSource(`/api/mcharness/chat/conversations/${roomId}/stream?last_event_id=${cursor}`);
 
     sseEventSource.onopen = () => {
       if (statusPill) {
         statusPill.textContent = "● LIVE SSE";
         statusPill.style.color = "#34d399";
       }
+      loadMissionRuntimeRecovery();
     };
 
     sseEventSource.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data);
-        loadGroupChatEvents(roomId);
+        if (roomId !== currentChatRoomId) return;
+        const seq = Number(evt.seq) || Number(e.lastEventId) || 0;
+        if (seq && seq <= readMissionCursor(roomId)) return;
+        mergeGroupChatEvents([evt]);
       } catch (err) {
         // Heartbeat or pulse
       }
@@ -6289,6 +6565,7 @@
         statusPill.textContent = "● RECONNECTING";
         statusPill.style.color = "#f59e0b";
       }
+      loadMissionRuntimeRecovery();
     };
   }
 
