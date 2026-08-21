@@ -22,12 +22,79 @@ function applyMode(): void {
   $('#team-chat-workspace').toggleAttribute('hidden', ui.workspace !== 'team-chat');
   const toggle = document.getElementById('mode-toggle') as HTMLInputElement | null; if (toggle) toggle.checked = developer;
 }
+async function ensureWardenServerAndMount(): Promise<void> {
+  const loading = document.getElementById('mission-server-state');
+  const frame = document.getElementById('team-chat-frame') as HTMLIFrameElement | null;
+  const title = document.getElementById('mission-server-title');
+  const detail = document.getElementById('mission-server-detail');
+  const actions = document.getElementById('mission-server-actions');
+  const errBox = document.getElementById('mission-server-error');
+
+  if (!loading || !frame) return;
+
+  const showLoading = (msg: string) => {
+    loading.removeAttribute('hidden');
+    frame.setAttribute('hidden', 'true');
+    actions?.setAttribute('hidden', 'true');
+    errBox?.setAttribute('hidden', 'true');
+    if (title) title.textContent = msg;
+    if (detail) detail.textContent = 'Connecting to local Warden control plane (:6969)…';
+  };
+
+  const showError = (err: string) => {
+    loading.removeAttribute('hidden');
+    frame.setAttribute('hidden', 'true');
+    if (title) title.textContent = 'Warden runtime unavailable';
+    if (detail) detail.textContent = 'The local Warden backend server could not be started or reached.';
+    actions?.removeAttribute('hidden');
+    if (errBox && err) {
+      errBox.textContent = err;
+      errBox.removeAttribute('hidden');
+    }
+  };
+
+  const showFrame = () => {
+    loading.setAttribute('hidden', 'true');
+    frame.removeAttribute('hidden');
+    if (!frame.src || frame.src === 'about:blank' || frame.src.endsWith('index.html')) {
+      frame.src = 'http://127.0.0.1:6969/web/warden/app.html?embed=true';
+    }
+  };
+
+  if (await window.wardenDesk.warden.serverHealth()) {
+    showFrame();
+    return;
+  }
+
+  showLoading('Starting Warden…');
+
+  const started = await window.wardenDesk.warden.ensureServer();
+  if (started && await window.wardenDesk.warden.serverHealth()) {
+    showFrame();
+    return;
+  }
+
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (await window.wardenDesk.warden.serverHealth()) {
+      showFrame();
+      return;
+    }
+  }
+
+  const status = await window.wardenDesk.warden.serverStatus();
+  showError(status.error || 'Server did not respond to health check in time.');
+}
+
 async function selectWorkspace(workspace: WorkspaceId): Promise<void> {
   ui.workspace = workspace; document.body.dataset.workspace = workspace; document.querySelectorAll<HTMLButtonElement>('[data-workspace]').forEach((button) => button.classList.toggle('active', button.dataset.workspace === workspace));
   $('#provider-host').toggleAttribute('hidden', workspace !== 'chat'); $('#build-workspace').toggleAttribute('hidden', workspace !== 'build'); $('#team-chat-workspace').toggleAttribute('hidden', workspace !== 'team-chat'); $('#browser-toolbar').toggleAttribute('hidden', workspace !== 'chat');
   applyMode();
   await window.wardenDesk.state.update({ workspace });
   if (ui.activeProjectId) await window.wardenDesk.project.update(ui.activeProjectId, { workspace });
+  if (workspace === 'team-chat') {
+    void ensureWardenServerAndMount();
+  }
   if (workspace === 'chat') { providerBounds(); if (ui.platformId) await window.wardenDesk.platform.show(ui.platformId, ui.splitPlatformId); } else { await window.wardenDesk.platform.hide(); queueMicrotask(() => fitActiveTerminal()); }
 }
 async function selectPlatform(id: string, splitId?: string): Promise<void> { const platform = ui.platforms.get(id); if (!platform?.enabled) return; ui.platformId = id; ui.splitPlatformId = splitId; renderPlatforms(); renderWorkspaceContext(); await window.wardenDesk.state.update({ selectedPlatformId: id }); if (ui.activeProjectId) await window.wardenDesk.project.update(ui.activeProjectId, { selectedPlatformId: id, splitPlatformId: splitId }); await selectWorkspace('chat'); await window.wardenDesk.platform.show(id, splitId); }
@@ -185,6 +252,8 @@ async function initialize(): Promise<void> {
   document.querySelectorAll<HTMLButtonElement>('[data-execution]').forEach((button) => button.addEventListener('click', () => selectExecution(button.dataset.execution as ExecutionMode)));
   document.querySelectorAll<HTMLInputElement>('input[name="billing-source"]').forEach((input) => input.addEventListener('change', renderAuthStatus));
   $('#project-picker').addEventListener('change', () => void activateProject(($('#project-picker') as HTMLSelectElement).value)); $('#platform-search').addEventListener('input', renderPlatforms); $('#add-platform').addEventListener('click', () => void openPlatformDialog()); $('#empty-add-platform').addEventListener('click', () => void openPlatformDialog()); $('#restore-platform').addEventListener('click', async () => { const removed = await window.wardenDesk.platform.removed(); if (!removed.length) return notice('No removed platforms are available to restore.'); const choice = removed.length === 1 ? removed[0].name : prompt(`Enter the platform to restore:\n${removed.map((item) => item.name).join('\n')}`); const target = removed.find((item) => item.name.toLowerCase() === choice?.trim().toLowerCase()); if (!target) return choice && notice('No removed platform matched that name.'); const restored = await window.wardenDesk.platform.restore(target.id); ui.platforms.set(restored.id, restored); renderPlatforms(); await selectPlatform(restored.id); }); presetSelect.addEventListener('change', () => applyPreset(presetSelect.value)); const platformDialog = $('#platform-dialog') as HTMLDialogElement; ($('#platform-form') as HTMLFormElement).addEventListener('submit', (event) => void savePlatformForm(event)); platformDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId && ui.platforms.get(ui.platformId)?.enabled) void selectPlatform(ui.platformId, ui.splitPlatformId); }); ($('#split-dialog') as HTMLDialogElement).addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId && ui.platforms.get(ui.platformId)?.enabled) void selectPlatform(ui.platformId, ui.splitPlatformId); });
+  document.getElementById('mission-server-retry')?.addEventListener('click', () => { void ensureWardenServerAndMount(); });
+  document.getElementById('mission-server-details-btn')?.addEventListener('click', () => { document.getElementById('mission-server-error')?.toggleAttribute('hidden'); });
   const aboutDialog = $('#about-dialog') as HTMLDialogElement; $('#about-button').addEventListener('click', () => void openAboutDialog()); $('#about-close').addEventListener('click', () => aboutDialog.close()); $('#about-done').addEventListener('click', () => aboutDialog.close()); aboutDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId) void selectPlatform(ui.platformId, ui.splitPlatformId); });
   const providerSetupDialog = $('#provider-setup-dialog') as HTMLDialogElement; $('#provider-setup-button').addEventListener('click', () => void openProviderSetupDialog()); $('#provider-setup-close').addEventListener('click', () => providerSetupDialog.close()); $('#provider-setup-done').addEventListener('click', () => providerSetupDialog.close()); providerSetupDialog.addEventListener('close', () => { if (ui.workspace === 'chat' && ui.platformId) void selectPlatform(ui.platformId, ui.splitPlatformId); });
   const chatHandoffDialog = $('#chat-to-build-dialog') as HTMLDialogElement; $('#handoff-to-build').addEventListener('click', () => void openChatHandoffDialog()); $('#chat-handoff-close').addEventListener('click', () => chatHandoffDialog.close()); $('#chat-handoff-cancel').addEventListener('click', () => chatHandoffDialog.close());

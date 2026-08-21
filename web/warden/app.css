@@ -7609,6 +7609,7 @@ body.embed-mode {
 }
 
 body.embed-mode .warden-sidebar,
+body.embed-mode .mission-control-rail,
 body.embed-mode .captain-deck-bar,
 body.embed-mode .brand-chip {
   display: none !important;
@@ -7637,4 +7638,12 @@ body.embed-mode #warden-section-group-chat {
   border: none !important;
   box-shadow: none !important;
   margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.embed-mode .group-chat-container {
+  height: 100vh !important;
+  width: 100vw !important;
+  border-radius: 0 !important;
+  border: none !important;
 }
