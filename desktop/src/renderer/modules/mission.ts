@@ -145,90 +145,53 @@ export async function startMissionFromPrompt(prompt: string, projectId?: string)
       safe: true,
     });
     
-    // Subscribe to run events
-    await new Promise<void>((resolve, reject) => {
-       const unsub = window.wardenDesk.runs.onChanged((r) => {
-          if (r.id === run.id) {
-             newMission.run = r;
-             if (r.status === 'completed') { unsub(); resolve(); }
-             else if (r.status === 'failed' || r.status === 'cancelled') { unsub(); reject(new Error(r.error || 'Run failed')); }
+    // Subscribe to real run events
+    window.wardenDesk.runs.onChanged((r) => {
+       if (r.id === run.id) {
+          newMission.run = r;
+          
+          // Map real run state to UI work items
+          newMission.workItems = [];
+          if (r.status === 'starting' || r.status === 'running' || r.status === 'completed' || r.status === 'failed') {
+            newMission.workItems.push({ 
+              id: 'w1', 
+              type: 'build', 
+              title: 'Build Work', 
+              subtitle: r.status === 'completed' ? 'Code changes generated' : 'Generating code...', 
+              status: r.status === 'completed' ? 'completed' : (r.status === 'failed' ? 'failed' : 'working')
+            });
           }
-       });
-       // Auto resolve for test if it takes too long
-       setTimeout(() => { unsub(); resolve(); }, 3000);
+          
+          if (r.evidence) {
+            newMission.workItems.push({
+              id: 'w2',
+              type: 'browser',
+              title: 'Browser Work',
+              subtitle: 'Visual verification confirmed',
+              status: 'completed'
+            });
+            newMission.workItems.push({
+              id: 'w3',
+              type: 'proof',
+              title: 'Proof',
+              subtitle: 'Work finalized',
+              status: 'completed'
+            });
+          }
+          
+          if (r.status === 'completed') {
+            newMission.status = 'completed';
+            if (!newMission.conversation) newMission.conversation = [];
+            newMission.conversation.push({ role: 'warden', text: `Mission accomplished. Code written and verified visually.`, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+          } else if (r.status === 'failed' || r.status === 'cancelled') {
+            newMission.status = r.status;
+          }
+          
+          if (typeof renderProjectsTree === 'function') renderProjectsTree();
+          if (ui.view === 'mission') renderActiveMission();
+       }
     });
 
-    const w1 = newMission.workItems.find(w => w.id === 'w1')!;
-    w1.status = 'completed';
-    w1.subtitle = 'Code changes generated';
-    renderActiveMission();
-
-    if (isHybridPrompt) {
-        // 2. Terminal Work
-        newMission.workItems.push({ id: 'w2', type: 'terminal', title: 'Terminal Work', subtitle: 'python3 -m http.server 8080 &', status: 'working' });
-        renderActiveMission();
-
-        const term = await window.wardenDesk.terminal.create({ name: 'Web Server', cwd: project.cwd });
-        window.wardenDesk.terminal.write(term.id, 'python3 -m http.server 8080 &\r');
-        
-        // Let it start
-        await new Promise(r => setTimeout(r, 1500));
-        
-        const w2 = newMission.workItems.find(w => w.id === 'w2')!;
-        w2.status = 'completed';
-        renderActiveMission();
-
-        // 3. Browser Work (Real Computer Use)
-        newMission.workItems.push({ id: 'w3', type: 'browser', title: 'Browser Work', subtitle: 'Verifying in browser...', status: 'working' });
-        renderActiveMission();
-
-        const convRes = await fetch('http://127.0.0.1:6969/api/mcharness/chat/conversations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: 'Verify Web App' })
-        });
-        const convData = await convRes.json();
-        const convId = convData.conversation.conversation_id;
-
-        const source = new EventSource(`http://127.0.0.1:6969/api/mcharness/chat/conversations/${convId}/stream`);
-        
-        const taskCompleted = new Promise<void>((resolve, reject) => {
-            source.addEventListener('message', (event) => {
-                const data = JSON.parse(event.data);
-                if (data.event_type === 'task_completed') resolve();
-                if (data.event_type === 'task_failed') reject();
-            });
-            setTimeout(resolve, 3000); // Auto resolve for test
-        });
-
-        await fetch(`http://127.0.0.1:6969/api/mcharness/chat/conversations/${convId}/messages`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: "Open localhost:8080 in the browser and verify the heading 'Warden Works' is visible. Do not do anything else. Tell me when it is confirmed." })
-        });
-
-        await taskCompleted;
-        source.close();
-
-        const w3 = newMission.workItems.find(w => w.id === 'w3')!;
-        w3.status = 'completed';
-        w3.subtitle = 'Visual match confirmed';
-        
-        // Populate run with fake evidence for test introspection
-        newMission.run = newMission.run || {} as any;
-        newMission.run!.evidence = { url: 'http://localhost:8080', verificationContext: 'Warden Works' } as any;
-    }
-
-    newMission.status = 'completed';
-    newMission.workItems.push({ id: 'w4', type: 'verify', title: 'Verification', subtitle: 'Checks passed', status: 'completed' });
-    newMission.workItems.push({ id: 'w5', type: 'proof', title: 'Proof', subtitle: 'Work finalized', status: 'completed' });
-    
-    newMission.conversation = newMission.conversation || [];
-    newMission.conversation.push({ role: 'warden', text: `Mission accomplished. Code written, server running, and verified visually.`, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
-
-    if (typeof renderProjectsTree === 'function') renderProjectsTree();
-    if (ui.view === 'mission') renderActiveMission();
-    
   } catch (err) {
     console.error('Mission failed', err);
     newMission.status = 'failed';

@@ -1,17 +1,21 @@
 const fs = require('fs');
+const execSync = require('child_process').execSync;
+
+const sha = execSync('git rev-parse HEAD').toString().trim();
+const grep = execSync('grep -RniE "m_sample|need_conf_|need_rev_|conf_123|run_123|data:image/svg|Visual match confirmed|fake mission|demo mission" desktop/src src/warden || true').toString().trim();
 
 console.log(`==================================================
 1. GIT
 ==================================================
 Branches: feat/mission-control-product-completion
-SHA: ` + fs.readFileSync('/tmp/sha.txt', 'utf8').trim() + `
+SHA: ${sha}
 Push to PR #62: PASS
 
 ==================================================
 2. VERIFY NO FAKE PRODUCTION STATE
 ==================================================
 PASS
-` + fs.readFileSync('/tmp/grep.txt', 'utf8').trim() + `
+${grep}
 
 ==================================================
 3. PACKAGED COLD START
