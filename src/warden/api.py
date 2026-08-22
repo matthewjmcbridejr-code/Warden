@@ -4672,7 +4672,7 @@ def get_command_deck_events():
 
 
 class _DemoSeedRequest(BaseModel):
-    title: str = "Demo Mission"
+    title: str = "Sample Workflow"
     description: str = "Demonstrate Warden Command Deck dispatch loop."
     agent: str = "cl"
     priority: str = "medium"

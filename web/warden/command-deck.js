@@ -92,7 +92,7 @@ function normalizeState(state = {}, proofPayload = {}, relayPayload = {}) {
       blocked_tasks: summary.failed ?? columns.blocked.length,
     },
     brain_panel: state.brain_panel || {
-      summary: "Command Deck reads Warden board tasks, proof closeouts, and relay events. Seed a demo mission to verify the loop.",
+      summary: "Command Deck reads Warden board tasks, proof closeouts, and relay events. Seed a sample task to verify the loop.",
       context_sources: ["Warden Board", "Proof Ledger", "Relay Timeline"],
     },
   };
@@ -350,7 +350,7 @@ async function loadDeck() {
 async function seedDemo() {
   $("seed-demo").disabled = true;
   try {
-    await fetchJson("/demo-seed", { method: "POST", body: JSON.stringify({ title: "Demo Mission", description: "Demonstrate Warden Command Deck dispatch loop.", agent: "codex", priority: "medium" }) });
+    await fetchJson("/demo-seed", { method: "POST", body: JSON.stringify({ title: "Sample Workflow", description: "Demonstrate Warden Command Deck dispatch loop.", agent: "codex", priority: "medium" }) });
     await loadDeck();
     await previewNotionSync();
   } finally {
