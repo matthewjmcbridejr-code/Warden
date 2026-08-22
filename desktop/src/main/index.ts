@@ -26,6 +26,7 @@ function requireMainRenderer(event: Electron.IpcMainInvokeEvent): void { if (!ma
 function registerIpc(): void {
   ipcMain.handle('app:info', (event) => { requireMainRenderer(event); return { name: 'Warden AI Desk', version: app.getVersion(), platform: process.platform, arch: process.arch }; });
   ipcMain.handle('warden:server-health', () => supervisor.isHealthy());
+  ipcMain.handle('warden:server-status', () => supervisor.getStatus());
   ipcMain.handle('warden:ensure-server', () => supervisor.ensureRunning());
   ipcMain.handle('state:get', () => ({ state: store.state, warning: store.warning }));
   ipcMain.handle('state:update', (_event, patch: unknown) => { if (!patch || typeof patch !== 'object') throw new Error('Invalid state update.'); const value = patch as Record<string, unknown>; const clean: Record<string, unknown> = {}; if (value.workspace === 'team-chat' || value.workspace === 'chat' || value.workspace === 'build') clean.workspace = value.workspace; if (typeof value.selectedPlatformId === 'string' && store.state.platforms.some((item) => item.id === value.selectedPlatformId)) clean.selectedPlatformId = value.selectedPlatformId; if (typeof value.activeProjectId === 'string' && store.state.projects.some((item) => item.id === value.activeProjectId)) clean.activeProjectId = value.activeProjectId; if (typeof value.onboardingComplete === 'boolean') clean.onboardingComplete = value.onboardingComplete; if (value.mode === 'simple' || value.mode === 'developer') clean.mode = value.mode; return store.patch(clean); });

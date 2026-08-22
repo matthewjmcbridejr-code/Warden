@@ -141,11 +141,13 @@ router.include_router(workbench_router)
 from .projects import router as projects_router
 from .webstudio.api import router as webstudio_router
 from .finish.api import router as finish_router
+from .computer.api import router as computer_router
 
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
 mcharness_router.include_router(projects_router)
 mcharness_router.include_router(webstudio_router)
 mcharness_router.include_router(finish_router)
+mcharness_router.include_router(computer_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
 _CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -4670,7 +4672,7 @@ def get_command_deck_events():
 
 
 class _DemoSeedRequest(BaseModel):
-    title: str = "Demo Mission"
+    title: str = "Sample Workflow"
     description: str = "Demonstrate Warden Command Deck dispatch loop."
     agent: str = "cl"
     priority: str = "medium"
@@ -6570,27 +6572,44 @@ async def api_stream_chat_events(conversation_id: str, request: Request, last_ev
     store = GroupChatStore()
 
     since_seq = 0
-    if last_event_id and last_event_id.isdigit():
+    if last_event_id and str(last_event_id).isdigit():
         since_seq = int(last_event_id)
+    else:
+        hdr = request.headers.get("last-event-id") or request.headers.get("Last-Event-ID")
+        if hdr and str(hdr).isdigit():
+            since_seq = int(hdr)
 
     async def sse_generator():
-        # 1. Replay past events since cursor
-        initial_events = store.list_events(conversation_id=conversation_id, since_seq=since_seq)
-        for evt in initial_events:
-            payload = json.dumps(evt.model_dump(mode="json"))
-            yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
-
-        # 2. Subscribe to live events stream
+        # Subscribe before replaying so an event cannot fall into the replay/live gap.
         q = store.subscribe()
+        last_sent_seq = since_seq
         try:
+            replay_cursor = since_seq
+            while True:
+                initial_events = store.list_events(
+                    conversation_id=conversation_id,
+                    since_seq=replay_cursor,
+                    limit=500,
+                )
+                for evt in initial_events:
+                    if evt.seq <= last_sent_seq:
+                        continue
+                    payload = json.dumps(evt.model_dump(mode="json"))
+                    yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                    last_sent_seq = evt.seq
+                if len(initial_events) < 500:
+                    break
+                replay_cursor = last_sent_seq
+
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=15.0)
-                    if evt.conversation_id == conversation_id:
+                    if evt.conversation_id == conversation_id and evt.seq > last_sent_seq:
                         payload = json.dumps(evt.model_dump(mode="json"))
                         yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                        last_sent_seq = evt.seq
                 except asyncio.TimeoutError:
                     # Heartbeat keepalive
                     yield f": heartbeat {int(time.time())}\n\n"

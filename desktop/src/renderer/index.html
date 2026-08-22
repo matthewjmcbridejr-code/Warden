@@ -1,117 +1,846 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:"><title>Warden AI Desk</title><link rel="stylesheet" href="renderer.css"></head>
-<body>
-  <aside class="sidebar">
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; frame-src 'self' http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:">
+  <title>Warden AI Desk</title>
+  <link rel="stylesheet" href="renderer.css">
+</head>
+<body data-view="home" data-workspace="team-chat">
+  <!-- PRIMARY SIDEBAR RAIL -->
+  <aside class="sidebar" aria-label="Warden Navigation">
     <div class="brand-row">
-      <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">W</span><div class="brand">Warden <span>AI Desk</span></div></div>
-      <span id="version-badge">v…</span>
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <div class="brand">Warden <span>AI Desk</span></div>
+      </div>
+      <span id="version-badge">v0.6.0</span>
     </div>
-    <section class="project-switcher" aria-labelledby="active-project-label">
-      <div class="project-switcher-head"><label id="active-project-label" class="project-picker-label" for="project-picker">Active project</label><span class="project-live-dot" title="Project workspace restores automatically"></span></div>
-      <select id="project-picker" aria-label="Active project"><option value="">No project selected</option></select>
-      <div id="workspace-context" aria-live="polite"><span id="context-project">No repository selected</span><span id="context-profile">Browser profile · Personal</span></div>
-    </section>
-    <nav class="workspace-nav" aria-label="Primary workspace">
-      <p class="section-label">Workspace</p>
-      <button class="workspace active" data-workspace="team-chat" title="Talk to Warden — Captain planning, Brain recall, memory, and team chat"><span class="workspace-glyph team-glyph" aria-hidden="true">💬</span><span class="workspace-copy"><strong>Talk to Warden</strong><small>Captain · Brain · Team</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
-      <button class="workspace" data-workspace="chat" title="Persistent web AI workspaces"><span class="workspace-glyph" aria-hidden="true">◫</span><span class="workspace-copy"><strong>Web Platforms</strong><small>Claude · Gemini · Grok</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
-      <button class="workspace" data-workspace="build" title="Local terminals and structured provider runs"><span class="workspace-glyph build-glyph" aria-hidden="true">⌁</span><span class="workspace-copy"><strong>Build</strong><small>Project missions</small></span><span class="workspace-arrow" aria-hidden="true">›</span></button>
+
+    <!-- Core Nav -->
+    <nav class="nav-core" aria-label="Main Navigation">
+      <button type="button" class="nav-button active" data-nav="home" title="Home — Mission overview and launcher">
+        <span class="nav-icon" aria-hidden="true">⌂</span>
+        <span class="nav-label">Home</span>
+      </button>
+      <button type="button" class="nav-button" data-nav="needs-you" title="Needs You — Attention, approvals, and reviews">
+        <span class="nav-icon" aria-hidden="true">⚠</span>
+        <span class="nav-label">Needs You</span>
+        <span id="nav-needs-badge" class="badge-count" hidden>0</span>
+      </button>
     </nav>
-    <div class="section-row"><p class="section-label">Platforms</p><span><button id="restore-platform" class="icon-button" title="Restore a removed platform" aria-label="Restore removed platform">↶</button><button id="add-platform" class="icon-button add-button" title="Add a custom AI platform" aria-label="Add AI platform">＋</button></span></div>
-    <input id="platform-search" type="search" placeholder="Find a platform…" aria-label="Search platforms">
-    <nav id="platforms" aria-label="AI platforms"></nav>
-    <div class="privacy">
-      <label class="mode-toggle" title="Developer Mode shows terminals, Git detail, and raw events"><input id="mode-toggle" type="checkbox"><span>Advanced controls</span></label>
+
+    <!-- Projects & Missions Tree -->
+    <div class="nav-section-header">
+      <span class="nav-section-title">PROJECTS</span>
+      <button type="button" id="nav-add-project" class="icon-button add-button" title="Open or create a project" aria-label="Add project">＋</button>
+    </div>
+    <div id="nav-projects-tree" class="nav-projects-tree" aria-label="Projects and Missions">
+      <!-- Dynamically populated project tree with nested missions -->
+    </div>
+
+    <div class="nav-divider"></div>
+
+    <!-- Secondary Nav: Connected AIs & Advanced -->
+    <nav class="nav-secondary" aria-label="Connected Resources and Advanced">
+      <button type="button" class="nav-button" data-nav="connected-ais" title="Connected AIs — Accounts, models, and platforms">
+        <span class="nav-icon" aria-hidden="true">❖</span>
+        <span class="nav-label">Connected AIs</span>
+        <span id="nav-connected-count" class="badge-quiet">4</span>
+      </button>
+      <button type="button" class="nav-button" data-nav="advanced" title="Advanced — Direct terminals, raw logs, and diagnostics">
+        <span class="nav-icon" aria-hidden="true">⚙</span>
+        <span class="nav-label">Advanced</span>
+      </button>
+    </nav>
+
+    <!-- Hidden compatibility elements for legacy state bindings -->
+    <div hidden>
+      <select id="project-picker"><option value="">No project selected</option></select>
+      <div id="workspace-context"><span id="context-project">No repository selected</span><span id="context-profile">Browser profile · Personal</span></div>
+      <input id="platform-search" type="search" placeholder="Find a platform…">
+      <nav id="platforms"></nav>
+      <input id="mode-toggle" type="checkbox">
       <button id="provider-setup-button">Providers</button>
       <button id="about-button">About</button>
+      <button id="restore-platform">↶</button>
+      <button id="add-platform">＋</button>
+      <div class="workspace-nav">
+        <button class="workspace active" data-workspace="team-chat"></button>
+        <button class="workspace" data-workspace="chat"></button>
+        <button class="workspace" data-workspace="build"></button>
+      </div>
     </div>
   </aside>
-  <main>
-    <header id="browser-toolbar"><div class="toolbar"><button data-action="back" title="Back (Alt+Left)" aria-label="Back">←</button><button data-action="forward" title="Forward (Alt+Right)" aria-label="Forward">→</button><button id="reload-stop" data-action="reload" title="Reload (Ctrl+R)" aria-label="Reload">↻</button><button id="open-system" title="Open in system browser" aria-label="Open in system browser">↗</button><button id="handoff-to-build" class="handoff-btn" title="Handoff goal to Build mission">Handoff to Build →</button><span id="loading-state" role="status" aria-live="polite"></span></div><button id="platform-overflow" aria-label="Platform menu" aria-haspopup="menu" aria-expanded="false">•••</button></header>
+
+  <!-- MAIN VIEW CONTAINER -->
+  <main class="main-stage">
+    <header id="browser-toolbar">
+      <div class="toolbar">
+        <button data-action="back" title="Back (Alt+Left)" aria-label="Back">←</button>
+        <button data-action="forward" title="Forward (Alt+Right)" aria-label="Forward">→</button>
+        <button id="reload-stop" data-action="reload" title="Reload (Ctrl+R)" aria-label="Reload">↻</button>
+        <button id="open-system" title="Open in system browser" aria-label="Open in system browser">↗</button>
+        <button id="handoff-to-build" class="handoff-btn" title="Handoff goal to Build mission">Handoff to Mission →</button>
+        <span id="loading-state" role="status" aria-live="polite"></span>
+      </div>
+      <button id="platform-overflow" aria-label="Platform menu" aria-haspopup="menu" aria-expanded="false">•••</button>
+    </header>
+
     <div id="notice" role="status" hidden></div>
-    <section id="team-chat-workspace" style="width:100%; height:100%; display:flex; flex-direction:column; padding:0; margin:0;">
-      <iframe id="team-chat-frame" src="http://127.0.0.1:6969/web/warden/app.html?embed=true" style="width:100%; height:100%; border:none; background:#0a101c;"></iframe>
-    </section>
-    <section id="provider-host" hidden><div class="empty"><span class="eyebrow">CHAT WORKSPACE</span><h1>Your project’s AI workspace.</h1><p>Add or select a sandboxed web platform. Login sessions stay inside the selected named Warden browser profile.</p><button id="empty-add-platform" class="primary">Add a web platform</button></div></section>
-    <section id="build-workspace" hidden>
-      <div id="simple-build" hidden>
-        <header class="sb-commandbar">
-          <div class="sb-project-identity"><span class="sb-project-mark" aria-hidden="true">⌘</span><div><span class="sb-kicker">Project workspace</span><strong id="sb-project-name">No project selected</strong><span id="sb-project-meta">Open a repository to begin</span></div></div>
-          <div class="sb-command-actions"><span id="sb-safe-badge" class="status-pill">No safe workspace</span><button id="sb-open-terminal">Open terminal</button><button id="sb-new-task" class="primary">New mission</button></div>
+
+    <!-- VIEW 1: HOME -->
+    <section id="view-home" class="product-view active">
+      <div class="home-container">
+        <header class="home-hero">
+          <span class="eyebrow">WARDEN MISSION CONTROL</span>
+          <h1>What should Warden accomplish?</h1>
+          <p class="home-subhead">Warden coordinates planning, code changes, browser execution, terminal commands, and verification into durable, proven missions.</p>
         </header>
-        <div class="sb-workbench">
-          <aside class="sb-missions">
-            <div class="sb-rail-head"><div><span class="sb-kicker">Mission control</span><strong>Recent work</strong></div><span id="sb-run-count" class="count-badge">0</span></div>
-            <div id="sb-project-list" hidden></div>
-            <div id="sb-run-list" class="sb-run-list"><p class="sb-rail-empty">Tasks for this project will stay here.</p></div>
-            <div class="sb-rail-actions"><button id="sb-create-playground-sidebar">＋ Create sample project</button><button id="sb-choose-directory">Open another folder</button></div>
-          </aside>
-          <section class="sb-stage">
-            <div id="sb-error" class="sb-error" role="alert" aria-live="assertive" hidden></div>
-            <div id="sb-no-project" class="sb-empty-state" hidden><span class="sb-empty-orbit" aria-hidden="true">W</span><span class="sb-kicker">Build starts with context</span><h2>Open a project or create a local playground.</h2><p>Warden restores the repository, branch, structured runs, approvals, evidence, and browser profile as one workspace.</p><div class="run-actions"><button id="sb-create-playground" class="primary">Create sample project</button><button id="sb-empty-choose">Open a folder</button></div></div>
-            <div id="sb-readonly" class="sb-empty-state" hidden><span class="sb-kicker">Safe workspace unavailable</span><h2>This folder needs attention before a managed mission can edit it.</h2><p>Simple Build requires a clean Git workspace so Warden can isolate changes and offer a reliable Undo. Initialize Git outside Warden or create a sample project to build safely.</p><div class="run-actions"><button id="sb-open-readonly" class="primary">Inspect in Advanced mode</button><button id="sb-choose-another">Choose another folder</button></div></div>
-            <div id="sb-onboarding" class="sb-empty-state" hidden><span class="sb-kicker">Structured provider</span><h2 id="sb-onboarding-headline">Connect an AI to start building</h2><p id="sb-onboarding-body"></p><button id="sb-connect-codex" class="primary">Check Codex sign-in</button></div>
-            <div id="sb-composer" hidden>
-              <div class="sb-stage-head"><div><span class="sb-kicker">New mission</span><h1>What should Warden accomplish?</h1></div><div class="sb-provider-card"><span class="provider-orb">C</span><div><strong>Codex</strong><span id="sb-provider-line" class="sb-provider-line"></span></div><span class="connected-dot" aria-hidden="true"></span></div></div>
-              <div class="sb-template-section">
-                <span class="sb-kicker">Beginner Mission Templates</span>
-                <div id="sb-mission-templates" class="sb-template-grid">
-                  <button type="button" class="sb-template-card" data-template="welcome"><span class="template-icon">📄</span><strong>Welcome & Readme</strong><small>Add starter README introducing the project</small></button>
-                  <button type="button" class="sb-template-card" data-template="typos"><span class="template-icon">✨</span><strong>Audit Typos</strong><small>Fix spelling and formatting in project files</small></button>
-                  <button type="button" class="sb-template-card" data-template="web"><span class="template-icon">🌐</span><strong>Landing Page</strong><small>Create styled index.html starter page</small></button>
-                  <button type="button" class="sb-template-card" data-template="testing"><span class="template-icon">🧪</span><strong>Add Verification</strong><small>Add sanity test and run build checks</small></button>
+
+        <!-- Outcome Composer -->
+        <div class="home-composer-card">
+          <textarea id="home-prompt" placeholder="Describe the outcome you want (e.g. 'Create a simple landing page and verify it in the browser', 'Audit project for typos', 'What were we working on yesterday?')..."></textarea>
+          <div class="home-composer-bar">
+            <div class="home-context-pickers">
+              <label for="home-project-select" class="home-context-label">Project:</label>
+              <select id="home-project-select" class="home-select"></select>
+            </div>
+            <button type="button" id="home-start-mission-btn" class="primary btn-start-mission">Start Mission <span aria-hidden="true">→</span></button>
+          </div>
+        </div>
+
+        <!-- Beginner / Starter Templates -->
+        <div class="home-templates-section">
+          <span class="section-kicker">STARTER MISSION TEMPLATES</span>
+          <div class="home-template-grid">
+            <button type="button" class="template-card" data-template="web">
+              <span class="template-glyph">🌐</span>
+              <div>
+                <strong>Landing Page & Visual Verification</strong>
+                <small>Create styled page, start server, and verify in browser</small>
+              </div>
+            </button>
+            <button type="button" class="template-card" data-template="welcome">
+              <span class="template-glyph">📄</span>
+              <div>
+                <strong>Welcome & Project Brief</strong>
+                <small>Create WELCOME.md introducing architecture and safety</small>
+              </div>
+            </button>
+            <button type="button" class="template-card" data-template="typos">
+              <span class="template-glyph">✨</span>
+              <div>
+                <strong>Audit Typos & Consistency</strong>
+                <small>Review documentation and apply formatting fixes</small>
+              </div>
+            </button>
+            <button type="button" class="template-card" data-template="testing">
+              <span class="template-glyph">🧪</span>
+              <div>
+                <strong>Verification Checks</strong>
+                <small>Run test suite and verify build sanity checks</small>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Attention / Needs You Section -->
+        <section id="home-needs-section" class="home-dashboard-section" hidden>
+          <div class="section-title-row">
+            <div class="section-title-lockup">
+              <span class="status-dot warning"></span>
+              <h2>Needs You</h2>
+            </div>
+            <span id="home-needs-count-badge" class="badge-count">0</span>
+          </div>
+          <div id="home-needs-list" class="home-cards-grid"></div>
+        </section>
+
+        <!-- Active Missions Section -->
+        <section id="home-active-section" class="home-dashboard-section">
+          <div class="section-title-row">
+            <div class="section-title-lockup">
+              <span class="status-dot active"></span>
+              <h2>Active Missions</h2>
+            </div>
+            <span id="home-active-count-badge" class="badge-quiet">0</span>
+          </div>
+          <div id="home-active-list" class="home-cards-grid">
+            <p class="empty-hint">No missions currently running. Start a mission above.</p>
+          </div>
+        </section>
+
+        <!-- Recent Completed Missions Section -->
+        <section id="home-recent-section" class="home-dashboard-section">
+          <div class="section-title-row">
+            <div class="section-title-lockup">
+              <span class="status-dot success"></span>
+              <h2>Recent Missions</h2>
+            </div>
+          </div>
+          <div id="home-recent-list" class="home-cards-grid"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- VIEW 2: NEEDS YOU (Global Attention Queue) -->
+    <section id="view-needs-you" class="product-view" hidden>
+      <div class="needs-you-view-container">
+        <header class="view-header">
+          <div>
+            <span class="eyebrow">ATTENTION QUEUE</span>
+            <h1>Needs You</h1>
+            <p class="view-subhead">Actions, permissions, and reviews waiting for your judgment.</p>
+          </div>
+        </header>
+        <div id="needs-you-full-list" class="needs-you-full-grid"></div>
+        <div id="needs-you-empty" class="view-empty-state" hidden>
+          <span class="empty-icon">✓</span>
+          <h2>You're all caught up.</h2>
+          <p>No actions or code reviews are currently waiting for your attention.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: UNIFIED MISSION WORKSPACE -->
+    <section id="view-mission" class="product-view" hidden>
+      <div class="mission-workspace-shell">
+        <!-- Mission Header Bar -->
+        <header class="mission-command-bar">
+          <div class="mission-identity">
+            <span class="mission-project-badge" id="mission-project-badge">Warden</span>
+            <h1 id="mission-title" class="mission-title">Mission Title</h1>
+            <span id="mission-status-pill" class="status-pill active">Working</span>
+          </div>
+          <div class="mission-bar-actions">
+            <div id="sb-phase-track" class="sb-phase-track" aria-label="Mission progress">
+              <span data-phase="brief"><i>1</i>Brief</span>
+              <span data-phase="build"><i>2</i>Build</span>
+              <span data-phase="verify"><i>3</i>Verify</span>
+              <span data-phase="review"><i>4</i>Review</span>
+            </div>
+            <button type="button" id="mission-btn-open-terminal" class="btn small" title="Open terminal for this mission">Terminal</button>
+            <button type="button" id="mission-btn-new" class="btn primary small">New Mission</button>
+          </div>
+        </header>
+
+        <!-- Mission Body Split -->
+        <div class="mission-workspace-body">
+          <!-- Left/Center Work Column -->
+          <div class="mission-main-column">
+            <!-- Objective Box -->
+            <div class="mission-objective-card">
+              <span class="card-kicker">OBJECTIVE</span>
+              <p id="mission-objective-text"></p>
+            </div>
+
+            <!-- Attention Alert Banner (when Needs You is active for this mission) -->
+            <div id="mission-attention-banner" class="mission-attention-banner" hidden>
+              <div class="attention-signal">!</div>
+              <div class="attention-copy">
+                <strong id="mission-attention-title">Approval Required</strong>
+                <p id="mission-attention-desc"></p>
+                <div class="attention-actions" id="mission-attention-actions"></div>
+              </div>
+            </div>
+
+            <!-- Conversation & Reasoning Syntheses Stream -->
+            <div id="mission-chat-stream" class="mission-chat-stream" aria-live="polite"></div>
+
+            <!-- Typed Work Cards Stack -->
+            <div class="mission-work-section">
+              <span class="card-kicker">WORK ARTIFACTS & ACTIVITY</span>
+              <div id="mission-work-cards-stack" class="work-cards-stack">
+                <!-- Dynamically populated: Browser, Terminal, Build, Verification, Proof -->
+              </div>
+            </div>
+
+            <!-- Mission Ask / Followup Composer Dock -->
+            <div class="mission-bottom-dock">
+              <textarea id="mission-followup-input" placeholder="Ask Warden a question, provide instructions, or steer this mission..."></textarea>
+              <div class="mission-dock-bar">
+                <span class="dock-hint">Enter to send · Warden synthesizes context, tools, and proof</span>
+                <button type="button" id="mission-send-btn" class="primary">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Context Surface Column -->
+          <aside class="mission-context-column" aria-label="Work inspection surface">
+            <div class="sb-result-head" style="display:none;" hidden><span class="sb-kicker">Review surface</span><strong>Mission evidence</strong></div>
+            <div class="context-tabs-bar" role="tablist">
+              <button type="button" class="context-tab active" data-context-tab="browser" id="tab-btn-browser">Browser</button>
+              <button type="button" class="context-tab" data-context-tab="build" id="tab-btn-build">Build / Diff</button>
+              <button type="button" class="context-tab" data-context-tab="terminal" id="tab-btn-terminal">Terminal</button>
+              <button type="button" class="context-tab" data-context-tab="verify" id="tab-btn-verify">Verification</button>
+              <button type="button" class="context-tab" data-context-tab="proof" id="tab-btn-proof">Proof</button>
+            </div>
+
+            <!-- Context Panels -->
+            <div class="context-panels-container">
+              <!-- Panel: Browser Work Surface -->
+              <div id="panel-browser" class="context-panel active">
+                <div class="panel-inner">
+                  <div class="browser-screenshot-frame">
+                    <img id="browser-work-img" alt="Latest browser observation" hidden>
+                    <div id="browser-work-img-empty" class="screenshot-placeholder">Waiting for browser screenshot…</div>
+                  </div>
+                  <div class="browser-meta-grid">
+                    <div class="meta-field">
+                      <span class="meta-label">Status</span>
+                      <strong id="browser-meta-status">Ready</strong>
+                    </div>
+                    <div class="meta-field">
+                      <span class="meta-label">Step</span>
+                      <strong id="browser-meta-step">0 / 12</strong>
+                    </div>
+                    <div class="meta-field span-2">
+                      <span class="meta-label">Page Title</span>
+                      <span id="browser-meta-title" class="meta-value">—</span>
+                    </div>
+                    <div class="meta-field span-2">
+                      <span class="meta-label">URL</span>
+                      <span id="browser-meta-url" class="meta-value">—</span>
+                    </div>
+                    <div class="meta-field span-2">
+                      <span class="meta-label">Current Action</span>
+                      <span id="browser-meta-action" class="meta-value">—</span>
+                    </div>
+                  </div>
+                  <div class="browser-activity-list" id="browser-activity-list"></div>
                 </div>
               </div>
 
-              <div class="sb-brief-card">
-                <label for="sb-task">Outcome</label>
-                <textarea id="sb-task" placeholder="Redesign the project settings flow and verify it at desktop and compact window sizes."></textarea>
-                <label for="sb-acceptance">Ready for review when <span>optional, but makes long missions better</span></label>
-                <textarea id="sb-acceptance" placeholder="The existing tests pass, keyboard navigation works, and screenshots show no clipped controls."></textarea>
-                <div class="sb-context-row"><span><strong>Project context attached</strong><small>Instructions, skills, Git state, and scoped Brain context</small></span><span class="status-pill quiet">Subscription</span></div>
+              <!-- Panel: Build / Diff Surface -->
+              <div id="panel-build" class="context-panel" hidden>
+                <div class="panel-inner">
+                  <div class="build-summary-box">
+                    <div class="build-stats-row">
+                      <div class="stat-pill"><strong id="build-files-count">0</strong><span>files changed</span></div>
+                      <div class="stat-pill"><strong id="build-checks-count">0</strong><span>checks passed</span></div>
+                      <div class="stat-pill"><strong id="build-workspace-state">active</strong><span>workspace</span></div>
+                    </div>
+                  </div>
+                  <div class="build-files-box">
+                    <span class="section-kicker">CHANGED FILES</span>
+                    <div id="sb-changed-list" class="file-diff-list"></div>
+                  </div>
+                  <div class="build-diff-box">
+                    <span class="section-kicker">UNIFIED DIFF</span>
+                    <pre id="sb-diff" class="diff-viewer"></pre>
+                  </div>
+                  <div class="build-actions-bar">
+                    <button type="button" id="sb-keep" class="primary">Apply to project</button>
+                    <button type="button" id="sb-ask-changes">Request Changes</button>
+                    <button type="button" id="sb-discard" class="danger">Discard Worktree</button>
+                    <button type="button" id="sb-undo" class="danger" hidden>Undo Update</button>
+                  </div>
+                </div>
               </div>
-              <div class="sb-composer-actions"><span>Runs in an isolated worktree. You decide what reaches the project.</span><button id="sb-start" class="primary">Start mission <span aria-hidden="true">→</span></button></div>
-            </div>
-            <div id="sb-progress" hidden>
-              <div class="sb-live-head"><div><span class="sb-kicker">Active mission</span><h1 id="sb-run-title">Working on your project</h1><p id="sb-run-meta">Codex · subscription</p></div><span id="sb-run-status" class="status-pill active">Starting</span></div>
-              <div id="sb-phase-track" class="sb-phase-track" aria-label="Mission progress"><span data-phase="brief"><i>1</i>Brief</span><span data-phase="build"><i>2</i>Build</span><span data-phase="verify"><i>3</i>Verify</span><span data-phase="review"><i>4</i>Review</span></div>
-              <div id="sb-approval" class="sb-approval-card" hidden><div class="approval-signal" aria-hidden="true">!</div><div><span class="sb-kicker">Your decision</span><strong id="sb-approval-title"></strong><p id="sb-approval-why"></p><div class="run-actions"><button id="sb-approve-once" class="primary">Allow once</button><button id="sb-deny">Don’t allow</button><button id="sb-approve-details">Inspect request</button></div></div></div>
-              <div class="sb-activity-head"><div><span class="sb-kicker">Live activity</span><strong>What Warden is doing</strong></div><button id="sb-technical-toggle">View raw events</button></div>
-              <div id="sb-progress-list" class="sb-activity" aria-live="polite"></div>
-              <pre id="sb-technical" hidden></pre>
-              <div class="run-actions" id="sb-active-actions" hidden><button id="sb-cancel" class="danger quiet-danger">Stop mission</button></div>
-              <div class="sb-review-dock">
-                <textarea id="sb-followup" placeholder="Describe what should change before you apply this work…" hidden></textarea><button id="sb-send-followup" class="primary" hidden>Send revision</button>
-                <div class="run-actions" id="sb-pre-actions"><button id="sb-keep" class="primary">Apply to project</button><button id="sb-ask-changes">Request changes</button><button id="sb-discard" class="danger">Discard worktree</button></div>
-                <div class="run-actions" id="sb-post-actions" hidden><button id="sb-open-project" class="primary">Start another mission</button><button id="sb-undo" class="danger">Undo applied update</button></div>
+
+              <!-- Panel: Terminal Surface -->
+              <div id="panel-terminal" class="context-panel" hidden>
+                <div class="panel-inner">
+                  <div class="terminal-meta-bar">
+                    <span id="mission-term-cwd" class="term-cwd">/home/matt/workspaces/warden</span>
+                    <span id="mission-term-status" class="status-pill quiet">PTY Idle</span>
+                  </div>
+                  <div class="mission-term-view">
+                    <pre id="mission-term-output" class="terminal-output-block">No active terminal commands.</pre>
+                  </div>
+                  <div class="term-history-section">
+                    <span class="section-kicker">COMMAND HISTORY</span>
+                    <ol id="mission-term-history-list" class="term-history-list"></ol>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Panel: Verification Surface -->
+              <div id="panel-verify" class="context-panel" hidden>
+                <div class="panel-inner">
+                  <div class="verify-header">
+                    <span class="section-kicker">VERIFICATION CHECKS</span>
+                    <strong id="verify-summary-title">Checks passing</strong>
+                  </div>
+                  <div id="sb-check-list" class="checks-list"></div>
+                </div>
+              </div>
+
+              <!-- Panel: Proof Surface -->
+              <div id="panel-proof" class="context-panel" hidden>
+                <div class="panel-inner">
+                  <div class="proof-header">
+                    <span class="eyebrow">DURABLE EVIDENCE</span>
+                    <h2>Mission Proof</h2>
+                    <p class="proof-subhead">Aggregated evidence across browser observations, code changes, and test verifications.</p>
+                  </div>
+                  <div id="sb-history-list" class="proof-timeline"></div>
+                  <div class="proof-actions-row">
+                    <button type="button" id="sb-save-proof" class="primary">Save Proof to Brain</button>
+                    <button type="button" id="sb-handoff">Prepare AI Handoff</button>
+                  </div>
+                  <pre id="sb-handoff-output" hidden></pre>
+                </div>
               </div>
             </div>
-          </section>
-          <aside class="sb-result">
-            <div class="sb-result-head"><span class="sb-kicker">Review surface</span><strong>Mission evidence</strong></div>
-            <div class="sb-result-tabs" role="tablist" aria-label="Mission evidence"><button class="active" data-sb-tab="summary">Summary</button><button data-sb-tab="changed">Files</button><button data-sb-tab="checks">Checks</button><button data-sb-tab="history">Proof</button></div>
-            <div id="sb-tab-summary" class="sb-tab-panel"><p id="sb-summary-copy" class="muted">Start a mission to see its outcome, scope, and verification here.</p><div id="sb-summary-stats" class="sb-summary-stats" hidden></div></div>
-            <div id="sb-tab-changed" class="sb-tab-panel" hidden><div id="sb-changed-list" class="sb-file-list"></div><pre id="sb-diff" class="sb-diff" hidden></pre></div>
-            <div id="sb-tab-checks" class="sb-tab-panel" hidden><div id="sb-check-list" class="sb-check-list"></div></div>
-            <div id="sb-tab-history" class="sb-tab-panel" hidden><div id="sb-history-list" class="sb-proof-timeline"></div><div class="sb-proof-actions"><button id="sb-handoff">Prepare AI review handoff</button><button id="sb-save-proof" class="primary">Save proof to Brain</button></div><p id="sb-proof-state" class="muted">Proof has not been saved.</p><pre id="sb-handoff-output" hidden></pre></div>
           </aside>
         </div>
       </div>
-      <div class="build-top"><div class="build-heading"><span class="eyebrow">BUILD WORKSPACE</span><strong>One project, local tools, structured provider runs.</strong></div><div class="execution-modes" role="tablist" aria-label="Build execution mode"><button class="active" data-execution="local" title="A local PTY inside the selected project">Local Terminal</button><button data-execution="codex" title="Codex App Server using the official local login">Codex <span id="auth-tab-codex">checking…</span></button><button data-execution="claude" title="Claude Code using the official local login">Claude <span id="auth-tab-claude">checking…</span></button><button data-execution="gemini" title="Gemini CLI using the official local login">Gemini <span id="auth-tab-gemini">checking…</span></button><button data-execution="grok" title="Grok Build using the official local login">Grok Build <span id="auth-tab-grok">checking…</span></button></div></div>
-      <div id="terminal-workspace"><div class="project-bar"><button id="choose-directory">Choose project…</button><code id="active-directory">No project selected</code><button id="new-terminal">+ Terminal</button></div><div class="terminal-tabs" id="terminal-tabs"></div><div class="terminal-panel"><div id="terminal-container"></div><div id="terminal-empty"><h2>No running terminal</h2><p>Choose a project directory, then create a managed terminal session.</p></div></div><footer class="terminal-footer"><span id="terminal-state">Stopped</span><button id="restart-terminal">Restart</button><button id="clear-display">Clear display</button><button id="show-history">History</button><button id="close-terminal" class="danger">Close terminal</button></footer></div>
-      <div id="agent-workspace" hidden><section class="run-compose"><div class="project-bar"><button id="agent-choose-directory">Choose project…</button><code id="agent-directory">No project selected</code></div><section id="auth-status" class="auth-status"><div><strong id="auth-title">Checking provider…</strong><p id="auth-detail">Authentication stays with the official local client.</p></div><button id="refresh-auth">Refresh</button><div class="billing-source"><label><input type="radio" name="billing-source" value="subscription" checked> Subscription</label><label id="api-source-label"><input type="radio" name="billing-source" value="api_key"> API key fallback</label></div><p class="auth-policy">Warden never reads or stores provider tokens. API billing is never selected automatically.</p></section><label for="run-prompt">BUILD TASK</label><textarea id="run-prompt" placeholder="Describe the repository task…"></textarea><div class="context-controls"><label><input id="attach-context" type="checkbox" checked> Attach repository instructions, skills, git state, and scoped Warden memories</label><button id="preview-context">Preview context</button></div><pre id="context-preview" hidden></pre><div class="run-actions"><button id="start-run" class="primary">Start run</button><button id="resume-run">Resume with prompt</button><button id="cancel-run" class="danger">Cancel</button></div><div id="approval-list"></div><div class="evidence-actions"><button id="generate-handoff">Generate handoff</button><button id="save-proof">Save proof</button></div><pre id="run-detail">Select or start a run.</pre></section><aside class="run-list"><div class="run-list-head"><strong>WARDEN RUNS</strong><button id="refresh-runs">↻</button></div><div id="runs"></div></aside></div>
+    </section>
+
+    <!-- VIEW 4: CONNECTED AIS -->
+    <section id="view-connected-ais" class="product-view" hidden>
+      <div class="connected-ais-container">
+        <header class="view-header">
+          <div>
+            <span class="eyebrow">RESOURCES & MODELS</span>
+            <h1>Connected AIs</h1>
+            <p class="view-subhead">Manage local official CLI logins, AI subscriptions, and sandboxed web browser sessions.</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" id="btn-add-platform-top" class="primary">＋ Add Web AI</button>
+            <button type="button" id="btn-new-profile-top">＋ New Browser Profile</button>
+          </div>
+        </header>
+
+        <div class="connected-ais-grid" id="connected-ais-grid">
+          <!-- Structured CLI Providers -->
+          <article class="provider-card">
+            <div class="provider-card-head">
+              <div class="provider-badge codex">C</div>
+              <div>
+                <strong>OpenAI Codex</strong>
+                <small>Official Local Client</small>
+              </div>
+              <span class="status-pill success">Connected</span>
+            </div>
+            <p class="provider-desc">Local app server with subscription authentication for isolated safe worktrees.</p>
+            <div class="provider-meta">Auth: Subscription (ChatGPT Plus/Pro)</div>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-card-head">
+              <div class="provider-badge gemini">G</div>
+              <div>
+                <strong>Google Gemini</strong>
+                <small>Vertex AI ADC & API</small>
+              </div>
+              <span class="status-pill success">Connected</span>
+            </div>
+            <p class="provider-desc">Gemini Computer Use and multimodal agency with refreshable Application Default Credentials.</p>
+            <div class="provider-meta">Auth: Google Cloud ADC (Personal)</div>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-card-head">
+              <div class="provider-badge claude">C</div>
+              <div>
+                <strong>Anthropic Claude</strong>
+                <small>Claude Code CLI & Web</small>
+              </div>
+              <span class="status-pill success">Connected</span>
+            </div>
+            <p class="provider-desc">Official Claude Code subscription client and sandboxed browser sessions.</p>
+            <div class="provider-meta">Auth: Claude Pro Subscription</div>
+          </article>
+
+          <article class="provider-card">
+            <div class="provider-card-head">
+              <div class="provider-badge grok">X</div>
+              <div>
+                <strong>xAI Grok</strong>
+                <small>Grok Build & Web</small>
+              </div>
+              <span class="status-pill success">Connected</span>
+            </div>
+            <p class="provider-desc">Grok Build structured adapter and sandboxed web chat session.</p>
+            <div class="provider-meta">Auth: xAI Subscription</div>
+          </article>
+        </div>
+
+        <div class="web-platforms-section">
+          <div class="section-title-row">
+            <h2>Sandboxed Web Platforms</h2>
+            <span class="section-subtext">Isolated browser sessions with profile boundary.</span>
+          </div>
+          <div id="connected-platforms-list" class="platforms-list-grid"></div>
+        </div>
+
+        <!-- Embedded Web Host (When an AI Platform is opened) -->
+        <section id="provider-host" hidden>
+          <div class="empty">
+            <span class="eyebrow">WEB AI WORKSPACE</span>
+            <h1>Sandboxed Platform Workspace</h1>
+            <p>Sessions remain isolated within the assigned named Warden browser profile.</p>
+            <button type="button" id="empty-add-platform" class="primary">Add a web platform</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- VIEW 5: ADVANCED -->
+    <section id="view-advanced" class="product-view" hidden>
+      <div class="advanced-container">
+        <header class="view-header">
+          <div>
+            <span class="eyebrow">DEVELOPER TOOLS & DIAGNOSTICS</span>
+            <h1>Advanced Controls</h1>
+            <p class="view-subhead">Direct PTY terminal sessions, raw execution telemetry, worktree safety inspection, and Brain tools.</p>
+          </div>
+          <div class="advanced-tabs-bar" role="tablist">
+            <button type="button" class="adv-tab active" data-adv-tab="terminals">Terminals</button>
+            <button type="button" class="adv-tab" data-adv-tab="build-runner">Direct Build</button>
+            <button type="button" class="adv-tab" data-adv-tab="telemetry">Telemetry</button>
+            <button type="button" class="adv-tab" data-adv-tab="brain">Brain & Memories</button>
+          </div>
+        </header>
+
+        <div id="adv-panel-terminals" class="adv-panel active">
+          <div id="terminal-workspace">
+            <div class="project-bar">
+              <button id="choose-directory">Choose project…</button>
+              <code id="active-directory">No project selected</code>
+              <button id="new-terminal">+ Terminal</button>
+            </div>
+            <div class="terminal-tabs" id="terminal-tabs"></div>
+            <div class="terminal-panel">
+              <div id="terminal-container"></div>
+              <div id="terminal-empty">
+                <h2>No running terminal</h2>
+                <p>Choose a project directory, then create a managed terminal session.</p>
+              </div>
+            </div>
+            <footer class="terminal-footer">
+              <span id="terminal-state">Stopped</span>
+              <button id="restart-terminal">Restart</button>
+              <button id="clear-display">Clear display</button>
+              <button id="show-history">History</button>
+              <button id="close-terminal" class="danger">Close terminal</button>
+            </footer>
+          </div>
+        </div>
+
+        <div id="adv-panel-build-runner" class="adv-panel" hidden>
+          <div id="agent-workspace">
+            <section class="run-compose">
+              <div class="project-bar">
+                <button id="agent-choose-directory">Choose project…</button>
+                <code id="agent-directory">No project selected</code>
+              </div>
+              <section id="auth-status" class="auth-status">
+                <div>
+                  <strong id="auth-title">Checking provider…</strong>
+                  <p id="auth-detail">Authentication stays with the official local client.</p>
+                </div>
+                <button id="refresh-auth">Refresh</button>
+                <div class="billing-source">
+                  <label><input type="radio" name="billing-source" value="subscription" checked> Subscription</label>
+                  <label id="api-source-label"><input type="radio" name="billing-source" value="api_key"> API key fallback</label>
+                </div>
+                <p class="auth-policy">Warden never reads or stores provider tokens. API billing is never selected automatically.</p>
+              </section>
+              <label for="run-prompt">DIRECT TASK PROMPT</label>
+              <textarea id="run-prompt" placeholder="Describe the repository task…"></textarea>
+              <div class="context-controls">
+                <label><input id="attach-context" type="checkbox" checked> Attach repository instructions, skills, git state, and scoped Warden memories</label>
+                <button id="preview-context">Preview context</button>
+              </div>
+              <pre id="context-preview" hidden></pre>
+              <div class="run-actions">
+                <button id="start-run" class="primary">Start run</button>
+                <button id="resume-run">Resume with prompt</button>
+                <button id="cancel-run" class="danger">Cancel</button>
+              </div>
+              <div id="approval-list"></div>
+              <div class="evidence-actions">
+                <button id="generate-handoff">Generate handoff</button>
+                <button id="save-proof">Save proof</button>
+              </div>
+              <pre id="run-detail">Select or start a run.</pre>
+            </section>
+            <aside class="run-list">
+              <div class="run-list-head">
+                <strong>WARDEN RUNS</strong>
+                <button id="refresh-runs">↻</button>
+              </div>
+              <div id="runs"></div>
+            </aside>
+          </div>
+        </div>
+
+        <div id="adv-panel-telemetry" class="adv-panel" hidden>
+          <div class="telemetry-box">
+            <span class="section-kicker">RAW EVENT & SSE TELEMETRY</span>
+            <pre id="sb-technical"></pre>
+          </div>
+        </div>
+
+        <div id="adv-panel-brain" class="adv-panel" hidden>
+          <div class="brain-box">
+            <span class="section-kicker">BRAIN MEMORIES & SCOPE</span>
+            <p>Durable Brain memory and Captain plans backing active projects.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hidden compatibility container for Simple Build elements -->
+    <div id="build-workspace" hidden>
+      <div id="simple-build" hidden>
+        <header class="sb-commandbar" hidden>
+          <div class="sb-project-identity">
+            <span class="sb-project-mark" aria-hidden="true">⌘</span>
+            <div>
+              <span class="sb-kicker">Project workspace</span>
+              <strong id="sb-project-name">No project selected</strong>
+              <span id="sb-project-meta">Open a repository to begin</span>
+            </div>
+          </div>
+          <div class="sb-command-actions">
+            <span id="sb-safe-badge" class="status-pill">No safe workspace</span>
+            <button id="sb-open-terminal">Open terminal</button>
+            <button id="sb-new-task" class="primary">New mission</button>
+          </div>
+        </header>
+        <div class="sb-workbench" hidden>
+          <aside class="sb-missions">
+            <div class="sb-rail-head">
+              <div><span class="sb-kicker">Mission control</span><strong>Recent work</strong></div>
+              <span id="sb-run-count" class="count-badge">0</span>
+            </div>
+            <div id="sb-project-list" hidden></div>
+            <div id="sb-run-list" class="sb-run-list"></div>
+            <div class="sb-rail-actions">
+              <button id="sb-create-playground-sidebar">＋ Create sample project</button>
+              <button id="sb-choose-directory">Open another folder</button>
+            </div>
+          </aside>
+          <section class="sb-stage">
+            <div id="sb-error" class="sb-error" role="alert" aria-live="assertive" hidden></div>
+            <div id="sb-no-project" class="sb-empty-state" hidden>
+              <div class="run-actions">
+                <button id="sb-create-playground" class="primary">Create sample project</button>
+                <button id="sb-empty-choose">Open a folder</button>
+              </div>
+            </div>
+            <div id="sb-readonly" class="sb-empty-state" hidden>
+              <div class="run-actions">
+                <button id="sb-open-readonly" class="primary">Inspect in Advanced mode</button>
+                <button id="sb-choose-another">Choose another folder</button>
+              </div>
+            </div>
+            <div id="sb-onboarding" class="sb-empty-state" hidden>
+              <h2 id="sb-onboarding-headline">Connect an AI to start building</h2>
+              <p id="sb-onboarding-body"></p>
+              <button id="sb-connect-codex" class="primary">Check Codex sign-in</button>
+            </div>
+            <div id="sb-composer" hidden>
+              <span id="sb-provider-line"></span>
+              <textarea id="sb-task"></textarea>
+              <textarea id="sb-acceptance"></textarea>
+              <button id="sb-start">Start mission</button>
+              <div id="sb-mission-templates"></div>
+            </div>
+            <div id="sb-progress" hidden>
+              <h1 id="sb-run-title"></h1>
+              <p id="sb-run-meta"></p>
+              <span id="sb-run-status"></span>
+              <div id="sb-approval" hidden>
+                <strong id="sb-approval-title"></strong>
+                <p id="sb-approval-why"></p>
+                <button id="sb-approve-once">Allow once</button>
+                <button id="sb-deny">Don’t allow</button>
+                <button id="sb-approve-details">Inspect request</button>
+              </div>
+              <div id="sb-progress-list"></div>
+              <button id="sb-technical-toggle">View raw events</button>
+              <div id="sb-active-actions"><button id="sb-cancel">Stop mission</button></div>
+              <textarea id="sb-followup" hidden></textarea>
+              <button id="sb-send-followup" hidden></button>
+              <div id="sb-pre-actions"><button id="sb-ask-changes"></button></div>
+              <div id="sb-post-actions"><button id="sb-open-project"></button></div>
+            </div>
+          </section>
+          <aside class="sb-result">
+            <div class="sb-result-tabs">
+              <button data-sb-tab="summary">Summary</button>
+              <button data-sb-tab="changed">Files</button>
+              <button data-sb-tab="checks">Checks</button>
+              <button data-sb-tab="history">Proof</button>
+            </div>
+            <p id="sb-summary-copy"></p>
+            <div id="sb-summary-stats"></div>
+            <p id="sb-proof-state"></p>
+          </aside>
+        </div>
+      </div>
+      <div class="build-top" hidden>
+        <div class="execution-modes">
+          <button data-execution="local">Local</button>
+          <button data-execution="codex">Codex <span id="auth-tab-codex"></span></button>
+          <button data-execution="claude">Claude <span id="auth-tab-claude"></span></button>
+          <button data-execution="gemini">Gemini <span id="auth-tab-gemini"></span></button>
+          <button data-execution="grok">Grok <span id="auth-tab-grok"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden embedded server workspace container for seamless cold-start supervisor -->
+    <section id="team-chat-workspace" style="display:none;" hidden>
+      <div id="mission-server-state" class="mission-server-state">
+        <div class="mission-server-spinner"><span class="brand-mark">W</span></div>
+        <h2 id="mission-server-title">Starting Warden…</h2>
+        <p id="mission-server-detail">Connecting to local Warden control plane (:6969)…</p>
+        <div id="mission-server-actions" hidden>
+          <button id="mission-server-retry" class="primary">Retry Connection</button>
+          <button id="mission-server-details-btn">View Details</button>
+        </div>
+        <pre id="mission-server-error" hidden></pre>
+      </div>
+      <iframe id="team-chat-frame" hidden></iframe>
     </section>
   </main>
-  <dialog id="history-dialog"><div class="dialog-head"><strong>Command history</strong><button data-close-dialog>×</button></div><ol id="history-list"></ol><button id="clear-history" class="danger">Clear history</button></dialog>
-  <dialog id="onboarding-dialog" class="welcome-dialog"><div class="welcome-mark"><img src="assets/icon.png" alt=""><span>WARDEN AI DESK 0.5</span></div><div class="dialog-head"><div><span class="eyebrow">FIRST RUN WIZARD</span><h2 id="onboarding-step-title">Welcome to Warden AI Desk</h2></div></div><p id="onboarding-step-copy" class="welcome-copy">Warden is your personal AI workspace that links sandboxed web platforms with safe, isolated build missions. Let's set up your first success.</p><div id="onboarding-wizard-content" class="onboarding-grid"><article><span>01</span><strong>Chat accounts</strong><p>Sign in to Claude, ChatGPT, Gemini, or Grok in Chat. Warden browser profiles keep your web sessions isolated.</p></article><article><span>02</span><strong>Build accounts</strong><p>Connect official local clients (Codex, Claude Code, Gemini CLI, Grok) with your existing subscription.</p></article><article><span>03</span><strong>Safe missions</strong><p>Warden runs agent missions in an isolated worktree. You inspect changes, checks, and proof before applying.</p></article></div><div class="welcome-note"><strong>Private & Safe by default</strong><span>No copied tokens, imported browser cookies, or unvetted git commits.</span></div><div class="run-actions"><button id="onboarding-create-sample" class="primary">Create sample project & prepare mission</button><button id="onboarding-project" class="secondary">Open existing folder</button><button id="onboarding-chat">Explore Chat</button></div></dialog>
 
-  <dialog id="provider-setup-dialog"><div class="dialog-head"><div><span class="eyebrow">SETUP CENTER</span><h2>Provider Setup & Capabilities</h2></div><button id="provider-setup-close" aria-label="Close Provider Setup">×</button></div><p class="about-positioning">Overview of your web chat platforms and official local CLI build providers.</p><div id="provider-setup-matrix" class="provider-matrix"></div><div class="boundary-card"><strong>Authentication Boundary</strong><p>Warden checks official local client binaries and subscription status locally. Tokens and keys are never read, stored, or transmitted by Warden.</p></div><button id="provider-setup-done" class="primary">Done</button></dialog>
+  <!-- DIALOGS -->
+  <dialog id="onboarding-dialog" class="welcome-dialog">
+    <div class="welcome-mark"><img src="assets/icon.png" alt=""><span>WARDEN AI DESK 0.6</span></div>
+    <div class="dialog-head">
+      <div>
+        <span class="eyebrow">FIRST RUN WIZARD</span>
+        <h2 id="onboarding-step-title">Welcome to Warden AI Desk</h2>
+      </div>
+    </div>
+    <p id="onboarding-step-copy" class="welcome-copy">Warden is your personal AI workspace that links sandboxed web platforms with safe, isolated build missions. Let's set up your first success.</p>
+    <div id="onboarding-wizard-content" class="onboarding-grid">
+      <article><span>01</span><strong>Chat accounts</strong><p>Sign in to Claude, ChatGPT, Gemini, or Grok in Chat. Warden browser profiles keep your web sessions isolated.</p></article>
+      <article><span>02</span><strong>Build accounts</strong><p>Connect official local clients (Codex, Claude Code, Gemini CLI, Grok) with your existing subscription.</p></article>
+      <article><span>03</span><strong>Safe missions</strong><p>Warden runs agent missions in an isolated worktree. You inspect changes, checks, and proof before applying.</p></article>
+    </div>
+    <div class="welcome-note"><strong>Private & Safe by default</strong><span>No copied tokens, imported browser cookies, or unvetted git commits.</span></div>
+    <div class="run-actions">
+      <button id="onboarding-create-sample" class="primary">Create sample project & prepare mission</button>
+      <button id="onboarding-project" class="secondary">Open existing folder</button>
+      <button id="onboarding-chat">Explore Connected AIs</button>
+    </div>
+  </dialog>
 
-  <dialog id="chat-to-build-dialog"><div class="dialog-head"><div><span class="eyebrow">CHAT TO BUILD HANDOFF</span><h2>Transfer Goal to Build Mission</h2></div><button id="chat-handoff-close" aria-label="Close Handoff">×</button></div><p class="about-positioning">Transfer a goal or task discussed in web chat into a structured, isolated Build mission.</p><label for="chat-handoff-prompt">MISSION BRIEF / GOAL</label><textarea id="chat-handoff-prompt" rows="4" placeholder="Paste or summarize what you want Warden to build from your chat session..."></textarea><div class="context-controls"><span>Attached Context Preview:</span><button id="chat-handoff-preview-btn">Preview Context Pack</button></div><pre id="chat-handoff-preview" hidden></pre><div class="run-actions"><button id="chat-handoff-start" class="primary">Create Build Mission <span aria-hidden="true">→</span></button><button id="chat-handoff-cancel">Cancel</button></div></dialog>
+  <dialog id="provider-setup-dialog">
+    <div class="dialog-head">
+      <div>
+        <span class="eyebrow">SETUP CENTER</span>
+        <h2>Provider Setup & Capabilities</h2>
+      </div>
+      <button id="provider-setup-close" aria-label="Close Provider Setup">×</button>
+    </div>
+    <p class="about-positioning">Overview of your web chat platforms and official local CLI build providers.</p>
+    <div id="provider-setup-matrix" class="provider-matrix"></div>
+    <div class="boundary-card">
+      <strong>Authentication Boundary</strong>
+      <p>Warden checks official local client binaries and subscription status locally. Tokens and keys are never read, stored, or transmitted by Warden.</p>
+    </div>
+    <button id="provider-setup-done" class="primary">Done</button>
+  </dialog>
 
-  <dialog id="about-dialog"><div class="dialog-head"><div><span class="eyebrow">ABOUT</span><h2>Warden AI Desk</h2></div><button id="about-close" aria-label="Close About">×</button></div><p class="about-positioning">A subscription-first Linux workstation for persistent AI web workspaces, local project terminals, and durable structured agent runs.</p><dl class="about-meta"><div><dt>Version</dt><dd id="about-version">—</dd></div><div><dt>Runtime</dt><dd id="about-runtime">—</dd></div><div><dt>Author</dt><dd>Matt McBride</dd></div><div><dt>License</dt><dd>Apache-2.0</dd></div></dl><div class="boundary-card"><strong>Capability boundary</strong><p>Web Platforms are sandboxed websites. Structured Build providers are separate official local clients. Adding a URL never grants Warden execution access.</p></div><button id="about-done" class="primary">Done</button></dialog>
-  <dialog id="api-warning-dialog"><div class="dialog-head"><strong>API billing warning</strong><button id="cancel-api-run">×</button></div><p id="api-warning-copy">This run will use an API key and may incur usage charges.</p><div class="run-actions"><button id="confirm-api-run" class="danger">I approve API billing for this run</button><button id="cancel-api-run-secondary">Cancel</button></div></dialog>
-  <dialog id="platform-dialog"><form method="dialog" id="platform-form"><div class="dialog-head"><strong id="platform-dialog-title">Add AI platform</strong><button value="cancel" aria-label="Close">×</button></div><p class="security-copy">Web platforms are untrusted sandboxed websites. Adding one never grants structured execution or Warden access.</p><label>STARTER PRESET<select id="platform-preset"><option value="">Custom platform</option></select></label><label>DISPLAY NAME<input id="platform-name" maxlength="80" required></label><label>STARTING URL<input id="platform-url" type="url" placeholder="https://example.com/" required></label><label>ICON<input id="platform-icon" placeholder="Two letters or https://…/favicon.png"></label><div class="form-grid"><label>CATEGORY<select id="platform-category"><option>Chat</option><option>Build</option><option>Research</option><option>Other</option></select></label><label>BROWSER PROFILE<select id="platform-profile"></select><button type="button" id="new-profile">＋ New named profile</button></label></div><label>TRUSTED FIRST-PARTY DOMAINS<textarea id="platform-domains" rows="2" placeholder="example.com"></textarea></label><label>TRUSTED AUTH DOMAINS<textarea id="platform-auth-domains" rows="2" placeholder="accounts.google.com"></textarea></label><div class="form-grid checks"><label><input id="platform-enabled" type="checkbox" checked> Enabled</label><label><input id="platform-pinned" type="checkbox"> Pinned</label><label><input id="platform-main" type="checkbox" checked> Main view</label><label><input id="platform-split" type="checkbox" checked> Split view</label></div><div class="run-actions"><button id="save-platform" value="default" class="primary">Save platform</button><button value="cancel">Cancel</button></div></form></dialog>
-  <dialog id="split-dialog"><div class="dialog-head"><strong>Open split view</strong><button id="split-cancel-x">×</button></div><label>SECOND PLATFORM<select id="split-platform"></select></label><div class="run-actions"><button id="confirm-split" class="primary">Open split</button><button id="split-cancel">Cancel</button></div></dialog>
+  <dialog id="chat-to-build-dialog">
+    <div class="dialog-head">
+      <div>
+        <span class="eyebrow">CHAT TO MISSION HANDOFF</span>
+        <h2>Transfer Goal to Mission</h2>
+      </div>
+      <button id="chat-handoff-close" aria-label="Close Handoff">×</button>
+    </div>
+    <p class="about-positioning">Transfer a goal or task discussed in chat into a structured, proven Warden mission.</p>
+    <label for="chat-handoff-prompt">MISSION BRIEF / GOAL</label>
+    <textarea id="chat-handoff-prompt" rows="4" placeholder="Paste or summarize what you want Warden to accomplish..."></textarea>
+    <div class="context-controls">
+      <span>Attached Context Preview:</span>
+      <button id="chat-handoff-preview-btn">Preview Context Pack</button>
+    </div>
+    <pre id="chat-handoff-preview" hidden></pre>
+    <div class="run-actions">
+      <button id="chat-handoff-start" class="primary">Create Mission <span aria-hidden="true">→</span></button>
+      <button id="chat-handoff-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <dialog id="about-dialog">
+    <div class="dialog-head">
+      <div>
+        <span class="eyebrow">ABOUT</span>
+        <h2>Warden AI Desk</h2>
+      </div>
+      <button id="about-close" aria-label="Close About">×</button>
+    </div>
+    <p class="about-positioning">A subscription-first Linux workstation for unified AI missions, local project terminals, and durable structured agent runs.</p>
+    <dl class="about-meta">
+      <div><dt>Version</dt><dd id="about-version">0.6.0-rc.1</dd></div>
+      <div><dt>Runtime</dt><dd id="about-runtime">—</dd></div>
+      <div><dt>Author</dt><dd>Matt McBride</dd></div>
+      <div><dt>License</dt><dd>Apache-2.0</dd></div>
+    </dl>
+    <div class="boundary-card">
+      <strong>Capability boundary</strong>
+      <p>Web Platforms are sandboxed websites. Structured Build providers are separate official local clients. Adding a URL never grants Warden execution access.</p>
+    </div>
+    <button id="about-done" class="primary">Done</button>
+  </dialog>
+
+  <dialog id="api-warning-dialog">
+    <div class="dialog-head"><strong>API billing warning</strong><button id="cancel-api-run">×</button></div>
+    <p id="api-warning-copy">This run will use an API key and may incur usage charges.</p>
+    <div class="run-actions">
+      <button id="confirm-api-run" class="danger">I approve API billing for this run</button>
+      <button id="cancel-api-run-secondary">Cancel</button>
+    </div>
+  </dialog>
+
+  <dialog id="platform-dialog">
+    <form method="dialog" id="platform-form">
+      <div class="dialog-head">
+        <strong id="platform-dialog-title">Add AI platform</strong>
+        <button value="cancel" aria-label="Close">×</button>
+      </div>
+      <p class="security-copy">Web platforms are untrusted sandboxed websites. Adding one never grants structured execution or Warden access.</p>
+      <label>STARTER PRESET<select id="platform-preset"><option value="">Custom platform</option></select></label>
+      <label>DISPLAY NAME<input id="platform-name" maxlength="80" required></label>
+      <label>STARTING URL<input id="platform-url" type="url" placeholder="https://example.com/" required></label>
+      <label>ICON<input id="platform-icon" placeholder="Two letters or https://…/favicon.png"></label>
+      <div class="form-grid">
+        <label>CATEGORY<select id="platform-category"><option>Chat</option><option>Build</option><option>Research</option><option>Other</option></select></label>
+        <label>BROWSER PROFILE<select id="platform-profile"></select><button type="button" id="new-profile">＋ New named profile</button></label>
+      </div>
+      <label>TRUSTED FIRST-PARTY DOMAINS<textarea id="platform-domains" rows="2" placeholder="example.com"></textarea></label>
+      <label>TRUSTED AUTH DOMAINS<textarea id="platform-auth-domains" rows="2" placeholder="accounts.google.com"></textarea></label>
+      <div class="form-grid checks">
+        <label><input id="platform-enabled" type="checkbox" checked> Enabled</label>
+        <label><input id="platform-pinned" type="checkbox"> Pinned</label>
+        <label><input id="platform-main" type="checkbox" checked> Main view</label>
+        <label><input id="platform-split" type="checkbox" checked> Split view</label>
+      </div>
+      <div class="run-actions">
+        <button id="save-platform" value="default" class="primary">Save platform</button>
+        <button value="cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="split-dialog">
+    <div class="dialog-head"><strong>Open split view</strong><button id="split-cancel-x">×</button></div>
+    <label>SECOND PLATFORM<select id="split-platform"></select></label>
+    <div class="run-actions">
+      <button id="confirm-split" class="primary">Open split</button>
+      <button id="split-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <dialog id="history-dialog">
+    <div class="dialog-head"><strong>Command history</strong><button data-close-dialog>×</button></div>
+    <ol id="history-list"></ol>
+    <button id="clear-history" class="danger">Clear history</button>
+  </dialog>
+
   <script src="renderer.js"></script>
-</body></html>
+</body>
+</html>
