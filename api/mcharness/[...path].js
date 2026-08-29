@@ -76,11 +76,13 @@ module.exports = async function handler(req, res) {
   const cloudRunUrl = text(process.env.GCP_CLOUD_RUN_URL).replace(/\/$/, "");
   if (!cloudRunUrl) return res.status(503).json({ ok: false, error: "GCP_CLOUD_RUN_URL is not configured" });
 
-  const segments = Array.isArray(req.query.path) ? req.query.path : [req.query.path].filter(Boolean);
+  const rawPath = req.query.path ?? req.query["...path"];
+  const pathValues = Array.isArray(rawPath) ? rawPath : [rawPath];
+  const segments = pathValues.flatMap((value) => text(value).split("/").filter(Boolean));
   const target = `${cloudRunUrl}/api/mcharness/${segments.map(encodeURIComponent).join("/")}`;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(req.query)) {
-    if (key === "path") continue;
+    if (key === "path" || key === "...path") continue;
     for (const item of Array.isArray(value) ? value : [value]) query.append(key, String(item));
   }
 
