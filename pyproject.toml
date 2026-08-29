@@ -28,7 +28,7 @@ warden = "warden.cli:main"
 [project.optional-dependencies]
 semantic = ["sqlite-vec"]
 pdf = ["pypdf"]
-cloud = ["psycopg[binary]>=3.2", "google-cloud-storage>=2.18"]
+cloud = ["psycopg[binary]>=3.2", "google-cloud-storage>=2.18", "google-cloud-pubsub>=2.27"]
 
 [tool.setuptools]
 include-package-data = true

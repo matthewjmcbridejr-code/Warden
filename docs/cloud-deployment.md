@@ -85,6 +85,21 @@ database or trust authority. Its runner flags remain disabled until worker
 identity, allowlists, isolation, queue leases, and proof-gate behavior have
 live evidence.
 
+## Durable mission queue
+
+Cloud Run publishes bounded Captain-step envelopes to the `warden-missions`
+Pub/Sub topic when the local runner is unavailable. The e2-medium consumes the
+`warden-worker-missions` subscription, records a Cloud SQL mission receipt, and
+uses a Cloud SQL lease keyed by mission ID before acknowledging the message.
+`WARDEN_WORKER_EXECUTION_ENABLED` remains false by default; receiving a queued
+mission is not permission to interpret arbitrary message text as a shell
+command. The dead-letter topic is the recovery path for repeated delivery
+failures.
+
+The Cloud Run runtime service account needs only `roles/pubsub.publisher` on
+the topic, and the worker identity needs only `roles/pubsub.subscriber` on the
+subscription. No service-account key is needed.
+
 ## Vercel console authentication gate
 
 The server-side bridge requires the encrypted Vercel production variable

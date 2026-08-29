@@ -2027,6 +2027,8 @@ def get_mcharness_health():
     # _lane_entries(), which shell out to git and probe CLI executables per
     # item and can push this endpoint past client-side timeouts (e.g. the
     # browser extension's 2s abort).
+    from .cloud_queue import queue_status
+
     return {
         "ok": True,
         "service": "mcharness-control-plane",
@@ -2040,6 +2042,7 @@ def get_mcharness_health():
         "available_lanes_count": len(AGENT_LANES),
         "repo_count": len(SAFE_REPO_PATHS),
         "manual_mode": True,
+        "queue": queue_status(),
     }
 
 
@@ -2494,6 +2497,25 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     if not _codex_runner_ready():
         import uuid
         run_id = "blocked-" + str(uuid.uuid4())[:8]
+        queue_result = None
+        try:
+            from .cloud_queue import enqueue_mission
+
+            queue_result = enqueue_mission(
+                mission_id=f"{plan_id}:{step_id}:{run_id}",
+                kind="captain_step",
+                body={
+                    "plan_id": plan_id,
+                    "step_id": step_id,
+                    "run_id": run_id,
+                    "repo_id": repo_id,
+                    "lane_id": lane_id,
+                    "prompt": prompt,
+                },
+                idempotency_key=f"captain-step:{plan_id}:{step_id}:{run_id}",
+            )
+        except Exception:
+            queue_result = None
         create_run_record(
             MCTABLE_ROOT,
             run_id=run_id,
@@ -2503,7 +2525,7 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             repo_id=repo_id,
             branch=None,
             prompt=prompt,
-            status="blocked",
+            status="queued" if queue_result is not None else "blocked",
             plan_id=plan_id,
             created_by="captain_dispatch",
             service_mode="public",
@@ -2525,7 +2547,9 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             "service": "mcharness-control-plane",
             "run_id": run_id,
             "memory_id": mem_id,
-            "message": "Runner unavailable — blocked attempt saved to Memory",
+            "queued": queue_result is not None,
+            "queue": queue_result,
+            "message": "Mission queued for the cloud worker" if queue_result is not None else "Runner unavailable — blocked attempt saved to Memory",
             "plan": _captain_plan_response(plan),
             "dispatch": {},
         }

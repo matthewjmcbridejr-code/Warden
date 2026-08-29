@@ -82,6 +82,27 @@ def create_app() -> FastAPI:
         if task is not None:
             task.cancel()
 
+    @app.on_event("startup")
+    def start_cloud_mission_consumer():
+        # The e2-medium opts in explicitly. Cloud Run and the MCP edge do not
+        # subscribe, so a deployment cannot accidentally create duplicate
+        # workers. Execution remains separately gated by the worker env.
+        from .cloud_queue import CloudQueueUnavailable, MissionConsumer, consumer_enabled
+
+        if not consumer_enabled():
+            return
+        try:
+            app.state.cloud_mission_consumer = MissionConsumer().start()
+        except CloudQueueUnavailable as exc:
+            app.state.cloud_mission_consumer_error = str(exc)
+            print(f"Cloud mission consumer unavailable: {exc}")
+
+    @app.on_event("shutdown")
+    def stop_cloud_mission_consumer():
+        consumer = getattr(app.state, "cloud_mission_consumer", None)
+        if consumer is not None:
+            consumer.stop()
+
     # Marius Core Integration
     try:
         from src.marius.api import router as marius_router

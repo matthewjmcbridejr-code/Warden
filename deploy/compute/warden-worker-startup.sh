@@ -42,6 +42,12 @@ Environment=MCHARNESS_DATA_ROOT=/var/lib/warden
 Environment=MCHARNESS_PUBLIC_WRITE_ENABLED=false
 Environment=MCHARNESS_TMUX_RUNNER_ENABLED=false
 Environment=MCHARNESS_CODEX_RUNNER_ENABLED=false
+Environment=WARDEN_QUEUE_BACKEND=pubsub
+Environment=WARDEN_MISSIONS_TOPIC=projects/booming-key-500220-d9/topics/warden-missions
+Environment=WARDEN_MISSIONS_SUBSCRIPTION=projects/booming-key-500220-d9/subscriptions/warden-worker-missions
+Environment=WARDEN_QUEUE_CONSUMER_ENABLED=true
+Environment=WARDEN_WORKER_EXECUTION_ENABLED=false
+Environment=WARDEN_WORKER_ID=warden-worker
 ExecStart=/opt/warden/.venv/bin/python -m uvicorn src.server.api:app --host 127.0.0.1 --port 8125 --log-level warning
 Restart=on-failure
 RestartSec=5
