@@ -184,6 +184,10 @@ def persist_plan(
         "dispatch_count": max(0, int(plan_data.get("dispatch_count") or 0)),
         "scope_paths": [str(p).strip() for p in (plan_data.get("scope_paths") or []) if str(p).strip()],
         "blocker": plan_data.get("blocker"),
+        # Execution location is a property of the shared Mission contract. A
+        # cloud operation is an allowlisted capability name, never a command.
+        "execution_target": str(plan_data.get("execution_target") or "auto"),
+        "cloud_operation": plan_data.get("cloud_operation"),
     }
     if not record["decision_log"]:
         append_decision_log(record, action="plan_created", detail="Captain plan persisted.", step_id=current_step_id)
@@ -517,6 +521,8 @@ def sanitize_plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "dispatch_count": int(plan.get("dispatch_count") or 0),
         "scope_paths": list(plan.get("scope_paths") or []),
         "blocker": plan.get("blocker"),
+        "execution_target": plan.get("execution_target", "auto"),
+        "cloud_operation": plan.get("cloud_operation"),
         "step_count": len(steps),
         "steps": [
             {
