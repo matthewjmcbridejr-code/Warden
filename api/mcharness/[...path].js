@@ -13,6 +13,19 @@
 
 const text = (value) => String(value || "").trim();
 
+async function authenticateConsoleRequest(req) {
+  const { currentUser, oauthConfigured } = require("../_vercel-auth");
+  if (oauthConfigured()) {
+    const user = await currentUser(req);
+    if (user && !user.denied) return { user };
+    return { error: "Vercel sign-in required", status: 401 };
+  }
+  const consoleToken = text(process.env.WARDEN_CONSOLE_TOKEN);
+  const presentedToken = text(req.headers["x-warden-console-token"]);
+  if (consoleToken && presentedToken === consoleToken) return { user: null, breakGlass: true };
+  return { error: "Warden console authentication required", status: 401 };
+}
+
 async function vercelSubjectToken() {
   // Vercel's helper handles runtime token retrieval in deployments where the
   // system variable is not directly materialized in process.env.
@@ -73,11 +86,14 @@ async function googleAccessToken() {
 }
 
 module.exports = async function handler(req, res) {
-  const consoleToken = text(process.env.WARDEN_CONSOLE_TOKEN);
-  const presentedToken = text(req.headers["x-warden-console-token"]);
-  if (!consoleToken || presentedToken !== consoleToken) {
-    return res.status(401).json({ ok: false, error: "Warden console authentication required" });
+  let auth;
+  try {
+    auth = await authenticateConsoleRequest(req);
+  } catch (error) {
+    console.error(`Warden console authentication failed: ${String(error.message || error).slice(0, 300)}`);
+    return res.status(503).json({ ok: false, error: "Warden console authentication unavailable" });
   }
+  if (auth.error) return res.status(auth.status).json({ ok: false, error: auth.error });
   const cloudRunUrl = text(process.env.GCP_CLOUD_RUN_URL).replace(/\/$/, "");
   if (!cloudRunUrl) return res.status(503).json({ ok: false, error: "GCP_CLOUD_RUN_URL is not configured" });
 

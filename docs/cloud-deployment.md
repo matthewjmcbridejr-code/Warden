@@ -104,14 +104,18 @@ subscription. No service-account key is needed.
 
 ## Vercel console authentication gate
 
-The server-side bridge requires the encrypted Vercel production variable
-`WARDEN_CONSOLE_TOKEN` and the `X-Warden-Console-Token` header. Anonymous
-requests return `401`; the token is not bundled into the static UI. This is a
-temporary fail-closed gate for operator proofs, not a substitute for end-user
-identity. Before general use, register a Sign in with Vercel OAuth integration
-or enable approved Vercel deployment protection, then replace the temporary
-header gate with verified user sessions. Do not put the token in frontend
-JavaScript, GitHub, or a URL.
+The bridge supports Sign in with Vercel as the primary production identity
+boundary. Register an OAuth app, configure its callback as
+`https://<vercel-domain>/api/auth/callback`, set the encrypted
+`VERCEL_CLIENT_ID`, optional `VERCEL_CLIENT_SECRET`,
+`VERCEL_AUTH_REDIRECT_URI`, and mandatory
+`WARDEN_ALLOWED_VERCEL_EMAILS` variables, then the bridge validates the
+server-side Vercel session before exchanging its own WIF identity for Cloud
+Run. The access token is HttpOnly and never bundled into the static UI.
+
+`WARDEN_CONSOLE_TOKEN` plus `X-Warden-Console-Token` remains only as a
+temporary break-glass path while OAuth is being registered. Remove it after
+the authenticated browser proof. Anonymous requests remain fail-closed.
 
 ## One-time GCP setup
 
