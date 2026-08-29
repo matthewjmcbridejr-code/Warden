@@ -780,6 +780,11 @@ def _run_history_read_enabled() -> bool:
 
 
 def _require_private_memory_access(request: Request = None) -> None:
+    # Cloud Run is already protected by authenticated IAM and the memory
+    # adapter is cloud-primary. Brain reads/writes must not depend on worker
+    # execution flags; those flags govern shell/agent lanes only.
+    if is_cloud_primary():
+        return
     if _codex_runner_ready():
         return
     if _env_flag("MCHARNESS_LOCAL_DEV", "WARDEN_LOCAL_DESK", default="false"):
