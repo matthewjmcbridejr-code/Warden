@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://warden-api-REPLACE_ME-uc.a.run.app/api/:path*"
+    },
+    {
+      "source": "/",
+      "destination": "/web/warden/app.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/web/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    }
+  ]
+}

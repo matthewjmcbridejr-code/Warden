@@ -1,0 +1,30 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Dockerfile.cloudrun", "-t", "${_IMAGE}", "."]
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_IMAGE}"]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_IMAGE}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --min-instances=1
+      - --max-instances=3
+      - --memory=1Gi
+      - --cpu=1
+      - --timeout=300
+      - --set-env-vars=MCHARNESS_DATA_ROOT=/tmp/warden-data,MCHARNESS_PUBLIC_WRITE_ENABLED=false,WARDEN_TMUX_RUNNER_ENABLED=false,WARDEN_CODEX_RUNNER_ENABLED=false,WARDEN_GOOGLE_BRAIN_ENABLED=true,WARDEN_GOOGLE_PROJECT_ID=${PROJECT_ID}
+images:
+  - ${_IMAGE}
+substitutions:
+  _SERVICE: warden-api
+  _REGION: us-central1
+  _IMAGE: us-central1-docker.pkg.dev/$PROJECT_ID/warden/warden-api:$BUILD_ID
+options:
+  logging: CLOUD_LOGGING_ONLY
