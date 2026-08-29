@@ -14,11 +14,15 @@ id -u warden >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/
 mkdir -p "${APP_DIR}" "${DATA_DIR}"
 chown -R warden:warden "${APP_DIR}" "${DATA_DIR}"
 
+git_warden() {
+  runuser -u warden -- git "$@"
+}
+
 if [ ! -d "${APP_DIR}/.git" ]; then
-  git clone --branch "${REPO_BRANCH}" --single-branch "${REPO_URL}" "${APP_DIR}"
+  git_warden clone --branch "${REPO_BRANCH}" --single-branch "${REPO_URL}" "${APP_DIR}"
 else
-  git -C "${APP_DIR}" fetch origin "${REPO_BRANCH}"
-  git -C "${APP_DIR}" merge --ff-only "origin/${REPO_BRANCH}"
+  git_warden -C "${APP_DIR}" fetch origin "${REPO_BRANCH}"
+  git_warden -C "${APP_DIR}" merge --ff-only "origin/${REPO_BRANCH}"
 fi
 
 python3 -m venv "${APP_DIR}/.venv"
