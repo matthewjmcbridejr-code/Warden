@@ -13,8 +13,19 @@
 
 const text = (value) => String(value || "").trim();
 
+async function vercelSubjectToken() {
+  // Vercel's helper handles runtime token retrieval in deployments where the
+  // system variable is not directly materialized in process.env.
+  try {
+    const { getVercelOidcToken } = await import("@vercel/oidc");
+    return text(await getVercelOidcToken());
+  } catch (_) {
+    return text(process.env.VERCEL_OIDC_TOKEN);
+  }
+}
+
 async function googleAccessToken() {
-  const subjectToken = text(process.env.VERCEL_OIDC_TOKEN);
+  const subjectToken = await vercelSubjectToken();
   const provider = text(process.env.GCP_WORKLOAD_IDENTITY_PROVIDER);
   const serviceAccount = text(process.env.GCP_SERVICE_ACCOUNT);
   if (!subjectToken || !provider || !serviceAccount) {
