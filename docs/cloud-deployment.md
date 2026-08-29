@@ -91,10 +91,12 @@ Cloud Run publishes bounded Captain-step envelopes to the `warden-missions`
 Pub/Sub topic when the local runner is unavailable. The e2-medium consumes the
 `warden-worker-missions` subscription, records a Cloud SQL mission receipt, and
 uses a Cloud SQL lease keyed by mission ID before acknowledging the message.
-`WARDEN_WORKER_EXECUTION_ENABLED` remains false by default; receiving a queued
-mission is not permission to interpret arbitrary message text as a shell
-command. The dead-letter topic is the recovery path for repeated delivery
-failures.
+The production worker enables `WARDEN_WORKER_EXECUTION_ENABLED` only for the
+reviewed `SAFE_CLOUD_OPERATIONS` allowlist (`repo_status` and
+`artifact_proof`). Receiving a queued mission is never permission to interpret
+arbitrary message text as a shell command; adding an operation requires code
+review, bounded inputs, and an artifact/proof contract. The dead-letter topic is
+the recovery path for repeated delivery failures.
 
 The Cloud Run runtime service account needs only `roles/pubsub.publisher` on
 the topic, and the worker identity needs only `roles/pubsub.subscriber` on the
