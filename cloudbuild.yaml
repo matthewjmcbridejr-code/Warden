@@ -2,6 +2,8 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: ["build", "-f", "Dockerfile.cloudrun", "-t", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "."]
   - name: gcr.io/cloud-builders/docker
+    args: ["run", "--rm", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "python", "-c", "import playwright; from src.server.api import app; print(app.title)"]
+  - name: gcr.io/cloud-builders/docker
     args: ["push", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID"]
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -16,7 +18,7 @@ steps:
       - --port=8080
       - --min-instances=1
       - --max-instances=3
-      - --memory=1Gi
+      - --memory=2Gi
       - --cpu=1
       - --timeout=300
       - --set-env-vars=MCHARNESS_DATA_ROOT=/tmp/warden-data,MCHARNESS_PUBLIC_WRITE_ENABLED=false,WARDEN_TMUX_RUNNER_ENABLED=false,WARDEN_CODEX_RUNNER_ENABLED=false,WARDEN_GOOGLE_BRAIN_ENABLED=true,WARDEN_GOOGLE_PROJECT_ID=${PROJECT_ID}
