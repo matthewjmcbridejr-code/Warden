@@ -10,7 +10,8 @@ COPY src ./src
 COPY web ./web
 COPY branding.json ./branding.json
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && python -c "import playwright; print('playwright import: ok')"
 
 EXPOSE 8080
 CMD ["sh", "-c", "uvicorn src.server.api:app --host 0.0.0.0 --port ${PORT:-8080} --log-level info"]
