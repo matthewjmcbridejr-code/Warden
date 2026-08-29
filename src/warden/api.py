@@ -539,6 +539,8 @@ class McHarnessCaptainPlanRequest(BaseModel):
     check_command: Optional[str] = None
     max_dispatches: int = Field(default=0, ge=0, le=50)
     scope_paths: list[str] = Field(default_factory=list)
+    execution_target: Literal["local", "cloud", "auto"] = "auto"
+    cloud_operation: Optional[Literal["artifact_proof", "repo_status"]] = None
 
     @field_validator("goal")
     @classmethod
@@ -2394,6 +2396,8 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
     plan["check_command"] = payload.check_command
     plan["max_dispatches"] = payload.max_dispatches
     plan["scope_paths"] = list(payload.scope_paths)
+    plan["execution_target"] = payload.execution_target
+    plan["cloud_operation"] = payload.cloud_operation
 
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None
@@ -2538,6 +2542,8 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
                     "repo_id": repo_id,
                     "lane_id": lane_id,
                     "prompt": prompt,
+                    "execution_target": plan.get("execution_target", "auto"),
+                    "operation": plan.get("cloud_operation"),
                 },
                 idempotency_key=f"captain-step:{plan_id}:{step_id}:{run_id}",
             )

@@ -324,6 +324,22 @@ class CloudControlPlane:
             conn.commit()
             return acquired
 
+    def renew_lease(self, lease_key: str, owner_id: str, *, ttl_seconds: int = 60) -> bool:
+        """Extend an owned lease without allowing another worker to take it over."""
+        expires = _now().timestamp() + max(1, int(ttl_seconds))
+        with self._connect() as conn:
+            self.ensure_schema_on(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE warden_control_leases
+                       SET expires_at = to_timestamp(%s), updated_at = now()
+                       WHERE lease_key = %s AND owner_id = %s""",
+                    (expires, lease_key, owner_id),
+                )
+                renewed = cur.rowcount > 0
+            conn.commit()
+            return renewed
+
     def release_lease(self, lease_key: str, owner_id: str) -> bool:
         with self._connect() as conn:
             self.ensure_schema_on(conn)

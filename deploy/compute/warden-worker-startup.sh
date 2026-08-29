@@ -105,6 +105,9 @@ Environment=WARDEN_MISSIONS_SUBSCRIPTION=projects/booming-key-500220-d9/subscrip
 Environment=WARDEN_QUEUE_CONSUMER_ENABLED=true
 Environment=WARDEN_WORKER_EXECUTION_ENABLED=false
 Environment=WARDEN_WORKER_ID=warden-worker
+Environment=WARDEN_ARTIFACT_BACKEND=gcs
+Environment=WARDEN_ARTIFACT_BUCKET=booming-key-500220-d9-warden-brain
+Environment=WARDEN_WORKER_REPO_ROOT=/opt/warden
 ExecStart=/opt/warden/.venv/bin/python -m uvicorn src.server.api:app --host 127.0.0.1 --port 8125 --log-level warning
 Restart=on-failure
 RestartSec=5
