@@ -4,6 +4,21 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: ["run", "--rm", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "python", "-c", "import playwright; from src.server.api import app; print(app.title)"]
   - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker run -d --name warden-api-smoke -e PORT=8080 -p 18080:8080 us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
+        trap 'docker rm -f warden-api-smoke >/dev/null 2>&1 || true' EXIT
+        for attempt in $(seq 1 30); do
+          if docker run --rm --network host curlimages/curl:8.12.1 -fsS http://127.0.0.1:18080/api/mcharness/health; then
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs warden-api-smoke
+        exit 1
+  - name: gcr.io/cloud-builders/docker
     args: ["push", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID"]
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
