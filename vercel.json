@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://warden-api-REPLACE_ME-uc.a.run.app/api/:path*"
+      "destination": "https://warden-api-cpjzhcvbha-uc.a.run.app/api/:path*"
     },
     {
       "source": "/",
