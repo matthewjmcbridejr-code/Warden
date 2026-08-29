@@ -39,7 +39,7 @@ if [ ! -d "${APP_DIR}/.git" ]; then
   git clone --branch "${REPO_BRANCH}" --single-branch "${REPO_URL}" "${APP_DIR}"
 else
   git -C "${APP_DIR}" fetch origin "${REPO_BRANCH}"
-  git -C "${APP_DIR}" reset --hard "origin/${REPO_BRANCH}"
+  git -C "${APP_DIR}" merge --ff-only "origin/${REPO_BRANCH}"
 fi
 
 python3 -m venv "${APP_DIR}/.venv"
