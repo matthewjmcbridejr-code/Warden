@@ -329,6 +329,18 @@ def create_evidence_record(
                 attached = next((row for row in run_rows if row.get("run_id") == run_id), None)
                 if attached is not None:
                     _sync_cloud_record("run", str(run_id), attached)
+    # Cloud Run and the edge have separate local cache roots. Always update
+    # the authoritative run record directly when the run was created by a
+    # different instance, so evidence associations survive cross-instance
+    # reads and replacements.
+    if run_id:
+        cloud_run = _cloud_record("run", str(run_id))
+        if cloud_run is not None:
+            evidence_ids = list(cloud_run.get("evidence_ids") or [])
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+                cloud_run["evidence_ids"] = evidence_ids
+                _sync_cloud_record("run", str(run_id), cloud_run)
     _sync_cloud_record("evidence", evidence_id, record)
     return sanitize_evidence_summary(record)
 
