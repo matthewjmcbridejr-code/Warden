@@ -1,15 +1,15 @@
 steps:
   - name: gcr.io/cloud-builders/docker
-    args: ["build", "-f", "Dockerfile.cloudrun", "-t", "${_IMAGE}", "."]
+    args: ["build", "-f", "Dockerfile.cloudrun", "-t", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "."]
   - name: gcr.io/cloud-builders/docker
-    args: ["push", "${_IMAGE}"]
+    args: ["push", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID"]
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
       - run
       - deploy
       - ${_SERVICE}
-      - --image=${_IMAGE}
+      - --image=us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
@@ -21,10 +21,9 @@ steps:
       - --timeout=300
       - --set-env-vars=MCHARNESS_DATA_ROOT=/tmp/warden-data,MCHARNESS_PUBLIC_WRITE_ENABLED=false,WARDEN_TMUX_RUNNER_ENABLED=false,WARDEN_CODEX_RUNNER_ENABLED=false,WARDEN_GOOGLE_BRAIN_ENABLED=true,WARDEN_GOOGLE_PROJECT_ID=${PROJECT_ID}
 images:
-  - ${_IMAGE}
+  - us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
 substitutions:
   _SERVICE: warden-api
   _REGION: us-central1
-  _IMAGE: us-central1-docker.pkg.dev/$PROJECT_ID/warden/warden-api:$BUILD_ID
 options:
   logging: CLOUD_LOGGING_ONLY
