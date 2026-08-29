@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -49,7 +50,35 @@ def _run_path(run_id: str) -> Path:
     return RUNS_DIR / f"{run_id}.json"
 
 
+def _cloud_plane():
+    from .cloud_control_plane import CloudControlPlane, cloud_control_enabled
+    return CloudControlPlane() if cloud_control_enabled() else None
+
+
+def _cloud_get(record_type: str, record_id: str) -> dict[str, Any] | None:
+    plane = _cloud_plane()
+    if plane is None:
+        return None
+    try:
+        return plane.get_record(record_type, record_id)
+    except Exception:
+        return None
+
+
+def _cloud_sync(record_type: str, record_id: str, payload: dict[str, Any]) -> None:
+    plane = _cloud_plane()
+    if plane is None:
+        return
+    try:
+        plane.upsert_record(record_type, record_id, payload, source_updated_at=payload.get("updated_at") or payload.get("created_at"))
+    except Exception:
+        plane.enqueue_record(record_type, record_id, payload)
+
+
 def _load_run(run_id: str) -> CaptainRun:
+    cloud = _cloud_get("captain_run", run_id)
+    if cloud is not None:
+        return CaptainRun.model_validate(cloud)
     path = _run_path(run_id)
     if not path.exists():
         raise FileNotFoundError(run_id)
@@ -59,6 +88,7 @@ def _load_run(run_id: str) -> CaptainRun:
 def _save_run(run: CaptainRun) -> CaptainRun:
     _ensure_dirs()
     _run_path(run.run_id).write_text(run.model_dump_json(indent=2), encoding="utf-8")
+    _cloud_sync("captain_run", run.run_id, run.model_dump(mode="json"))
     return run
 
 
@@ -262,6 +292,11 @@ def _safe_captain_id(prefix: str) -> str:
 
 
 def _load_state(captain_run_id: str) -> CaptainState:
+    cloud = _cloud_get("captain_state", captain_run_id)
+    if cloud is not None:
+        STATE_MACHINE_DIR.mkdir(parents=True, exist_ok=True)
+        _state_path(captain_run_id).write_text(json.dumps(cloud, indent=2), encoding="utf-8")
+        return CaptainState.model_validate(cloud)
     path = _state_path(captain_run_id)
     if not path.exists():
         raise FileNotFoundError(captain_run_id)
@@ -271,6 +306,7 @@ def _load_state(captain_run_id: str) -> CaptainState:
 def _save_state(state: CaptainState) -> CaptainState:
     STATE_MACHINE_DIR.mkdir(parents=True, exist_ok=True)
     _state_path(state.captain_run_id).write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    _cloud_sync("captain_state", state.captain_run_id, state.model_dump(mode="json"))
     return state
 
 
