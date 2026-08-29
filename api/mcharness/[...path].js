@@ -73,6 +73,11 @@ async function googleAccessToken() {
 }
 
 module.exports = async function handler(req, res) {
+  const consoleToken = text(process.env.WARDEN_CONSOLE_TOKEN);
+  const presentedToken = text(req.headers["x-warden-console-token"]);
+  if (!consoleToken || presentedToken !== consoleToken) {
+    return res.status(401).json({ ok: false, error: "Warden console authentication required" });
+  }
   const cloudRunUrl = text(process.env.GCP_CLOUD_RUN_URL).replace(/\/$/, "");
   if (!cloudRunUrl) return res.status(503).json({ ok: false, error: "GCP_CLOUD_RUN_URL is not configured" });
 
