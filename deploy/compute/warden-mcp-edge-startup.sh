@@ -24,9 +24,10 @@ apt-get install -y ca-certificates curl git gnupg python3-venv
 # records point at this VM. The old McServer DNS record is not changed here.
 install -d -m 0755 /etc/apt/keyrings
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | gpg --dearmor -o /etc/apt/keyrings/caddy-stable.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/deb/debian.deb.txt' \
+  | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
   -o /etc/apt/sources.list.d/caddy-stable.list
+chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
 apt-get update
 apt-get install -y caddy
 
