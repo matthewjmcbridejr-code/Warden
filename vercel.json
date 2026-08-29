@@ -5,10 +5,6 @@
   "buildCommand": "",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://warden-api-cpjzhcvbha-uc.a.run.app/api/:path*"
-    },
-    {
       "source": "/",
       "destination": "/web/warden/app.html"
     }

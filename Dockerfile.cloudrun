@@ -10,7 +10,7 @@ COPY src ./src
 COPY web ./web
 COPY branding.json ./branding.json
 
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir '.[cloud]' \
     && python -c "import playwright; print('playwright import: ok')"
 
 EXPOSE 8080

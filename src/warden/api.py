@@ -56,6 +56,7 @@ from .workbench import (
     WorkbenchThreadCreateRequest,
     WorkbenchThreadUpdateRequest,
 )
+from .cloud_brain import get_memory_store, is_cloud_primary
 from .worker import WorkerStub, ALLOWED_COMMANDS
 from .captain_plans import (
     complete_step as complete_captain_plan_step,
@@ -133,6 +134,11 @@ from .assistant import (
     build_assistant_context,
     chat_with_assistant,
 )
+
+# Memory is the first cloud-primary Workbench boundary. Keep selection dynamic
+# so local tests/offline Desk instances can swap their Workbench root safely.
+def _memory_store():
+    return get_memory_store() if is_cloud_primary() else WORKBENCH_STORE
 
 router = APIRouter(prefix="/api/marius", tags=["marius-desktop"])
 router.include_router(captain_router)
@@ -1708,7 +1714,7 @@ def build_agent_prompt_with_memory(
             "already_injected": True,
         }
     try:
-        pack = WORKBENCH_STORE.build_memory_context_pack(
+        pack = _memory_store().build_memory_context_pack(
             project_id=project_id,
             repo_path=repo_path,
             agent=agent,
@@ -1746,7 +1752,7 @@ def _remember_run_memory(
     tags: Optional[list[str]] = None,
 ) -> Optional[str]:
     try:
-        memory = WORKBENCH_STORE.remember_memory(
+        memory = _memory_store().remember_memory(
             WorkbenchMemoryRememberRequest(
                 scope=scope,
                 content=content[:4000],
@@ -2301,7 +2307,7 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
     planning_goal = payload.goal
     if payload.include_memory_context:
         try:
-            pack = WORKBENCH_STORE.build_memory_context_pack(
+            pack = _memory_store().build_memory_context_pack(
                 project_id=repo["repo_id"], user_prompt=payload.goal, max_memories=8,
             )
             context_text = str(pack.get("context") or "").strip()
@@ -3218,12 +3224,13 @@ async def post_marius_agent_memory_remember(request: Request):
 @mcharness_router.get("/memory/health", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memory_health():
     from src.warden.brain_vector_store import count as vec_count
+    from .cloud_brain import cloud_brain_status
     vec = 0
     try:
         vec = vec_count()
     except Exception:
         pass
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     active = [m for m in memories if m.status != "forgotten"]
     kinds: dict = {}
     for m in active:
@@ -3235,12 +3242,13 @@ def get_warden_memory_health():
         "total_count": len(memories),
         "vector_count": vec,
         "kinds": kinds,
+        "storage": cloud_brain_status(),
     }
 
 
 @mcharness_router.get("/memories", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Optional[str] = None):
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     active = [m for m in memories if m.status != "forgotten"]
     if kind:
         active = [m for m in active if m.kind == kind]
@@ -3258,7 +3266,7 @@ def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Opt
 @mcharness_router.get("/memories/search", dependencies=[Depends(_require_private_memory_access)])
 @mcharness_router.get("/memories/recall", dependencies=[Depends(_require_private_memory_access)])
 def recall_warden_memories(q: str = "", scope: Optional[str] = None, kind: Optional[str] = None, limit: int = 20):
-    memories = WORKBENCH_STORE.search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
+    memories = _memory_store().search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
     if kind:
         memories = [m for m in memories if m.kind == kind]
     return {
@@ -3286,7 +3294,7 @@ class MemoryPatchRequest(BaseModel):
 
 @mcharness_router.patch("/memories/{memory_id}", dependencies=[Depends(_require_private_memory_access)])
 def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
-    path = WORKBENCH_STORE._path("memories", memory_id)
+    path = _memory_store()._path("memories", memory_id)
     if not path.exists():
         raise HTTPException(404, f"Memory not found: {memory_id}")
     from src.warden.workbench import WorkbenchMemory, _atomic_write_json, _now
@@ -3305,13 +3313,15 @@ def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
         memory.confidence = payload.confidence
     memory.updated_at = _now()
     _atomic_write_json(path, memory.model_dump(mode="json"))
+    if hasattr(_memory_store(), "save_memory"):
+        _memory_store().save_memory(memory)
     return {"ok": True, "memory": memory.model_dump(mode="json")}
 
 
 @mcharness_router.post("/memories", dependencies=[Depends(_require_private_memory_access)])
 def create_warden_memory(payload: WorkbenchMemoryCreateRequest):
     try:
-        memory = WORKBENCH_STORE.create_memory(payload)
+        memory = _memory_store().create_memory(payload)
         return {"ok": True, "memory": memory.model_dump(mode="json")}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3325,7 +3335,7 @@ async def remember_warden_memory(request: Request):
         if not payload.get("content"):
             payload["content"] = payload.get("summary") or payload.get("note") or ""
         req = WorkbenchMemoryRememberRequest(**payload)
-        memory = WORKBENCH_STORE.remember_memory(req)
+        memory = _memory_store().remember_memory(req)
         return {"ok": True, "memory": memory.model_dump(mode="json")}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3338,7 +3348,7 @@ def post_warden_memory_context_pack(payload: WardenMemoryContextPackRequest):
     try:
         return {
             "ok": True,
-            **WORKBENCH_STORE.build_memory_context_pack(
+            **_memory_store().build_memory_context_pack(
                 project_id=payload.project_id,
                 repo_path=payload.repo_path,
                 agent=payload.agent,
@@ -5694,7 +5704,7 @@ def get_brain_inbox(limit: int = 50):
     """Read-only reviewable feed of raw captures (newest first). PR 2 of the
     personal AI OS plan: make capture-fidelity gaps visible before automating."""
     limit = max(1, min(int(limit), 200))
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     items = [
         m for m in memories
         if m.status == "active" and (m.source in _CAPTURE_SOURCES or "auto" in m.tags)
@@ -5728,7 +5738,7 @@ def post_memory_promote(memory_id: str):
     """Explicit, user-triggered promotion of a memory into a durable Brain vault
     note (PR 5). Never automatic; sets source_ref to the created note path."""
     try:
-        memory = WORKBENCH_STORE.get_memory(memory_id)
+        memory = _memory_store().get_memory(memory_id)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     if memory.source_ref:
@@ -5753,7 +5763,7 @@ def post_memory_promote(memory_id: str):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"vault write failed: {exc}")
-    updated = WORKBENCH_STORE.update_memory_promotion(memory_id, source_ref=result.get("path"))
+    updated = _memory_store().update_memory_promotion(memory_id, source_ref=result.get("path"))
     return {"ok": True, "already_promoted": False, "note_path": result.get("path"), "memory_id": updated.memory_id}
 
 
@@ -5762,7 +5772,7 @@ def post_memory_discard(memory_id: str):
     """Explicit discard from the Brain Inbox: marks the memory forgotten (kept on
     disk, excluded from search/feeds). Never deletes files."""
     try:
-        updated = WORKBENCH_STORE.update_memory_promotion(memory_id, status="forgotten")
+        updated = _memory_store().update_memory_promotion(memory_id, status="forgotten")
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True, "memory_id": updated.memory_id, "status": updated.status}

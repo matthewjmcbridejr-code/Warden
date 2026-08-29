@@ -43,6 +43,22 @@ class ArtifactRef(BaseModel):
 _ARTIFACTS_STORE: dict[str, tuple[ArtifactRef, bytes]] = {}
 
 
+def _gcs_enabled() -> bool:
+    return os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower() == "gcs" and bool(
+        os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip()
+    )
+
+
+def _gcs_blob(ref: ArtifactRef):
+    try:
+        from google.cloud import storage
+    except ImportError as exc:
+        raise RuntimeError("Install the cloud extra to use GCS artifacts") from exc
+    client = storage.Client()
+    bucket = client.bucket(os.environ["WARDEN_ARTIFACT_BUCKET"])
+    return bucket.blob(f"artifacts/{ref.artifact_id}")
+
+
 def store_artifact(
     content: bytes | str,
     *,
@@ -76,6 +92,18 @@ def store_artifact(
         metadata=metadata or {},
     )
 
+    if _gcs_enabled():
+        blob = _gcs_blob(ref)
+        blob.metadata = {"warden_ref": json.dumps(ref.model_dump(mode="json"), sort_keys=True)}
+        try:
+            blob.upload_from_string(raw_bytes, content_type=mime_type, if_generation_match=0)
+        except Exception as exc:
+            # A deterministic artifact ID makes retries safe. A precondition
+            # failure means the immutable object already exists.
+            if getattr(exc, "code", None) != 412:
+                raise
+        ref.storage_backend = "gcs"
+        ref.metadata = {**ref.metadata, "gcs_object": blob.name}
     _ARTIFACTS_STORE[artifact_id] = (ref, raw_bytes)
     return ref
 
@@ -83,12 +111,28 @@ def store_artifact(
 def get_artifact_ref(artifact_id: str) -> ArtifactRef | None:
     """Retrieves metadata ref for an artifact."""
     item = _ARTIFACTS_STORE.get(artifact_id)
-    return item[0] if item else None
+    if item:
+        return item[0]
+    if not _gcs_enabled():
+        return None
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        blob = client.bucket(os.environ["WARDEN_ARTIFACT_BUCKET"]).blob(f"artifacts/{artifact_id}")
+        blob.reload()
+        ref = ArtifactRef.model_validate(json.loads((blob.metadata or {})["warden_ref"]))
+        _ARTIFACTS_STORE[artifact_id] = (ref, blob.download_as_bytes())
+        return ref
+    except (KeyError, ValueError, FileNotFoundError):
+        return None
 
 
 def read_artifact_content(artifact_id: str) -> tuple[ArtifactRef, bytes] | None:
     """Retrieves artifact ref and content bytes, verifying SHA-256 integrity."""
     item = _ARTIFACTS_STORE.get(artifact_id)
+    if not item:
+        ref = get_artifact_ref(artifact_id)
+        item = _ARTIFACTS_STORE.get(artifact_id) if ref else None
     if not item:
         return None
 

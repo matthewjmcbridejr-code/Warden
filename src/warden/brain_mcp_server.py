@@ -101,8 +101,8 @@ def _err(tool: str, message: str) -> str:
 
 
 def _store():
-    from src.warden.workbench import WorkbenchStore
-    return WorkbenchStore()
+    from src.warden.cloud_brain import get_memory_store
+    return get_memory_store()
 
 
 def _brain_ingest():
@@ -283,6 +283,7 @@ def warden_health() -> str:
         ]
 
         caller = _current_caller_identity()
+        from src.warden.cloud_brain import cloud_brain_status
         return _ok("warden_health", {
             "warden_api_reachable": api_ok,
             "warden_url": WARDEN_URL,
@@ -290,6 +291,7 @@ def warden_health() -> str:
             "memory_count": mem_count,
             "semantic_index_available": semantic_ok,
             "vector_count": vec_count,
+            "storage": cloud_brain_status(),
             "embed_model": brain_embed.EMBED_MODEL,
             "ingest_paths_found": [str(p) for p in obsidian_paths],
             "session_id": caller["session_id"],

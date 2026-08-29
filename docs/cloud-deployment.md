@@ -14,6 +14,58 @@ filesystem is ephemeral, so the production service starts read-only with all
 runner flags disabled. Cloud SQL/GCS adapters must be enabled before turning on
 production writes or multi-instance scaling.
 
+## Canonical storage and migration boundary
+
+The accepted placement decision is recorded in
+[`docs/adr/0001-warden-cloud-brain-hybrid-execution.md`](adr/0001-warden-cloud-brain-hybrid-execution.md).
+Cloud SQL is the durable Brain/state authority; GCS is the artifact/export
+authority; Vercel is only the console; the e2-medium worker is an execution
+plane; and the desktop is the local device plane. The local Workbench remains
+available as a cache/offline replica with an idempotent outbox.
+
+The first implemented adapter is memory. It is opt-in until the database is
+provisioned:
+
+```bash
+python3 scripts/migrate_brain.py --dry-run
+# After reviewing the report and provisioning the explicitly named database:
+WARDEN_BRAIN_BACKEND=postgres \
+WARDEN_BRAIN_DATABASE_URL='postgresql://...' \
+python3 scripts/migrate_brain.py --apply
+```
+
+Do not put the DSN in GitHub or a Vercel bundle. Inject it from Secret Manager
+into the authenticated GCP service and into an approved operator migration
+session. If the cloud is temporarily unreachable, the memory adapter writes
+one deterministic item per change under `cloud-outbox/`; replay with:
+
+```bash
+WARDEN_BRAIN_BACKEND=postgres \
+WARDEN_BRAIN_DATABASE_URL='postgresql://...' \
+python3 scripts/migrate_brain.py --replay-outbox
+```
+
+The SQL bootstrap is [`deploy/cloudsql/001_brain_memories.sql`](../deploy/cloudsql/001_brain_memories.sql).
+It is intentionally narrow: missions/events/checkpoints, run history,
+connectors, artifacts, and proof records need their own schema migrations and
+must not be declared migrated merely because memory works.
+
+## Always-on MCP edge
+
+The existing `python -m warden.brain_mcp_server --http --host ... --port 8126`
+is the MCP edge contract. Deploy it as an authenticated, independently
+replaceable GCP service (dedicated hardened Compute Engine gateway or a
+private Cloud Run service behind an approved authenticated ingress). Keep the
+OAuth/client-registration state durable and keep the endpoint protected by
+OAuth 2.1/device auth or scoped bearer tokens. Do not expose the personal
+Brain anonymously and do not use `allUsers` when the organization policy
+rejects it. DNS and OAuth redirect changes require an explicit domain cutover.
+
+The current `warden-worker` e2-medium is the execution plane, not the durable
+database or trust authority. Its runner flags remain disabled until worker
+identity, allowlists, isolation, queue leases, and proof-gate behavior have
+live evidence.
+
 ## One-time GCP setup
 
 Run from the repository root with the intended GCP project selected:

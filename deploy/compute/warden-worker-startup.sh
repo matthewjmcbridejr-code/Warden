@@ -23,7 +23,7 @@ fi
 
 python3 -m venv "${APP_DIR}/.venv"
 "${APP_DIR}/.venv/bin/pip" install --upgrade pip
-"${APP_DIR}/.venv/bin/pip" install "${APP_DIR}"
+"${APP_DIR}/.venv/bin/pip" install "${APP_DIR}[cloud]"
 chown -R warden:warden "${APP_DIR}" "${DATA_DIR}"
 
 install -m 0644 /dev/stdin /etc/systemd/system/warden-worker.service <<'UNIT'
@@ -40,8 +40,8 @@ Environment=PYTHONPATH=/opt/warden
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden
 Environment=MCHARNESS_PUBLIC_WRITE_ENABLED=false
-Environment=WARDEN_TMUX_RUNNER_ENABLED=true
-Environment=WARDEN_CODEX_RUNNER_ENABLED=true
+Environment=MCHARNESS_TMUX_RUNNER_ENABLED=false
+Environment=MCHARNESS_CODEX_RUNNER_ENABLED=false
 ExecStart=/opt/warden/.venv/bin/python -m uvicorn src.server.api:app --host 127.0.0.1 --port 8125 --log-level warning
 Restart=on-failure
 RestartSec=5
