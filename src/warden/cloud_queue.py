@@ -185,6 +185,70 @@ def _append_mission_event(envelope: dict[str, Any], event_type: str, payload: di
         )
 
 
+def _update_mission_contract(
+    envelope: dict[str, Any],
+    *,
+    status: str,
+    owner_id: str,
+    proof_payload: dict[str, Any] | None = None,
+    artifact_payload: dict[str, Any] | None = None,
+    reason: str | None = None,
+) -> None:
+    """Reflect worker outcome in the shared Mission/Plan/Run records."""
+    body = envelope.get("body") if isinstance(envelope.get("body"), dict) else {}
+    plane = CloudControlPlane()
+    now = datetime.now(timezone.utc).isoformat()
+    plan_id = str(body.get("plan_id") or "").strip()
+    step_id = str(body.get("step_id") or "").strip()
+    run_id = str(body.get("run_id") or "").strip()
+
+    if plan_id:
+        plan = plane.get_record("mission_plan", plan_id)
+        if isinstance(plan, dict):
+            for step in plan.get("steps") or []:
+                candidate = str(step.get("step_id") or step.get("id") or "")
+                if candidate != step_id:
+                    continue
+                step["status"] = "passed" if status == "completed" else "failed"
+                step["run_id"] = run_id or step.get("run_id")
+                step["updated_at"] = now
+                if proof_payload:
+                    evidence_ids = list(step.get("evidence_ids") or [])
+                    if proof_payload["proof_id"] not in evidence_ids:
+                        evidence_ids.append(proof_payload["proof_id"])
+                    step["evidence_ids"] = evidence_ids
+                break
+            steps = list(plan.get("steps") or [])
+            if status == "completed" and steps and all(str(item.get("status")) in {"passed", "skipped"} for item in steps):
+                plan["status"] = "completed"
+            elif status != "completed":
+                plan["status"] = "active"
+            plan["updated_at"] = now
+            if reason:
+                plan["blocker"] = {"kind": "cloud_worker_failure", "reason": reason, "at": now}
+            plane.upsert_record("mission_plan", plan_id, plan, source_updated_at=now)
+
+    if run_id:
+        run = plane.get_record("run", run_id) or {
+            "run_id": run_id,
+            "plan_id": plan_id or None,
+            "mission_id": str(envelope.get("mission_id") or ""),
+            "created_by": "cloud_worker",
+        }
+        run.update({
+            "status": "completed" if status == "completed" else "failed",
+            "updated_at": now,
+            "worker_id": owner_id,
+        })
+        if proof_payload:
+            run["proof_refs"] = [proof_payload["proof_id"]]
+        if artifact_payload:
+            run["artifact_refs"] = [artifact_payload["uri"]]
+        if reason:
+            run["failure_reason"] = reason
+        plane.upsert_record("run", run_id, run, source_updated_at=now)
+
+
 def _execute_safe_operation(envelope: dict[str, Any], *, owner_id: str) -> dict[str, Any]:
     """Run a fixed, non-shell-interpreting cloud operation and save proof.
 
@@ -273,6 +337,13 @@ def _execute_safe_operation(envelope: dict[str, Any], *, owner_id: str) -> dict[
     plane = CloudControlPlane()
     plane.upsert_record("artifact", ref.artifact_id, artifact_payload, source_updated_at=ref.created_at)
     plane.upsert_record("proof", proof_payload["proof_id"], proof_payload, source_updated_at=ref.created_at)
+    _update_mission_contract(
+        envelope,
+        status="completed",
+        owner_id=owner_id,
+        proof_payload=proof_payload,
+        artifact_payload=artifact_payload,
+    )
     _append_mission_event(envelope, "artifact.created", artifact_payload)
     _append_mission_event(envelope, "proof.recorded", proof_payload)
     _record_receipt(
@@ -332,6 +403,10 @@ def handle_mission_message(message: Any, *, owner_id: str | None = None) -> None
             _execute_safe_operation(envelope, owner_id=owner)
         except Exception as exc:
             _record_receipt(envelope, status="failed", owner_id=owner, reason=str(exc)[:300])
+            try:
+                _update_mission_contract(envelope, status="failed", owner_id=owner, reason=str(exc)[:300])
+            except Exception:
+                pass
             _append_mission_event(envelope, "mission.failed", {"worker_id": owner, "reason": str(exc)[:300]})
         message.ack()
     finally:

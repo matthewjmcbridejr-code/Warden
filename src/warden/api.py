@@ -1204,6 +1204,8 @@ def _captain_plan_response(plan: dict[str, Any], *, notes: list[str] | None = No
         "current_gate_status": current_gate_status,
         "current_gate_label": gate_ui_label(current_gate_status),
         "auto_advance": bool(plan.get("auto_advance", False)),
+        "execution_target": plan.get("execution_target", "auto"),
+        "cloud_operation": plan.get("cloud_operation"),
         "steps": steps,
         "decision_log": list(plan.get("decision_log") or []),
         "notes": list(notes or []),
