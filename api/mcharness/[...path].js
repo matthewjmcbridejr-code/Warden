@@ -37,7 +37,7 @@ async function googleAccessToken() {
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-      audience: provider,
+      audience: provider.startsWith("//") ? provider : `//iam.googleapis.com/${provider}`,
       scope: "https://www.googleapis.com/auth/cloud-platform",
       requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
       subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
