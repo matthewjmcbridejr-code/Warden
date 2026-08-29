@@ -94,6 +94,8 @@ def store_artifact(
 
     if _gcs_enabled():
         blob = _gcs_blob(ref)
+        ref.storage_backend = "gcs"
+        ref.metadata = {**ref.metadata, "gcs_object": blob.name}
         blob.metadata = {"warden_ref": json.dumps(ref.model_dump(mode="json"), sort_keys=True)}
         try:
             blob.upload_from_string(raw_bytes, content_type=mime_type, if_generation_match=0)
@@ -102,8 +104,6 @@ def store_artifact(
             # failure means the immutable object already exists.
             if getattr(exc, "code", None) != 412:
                 raise
-        ref.storage_backend = "gcs"
-        ref.metadata = {**ref.metadata, "gcs_object": blob.name}
     _ARTIFACTS_STORE[artifact_id] = (ref, raw_bytes)
     return ref
 
