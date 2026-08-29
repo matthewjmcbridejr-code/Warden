@@ -672,6 +672,41 @@ class WorkbenchStore:
     def _path(self, kind: str, item_id: str) -> Path:
         return self.root / kind / f"{item_id}.json"
 
+    @staticmethod
+    def _cloud_plane():
+        from .cloud_control_plane import CloudControlPlane, cloud_control_enabled
+        return CloudControlPlane() if cloud_control_enabled() else None
+
+    def _cloud_record(self, record_type: str, record_id: str) -> dict[str, Any] | None:
+        plane = self._cloud_plane()
+        if plane is None:
+            return None
+        try:
+            return plane.get_record(record_type, record_id)
+        except Exception:
+            return None
+
+    def _cloud_records(self, record_type: str, *, limit: int = 1000) -> list[dict[str, Any]] | None:
+        plane = self._cloud_plane()
+        if plane is None:
+            return None
+        try:
+            return plane.list_records(record_type, limit=limit)
+        except Exception:
+            return None
+
+    def _cloud_sync(self, record_type: str, record_id: str, payload: dict[str, Any]) -> None:
+        plane = self._cloud_plane()
+        if plane is None:
+            return
+        try:
+            plane.upsert_record(record_type, record_id, payload, source_updated_at=payload.get("updated_at") or payload.get("created_at"))
+        except Exception:
+            plane.enqueue_record(record_type, record_id, payload)
+
+    def _cloud_cache(self, kind: str, record_id: str, payload: dict[str, Any]) -> None:
+        _atomic_write_json(self._path(kind, record_id), payload)
+
     def _archive_memory(self, memory: WorkbenchMemory) -> Path:
         """Keep an immutable memory version outside the mutable workbench.
 
@@ -719,6 +754,10 @@ class WorkbenchStore:
         return self._path("runs", _safe_id(run_id, "run_id"))
 
     def _load_run(self, run_id: str) -> WorkbenchRun:
+        cloud = self._cloud_record("workbench_run", run_id)
+        if cloud is not None:
+            self._cloud_cache("runs", run_id, cloud)
+            return WorkbenchRun.model_validate(cloud)
         path = self._run_path(run_id)
         if not path.exists():
             raise WorkbenchError(f"run not available: {run_id}")
@@ -726,6 +765,7 @@ class WorkbenchStore:
 
     def _save_run(self, run: WorkbenchRun) -> WorkbenchRun:
         _atomic_write_json(self._run_path(run.run_id), run.model_dump(mode="json"))
+        self._cloud_sync("workbench_run", run.run_id, run.model_dump(mode="json"))
         return run
 
     def _run_view(self, run: WorkbenchRun) -> dict[str, Any]:
@@ -791,6 +831,13 @@ class WorkbenchStore:
         _atomic_write_json(path, [row.model_dump(mode="json") for row in rows])
 
     def _load_messages(self, thread_id: str) -> list[WorkbenchMessage]:
+        cloud = self._cloud_records("workbench_message")
+        if cloud is not None:
+            rows = [row for row in cloud if row.get("thread_id") == thread_id]
+            rows.sort(key=lambda row: row.get("created_at") or "")
+            for row in rows:
+                self._cloud_cache_message(WorkbenchMessage.model_validate(row))
+            return [WorkbenchMessage.model_validate(row) for row in rows]
         path = self._message_path(thread_id)
         if not path.exists():
             return []
@@ -808,8 +855,33 @@ class WorkbenchStore:
         with path.open("a", encoding="utf-8") as f:
             f.write(message.model_dump_json())
             f.write("\n")
+        self._cloud_sync("workbench_message", message.message_id, message.model_dump(mode="json"))
+
+    def _cloud_cache_message(self, message: WorkbenchMessage) -> None:
+        path = self._message_path(message.thread_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = self._load_messages_local(message.thread_id)
+        if any(row.message_id == message.message_id for row in existing):
+            return
+        with path.open("a", encoding="utf-8") as f:
+            f.write(message.model_dump_json())
+            f.write("\n")
+
+    def _load_messages_local(self, thread_id: str) -> list[WorkbenchMessage]:
+        path = self._message_path(thread_id)
+        if not path.exists():
+            return []
+        rows: list[WorkbenchMessage] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(WorkbenchMessage.model_validate_json(line))
+        return rows
 
     def _load_thread(self, thread_id: str) -> WorkbenchThread:
+        cloud = self._cloud_record("workbench_thread", thread_id)
+        if cloud is not None:
+            self._cloud_cache("threads", thread_id, cloud)
+            return WorkbenchThread.model_validate(cloud)
         path = self._path("threads", _safe_id(thread_id, "thread_id"))
         if not path.exists():
             raise WorkbenchError(f"thread not available: {thread_id}")
@@ -817,6 +889,7 @@ class WorkbenchStore:
 
     def _save_thread(self, thread: WorkbenchThread) -> WorkbenchThread:
         _atomic_write_json(self._path("threads", thread.thread_id), thread.model_dump(mode="json"))
+        self._cloud_sync("workbench_thread", thread.thread_id, thread.model_dump(mode="json"))
         return thread
 
     def _thread_view(self, thread: WorkbenchThread) -> dict[str, Any]:
@@ -832,6 +905,18 @@ class WorkbenchStore:
 
     def list_agents(self) -> list[WorkbenchAgent]:
         self.ensure_layout()
+        cloud = self._cloud_records("workbench_agent")
+        if cloud is not None:
+            rows: list[WorkbenchAgent] = []
+            for payload in cloud:
+                try:
+                    agent = WorkbenchAgent.model_validate(payload)
+                except Exception:
+                    continue
+                self._cloud_cache("agents", agent.agent_id, payload)
+                rows.append(agent)
+            rows.sort(key=lambda item: item.updated_at, reverse=True)
+            return rows
         agents_dir = self.root / "agents"
         if not agents_dir.exists():
             return []
@@ -846,6 +931,10 @@ class WorkbenchStore:
 
     def get_agent(self, agent_id: str) -> WorkbenchAgent:
         self.ensure_layout()
+        cloud = self._cloud_record("workbench_agent", agent_id)
+        if cloud is not None:
+            self._cloud_cache("agents", agent_id, cloud)
+            return WorkbenchAgent.model_validate(cloud)
         path = self._path("agents", _safe_id(agent_id, "agent_id"))
         if not path.exists():
             raise WorkbenchError(f"agent not available: {agent_id}")
@@ -868,10 +957,27 @@ class WorkbenchStore:
             updated_at=_now(),
         )
         _atomic_write_json(self._path("agents", agent.agent_id), agent.model_dump(mode="json"))
+        self._cloud_sync("workbench_agent", agent.agent_id, agent.model_dump(mode="json"))
         return agent
 
     def list_threads(self) -> list[dict[str, Any]]:
         self.ensure_layout()
+        cloud = self._cloud_records("workbench_thread")
+        if cloud is not None:
+            rows: list[dict[str, Any]] = []
+            for payload in cloud:
+                try:
+                    thread = WorkbenchThread.model_validate(payload)
+                except Exception:
+                    continue
+                self._cloud_cache("threads", thread.thread_id, payload)
+                rows.append({
+                    **thread.model_dump(mode="json"),
+                    "message_count": len(self._load_messages(thread.thread_id)),
+                    "proof_gate_count": len(thread.hard_gates),
+                })
+            rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+            return rows
         threads_dir = self.root / "threads"
         if not threads_dir.exists():
             return []
@@ -902,7 +1008,7 @@ class WorkbenchStore:
             raise WorkbenchError("thread objective is required.")
         thread_id = payload.thread_id or self._generate_thread_id(payload.title)
         _safe_id(thread_id, "thread_id")
-        if self._path("threads", thread_id).exists():
+        if self._path("threads", thread_id).exists() or self._cloud_record("workbench_thread", thread_id) is not None:
             raise WorkbenchError(f"thread already exists: {thread_id}")
         if payload.agent_id is not None:
             self.get_agent(payload.agent_id)
@@ -1025,6 +1131,18 @@ class WorkbenchStore:
 
     def list_runs(self) -> list[dict[str, Any]]:
         self.ensure_layout()
+        cloud = self._cloud_records("workbench_run")
+        if cloud is not None:
+            rows: list[dict[str, Any]] = []
+            for payload in cloud:
+                try:
+                    run = WorkbenchRun.model_validate(payload)
+                except Exception:
+                    continue
+                self._cloud_cache("runs", run.run_id, payload)
+                rows.append(self._run_view(run))
+            rows.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+            return rows
         runs_dir = self.root / "runs"
         if not runs_dir.exists():
             return []
@@ -1049,7 +1167,7 @@ class WorkbenchStore:
         run_id = payload.run_id or self._generate_run_id(payload.title)
         _safe_id(run_id, "run_id")
         path = self._run_path(run_id)
-        if path.exists():
+        if path.exists() or self._cloud_record("workbench_run", run_id) is not None:
             raise WorkbenchError(f"run already exists: {run_id}")
         now = _now()
         run = WorkbenchRun(
@@ -1252,6 +1370,18 @@ class WorkbenchStore:
 
     def list_skills(self) -> list[WorkbenchSkill]:
         self.ensure_layout()
+        cloud = self._cloud_records("workbench_skill")
+        if cloud is not None:
+            rows: list[WorkbenchSkill] = []
+            for payload in cloud:
+                try:
+                    skill = WorkbenchSkill.model_validate(payload)
+                except Exception:
+                    continue
+                self._cloud_cache("skills", skill.skill_id, payload)
+                rows.append(skill)
+            rows.sort(key=lambda item: item.updated_at, reverse=True)
+            return rows
         skills_dir = self.root / "skills"
         rows: list[WorkbenchSkill] = []
         if not skills_dir.exists():
@@ -1266,6 +1396,10 @@ class WorkbenchStore:
 
     def get_skill(self, skill_id: str) -> WorkbenchSkill:
         self.ensure_layout()
+        cloud = self._cloud_record("workbench_skill", skill_id)
+        if cloud is not None:
+            self._cloud_cache("skills", skill_id, cloud)
+            return WorkbenchSkill.model_validate(cloud)
         path = self._path("skills", _safe_id(skill_id, "skill_id"))
         if not path.exists():
             raise WorkbenchError(f"skill not available: {skill_id}")
@@ -1274,7 +1408,7 @@ class WorkbenchStore:
     def create_skill(self, payload: WorkbenchSkillCreateRequest) -> WorkbenchSkill:
         self.ensure_layout()
         _safe_id(payload.skill_id, "skill_id")
-        if self._path("skills", payload.skill_id).exists():
+        if self._path("skills", payload.skill_id).exists() or self._cloud_record("workbench_skill", payload.skill_id) is not None:
             raise WorkbenchError(f"skill already exists: {payload.skill_id}")
         skill = WorkbenchSkill(
             skill_id=payload.skill_id,
@@ -1295,6 +1429,7 @@ class WorkbenchStore:
             updated_at=_now(),
         )
         _atomic_write_json(self._path("skills", skill.skill_id), skill.model_dump(mode="json"))
+        self._cloud_sync("workbench_skill", skill.skill_id, skill.model_dump(mode="json"))
         return skill
 
     def list_memories(self) -> list[WorkbenchMemory]:
@@ -1622,6 +1757,18 @@ class WorkbenchStore:
 
     def list_artifacts(self) -> list[WorkbenchArtifact]:
         self.ensure_layout()
+        cloud = self._cloud_records("workbench_artifact")
+        if cloud is not None:
+            rows: list[WorkbenchArtifact] = []
+            for payload in cloud:
+                try:
+                    artifact = WorkbenchArtifact.model_validate(payload)
+                except Exception:
+                    continue
+                self._cloud_cache("artifacts", artifact.artifact_id, payload)
+                rows.append(artifact)
+            rows.sort(key=lambda item: item.updated_at, reverse=True)
+            return rows
         artifacts_dir = self.root / "artifacts"
         rows: list[WorkbenchArtifact] = []
         if not artifacts_dir.exists():
@@ -1639,7 +1786,7 @@ class WorkbenchStore:
         _safe_id(payload.artifact_id, "artifact_id")
         if payload.thread_id is not None:
             self._load_thread(payload.thread_id)
-        if self._path("artifacts", payload.artifact_id).exists():
+        if self._path("artifacts", payload.artifact_id).exists() or self._cloud_record("workbench_artifact", payload.artifact_id) is not None:
             raise WorkbenchError(f"artifact already exists: {payload.artifact_id}")
         artifact = WorkbenchArtifact(
             artifact_id=payload.artifact_id,
@@ -1653,6 +1800,7 @@ class WorkbenchStore:
             updated_at=_now(),
         )
         _atomic_write_json(self._path("artifacts", artifact.artifact_id), artifact.model_dump(mode="json"))
+        self._cloud_sync("workbench_artifact", artifact.artifact_id, artifact.model_dump(mode="json"))
         return artifact
 
     def list_tools(self) -> list[WorkbenchTool]:
@@ -1955,13 +2103,15 @@ def get_skill(skill_id: str) -> WorkbenchSkill:
 
 @router.get("/memories", response_model=list[WorkbenchMemory])
 def get_memories() -> list[WorkbenchMemory]:
-    return STORE.list_memories()
+    from .cloud_brain import get_memory_store
+    return get_memory_store(STORE).list_memories()
 
 
 @router.post("/memories", response_model=WorkbenchMemory)
 def create_memory(payload: WorkbenchMemoryCreateRequest) -> WorkbenchMemory:
     try:
-        return STORE.create_memory(payload)
+        from .cloud_brain import get_memory_store
+        return get_memory_store(STORE).create_memory(payload)
     except Exception as exc:
         raise _http_error(exc)
 
