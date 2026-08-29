@@ -1433,15 +1433,42 @@ def _artifact_blob_path(thread_id: str, kind: str, extension: str) -> Path:
 def _create_artifact(thread_id: str, kind: str, title: str, body: str, summary: Optional[str] = None, extension: str = "txt") -> dict[str, Any]:
     path = _artifact_blob_path(thread_id, kind, extension)
     path.write_text(body, encoding="utf-8")
+    artifact_id = f"artifact_{uuid.uuid4().hex[:8]}"
+    artifact_path = str(path)
+    artifact_notes = None
+    if os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower() == "gcs" and os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip():
+        # Cloud Run's filesystem is ephemeral. Keep the local file as a short
+        # lived cache, but make the immutable content-addressed GCS object the
+        # artifact authority and expose its hash in the Workbench registry.
+        from .artifacts_protocol import store_artifact
+
+        type_map = {
+            "diff": "diff",
+            "proof": "proof",
+            "test_report": "test_report",
+            "report": "report",
+            "log": "log_excerpt",
+        }
+        ref = store_artifact(
+            body,
+            type=type_map.get(kind, "agent_result"),
+            mime_type="text/markdown" if extension.lower() in {"md", "markdown"} else "text/plain",
+            project="warden",
+            task_id=thread_id,
+            created_by="warden",
+        )
+        artifact_id = ref.artifact_id
+        artifact_path = f"gs://{os.environ['WARDEN_ARTIFACT_BUCKET']}/{ref.metadata.get('gcs_object', f'artifacts/{ref.artifact_id}') }"
+        artifact_notes = f"sha256={ref.sha256}; immutable GCS object"
     artifact = WORKBENCH_STORE.create_artifact(
         WorkbenchArtifactCreateRequest(
-            artifact_id=f"artifact_{uuid.uuid4().hex[:8]}",
+            artifact_id=artifact_id,
             kind=kind,
             title=title,
-            path=str(path),
+            path=artifact_path,
             thread_id=thread_id,
             summary=summary or title,
-            notes=None,
+            notes=artifact_notes,
         )
     )
     return artifact.model_dump(mode="json")

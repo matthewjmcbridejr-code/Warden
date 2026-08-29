@@ -403,6 +403,17 @@ def replay_outbox(*, limit: int = 100) -> dict[str, Any]:
                     payload["stream_id"], payload["event_type"], payload["payload"],
                     event_id=payload["event_id"], idempotency_key=payload.get("idempotency_key"),
                 )
+            elif operation == "publish_mission":
+                from .cloud_queue import publish_mission
+
+                payload = body["payload"]
+                publish_mission(
+                    mission_id=payload["mission_id"],
+                    kind=payload["kind"],
+                    body=payload["body"],
+                    idempotency_key=payload.get("idempotency_key"),
+                    persist_record=False,
+                )
             else:
                 raise ValueError(f"unsupported operation: {operation}")
             path.unlink()
