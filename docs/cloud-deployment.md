@@ -66,6 +66,17 @@ database or trust authority. Its runner flags remain disabled until worker
 identity, allowlists, isolation, queue leases, and proof-gate behavior have
 live evidence.
 
+## Vercel console authentication gate
+
+The server-side bridge requires the encrypted Vercel production variable
+`WARDEN_CONSOLE_TOKEN` and the `X-Warden-Console-Token` header. Anonymous
+requests return `401`; the token is not bundled into the static UI. This is a
+temporary fail-closed gate for operator proofs, not a substitute for end-user
+identity. Before general use, register a Sign in with Vercel OAuth integration
+or enable approved Vercel deployment protection, then replace the temporary
+header gate with verified user sessions. Do not put the token in frontend
+JavaScript, GitHub, or a URL.
+
 ## One-time GCP setup
 
 Run from the repository root with the intended GCP project selected:

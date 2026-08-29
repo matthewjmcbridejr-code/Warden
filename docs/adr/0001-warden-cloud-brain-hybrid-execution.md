@@ -114,6 +114,11 @@ personal Brain endpoint is acceptable. Execution lanes remain disabled until
 their worker identity, allowlist, isolation, resource limits, and proof gates
 are verified.
 
+The Vercel bridge currently has a temporary encrypted operator-token gate so
+anonymous requests fail closed. It must be replaced by verified Vercel user
+sessions (or approved deployment protection) before the console is treated as
+a general user-facing Brain client; the token must never enter frontend code.
+
 McServer is not stopped by this ADR. Shutdown requires successful live proofs
 for memory write/recall, restart persistence, Desk-off access, cross-agent
 sharing, project scoping, local and cloud mission paths, Needs You, failure
