@@ -46,9 +46,28 @@ python3 scripts/migrate_brain.py --replay-outbox
 ```
 
 The SQL bootstrap is [`deploy/cloudsql/001_brain_memories.sql`](../deploy/cloudsql/001_brain_memories.sql).
-It is intentionally narrow: missions/events/checkpoints, run history,
-connectors, artifacts, and proof records need their own schema migrations and
-must not be declared migrated merely because memory works.
+The control-plane tables are bootstrapped alongside it by the API and are also
+included in [`deploy/cloudsql/001_brain_memories.sql`](../deploy/cloudsql/001_brain_memories.sql).
+They hold mission plans, run/evidence/proof records, ordered chat events,
+conversations, and worker leases as JSONB records with idempotent keys.
+
+To inventory and then migrate existing local control state (including Captain
+plans, workbench records, run history, proof gates, and the local group chat),
+use the separate migration boundary below. It never reads connector/vault
+directories or secret-looking files and redacts text fields before a write:
+
+```bash
+python3 scripts/migrate_control_state.py --dry-run
+WARDEN_BRAIN_BACKEND=postgres \
+WARDEN_BRAIN_DATABASE_URL='postgresql://...' \
+python3 scripts/migrate_control_state.py --apply
+```
+
+The migration is safe to rerun: existing record IDs are upserted and chat
+events use their existing idempotency keys. Artifact file contents are not
+copied by this command; artifact promotion to GCS is a separate, hash-checked
+operation. Connector credentials are intentionally excluded and must be
+re-issued through Secret Manager/approved connector flows.
 
 ## Always-on MCP edge
 
