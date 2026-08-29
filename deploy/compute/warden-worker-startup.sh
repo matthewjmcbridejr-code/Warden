@@ -103,7 +103,10 @@ Environment=WARDEN_QUEUE_BACKEND=pubsub
 Environment=WARDEN_MISSIONS_TOPIC=projects/booming-key-500220-d9/topics/warden-missions
 Environment=WARDEN_MISSIONS_SUBSCRIPTION=projects/booming-key-500220-d9/subscriptions/warden-worker-missions
 Environment=WARDEN_QUEUE_CONSUMER_ENABLED=true
-Environment=WARDEN_WORKER_EXECUTION_ENABLED=false
+# Enabled only for the reviewed SAFE_CLOUD_OPERATIONS allowlist. The worker
+# never interprets Pub/Sub text as a shell command; adding an operation requires
+# a code review, bounded inputs, and an artifact/proof contract.
+Environment=WARDEN_WORKER_EXECUTION_ENABLED=true
 Environment=WARDEN_WORKER_ID=warden-worker
 Environment=WARDEN_ARTIFACT_BACKEND=gcs
 Environment=WARDEN_ARTIFACT_BUCKET=booming-key-500220-d9-warden-brain
