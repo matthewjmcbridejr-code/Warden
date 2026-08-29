@@ -772,11 +772,13 @@ def _service_mode_label() -> str:
 
 
 def _run_history_write_enabled() -> bool:
-    return _codex_runner_ready()
+    # Cloud-primary mode permits authenticated control-plane writes while the
+    # execution lanes remain independently gated by _codex_runner_ready().
+    return _codex_runner_ready() or is_cloud_primary()
 
 
 def _run_history_read_enabled() -> bool:
-    return _codex_runner_ready()
+    return _codex_runner_ready() or is_cloud_primary()
 
 
 def _require_private_memory_access(request: Request = None) -> None:

@@ -122,6 +122,10 @@ class PostgresBrain:
             with conn.cursor() as cur:
                 cur.execute(SCHEMA)
             conn.commit()
+            # Keep all cloud-primary control tables bootstrapped alongside the
+            # memory authority. The adapter remains independently testable.
+            from .cloud_control_plane import CloudControlPlane
+            CloudControlPlane.ensure_schema_on(conn)
 
     @staticmethod
     def _record_payload(memory: Any) -> dict[str, Any]:
@@ -378,11 +382,29 @@ def replay_outbox(*, limit: int = 100) -> dict[str, Any]:
     for path in pending:
         try:
             body = json.loads(path.read_text(encoding="utf-8"))
-            if body.get("operation") != "upsert_memory":
-                raise ValueError(f"unsupported operation: {body.get('operation')}")
-            from .workbench import WorkbenchMemory
+            operation = body.get("operation")
+            if operation == "upsert_memory":
+                from .workbench import WorkbenchMemory
 
-            brain.upsert(WorkbenchMemory.model_validate(body["payload"]))
+                brain.upsert(WorkbenchMemory.model_validate(body["payload"]))
+            elif operation == "upsert_control_record":
+                from .cloud_control_plane import CloudControlPlane
+
+                payload = body["payload"]
+                CloudControlPlane().upsert_record(
+                    payload["record_type"], payload["record_id"], payload["payload"],
+                    source_updated_at=payload["payload"].get("updated_at") or payload["payload"].get("created_at"),
+                )
+            elif operation == "append_control_event":
+                from .cloud_control_plane import CloudControlPlane
+
+                payload = body["payload"]
+                CloudControlPlane().append_event(
+                    payload["stream_id"], payload["event_type"], payload["payload"],
+                    event_id=payload["event_id"], idempotency_key=payload.get("idempotency_key"),
+                )
+            else:
+                raise ValueError(f"unsupported operation: {operation}")
             path.unlink()
             replayed += 1
         except Exception as exc:

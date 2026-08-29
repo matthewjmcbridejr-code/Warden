@@ -29,6 +29,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _cloud_plane():
+    from .cloud_control_plane import CloudControlPlane, cloud_control_enabled
+    return CloudControlPlane() if cloud_control_enabled() else None
+
+
+def _sync_cloud_gate(gate: dict[str, Any]) -> None:
+    plane = _cloud_plane()
+    if plane is None:
+        return
+    try:
+        plane.upsert_record("proof_gate", str(gate["gate_id"]), gate, source_updated_at=gate.get("decided_at") or gate.get("created_at"))
+    except Exception:
+        plane.enqueue_record("proof_gate", str(gate["gate_id"]), gate)
+
+
+def _cloud_gate(gate_id: str) -> dict[str, Any] | None:
+    plane = _cloud_plane()
+    if plane is None:
+        return None
+    try:
+        return plane.get_record("proof_gate", gate_id)
+    except Exception:
+        return None
+
+
 def gates_index_path(root: Path) -> Path:
     return root / "gates" / "gates.json"
 
@@ -124,10 +149,14 @@ def create_proof_gate(
         rows = _read_gates(path)
         rows.insert(0, record)
         _write_gates(path, rows[:500])
+    _sync_cloud_gate(record)
     return _sanitize_gate(record)
 
 
 def get_proof_gate(root: Path, gate_id: str) -> dict[str, Any] | None:
+    cloud = _cloud_gate(gate_id)
+    if cloud is not None:
+        return _sanitize_gate(cloud)
     with _FILE_LOCK:
         rows = _read_gates(gates_index_path(root))
     for row in rows:
@@ -137,12 +166,28 @@ def get_proof_gate(root: Path, gate_id: str) -> dict[str, Any] | None:
 
 
 def list_gates_for_run(root: Path, run_id: str) -> list[dict[str, Any]]:
+    plane = _cloud_plane()
+    if plane is not None:
+        try:
+            cloud = plane.list_records("proof_gate", limit=500)
+            if cloud:
+                return [_sanitize_gate(row) for row in cloud if row.get("run_id") == run_id]
+        except Exception:
+            pass
     with _FILE_LOCK:
         rows = _read_gates(gates_index_path(root))
     return [_sanitize_gate(row) for row in rows if row.get("run_id") == run_id]
 
 
 def list_recent_gates(root: Path, *, limit: int = 30) -> list[dict[str, Any]]:
+    plane = _cloud_plane()
+    if plane is not None:
+        try:
+            cloud = plane.list_records("proof_gate", limit=limit)
+            if cloud:
+                return [_sanitize_gate(row) for row in cloud]
+        except Exception:
+            pass
     with _FILE_LOCK:
         rows = _read_gates(gates_index_path(root))
     return [_sanitize_gate(row) for row in rows[:limit]]
@@ -239,4 +284,6 @@ def decide_proof_gate(
         if updated is None:
             raise HTTPException(status_code=404, detail=f"Proof gate not found: {gate_id}")
         _write_gates(path, rows)
+    if updated is not None:
+        _sync_cloud_gate(updated)
     return _sanitize_gate(updated)
