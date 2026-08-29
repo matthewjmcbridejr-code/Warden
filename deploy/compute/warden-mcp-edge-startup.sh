@@ -82,8 +82,10 @@ unset RAW_DSN BRAIN_DSN OAUTH_PASSPHRASE
 
 # Pin the proxy version used by the startup contract and run it with the VM's
 # attached service account (roles/cloudsql.client; no static key file).
-curl -fsSL --retry 5 -o /usr/local/bin/cloud-sql-proxy \
-  https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.2/cloud-sql-proxy.linux.amd64
+if [ ! -x /usr/local/bin/cloud-sql-proxy ]; then
+  curl -fsSL --retry 5 -o /usr/local/bin/cloud-sql-proxy \
+    https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.2/cloud-sql-proxy.linux.amd64
+fi
 chmod 0755 /usr/local/bin/cloud-sql-proxy
 
 install -m 0644 /dev/stdin /etc/systemd/system/warden-cloudsql-proxy.service <<UNIT
