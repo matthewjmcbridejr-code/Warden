@@ -5,6 +5,10 @@
   "buildCommand": "",
   "rewrites": [
     {
+      "source": "/api/mcharness/:path*",
+      "destination": "/api/mcharness?path=:path*"
+    },
+    {
       "source": "/",
       "destination": "/web/warden/app.html"
     }
