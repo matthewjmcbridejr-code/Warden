@@ -65,7 +65,7 @@ secret_value() {
 # Transform Cloud Run's Cloud SQL socket path to the local Auth Proxy socket.
 # Neither the database password nor the DSN is logged.
 RAW_DSN="$(secret_value WARDEN_BRAIN_DATABASE_URL)"
-BRAIN_DSN="$(RAW_DSN="${RAW_DSN}" python3 -c 'import os; d=os.environ["RAW_DSN"]; print(d.replace("/cloudsql/booming-key-500220-d9:us-central1:warden-brain", "/run/warden-cloudsql"))')"
+BRAIN_DSN="$(RAW_DSN="${RAW_DSN}" python3 -c 'import os; d=os.environ["RAW_DSN"]; print(d.replace("/cloudsql/booming-key-500220-d9:us-central1:warden-brain", "/run/warden-cloudsql/booming-key-500220-d9:us-central1:warden-brain"))')"
 OAUTH_PASSPHRASE="$(secret_value MCP_OAUTH_OWNER_PASSPHRASE)"
 umask 077
 printf '%s\n' \
@@ -141,4 +141,5 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now warden-cloudsql-proxy.service
 systemctl enable --now warden-mcp-edge.service
-systemctl enable --now caddy.service
+systemctl enable caddy.service
+systemctl restart caddy.service

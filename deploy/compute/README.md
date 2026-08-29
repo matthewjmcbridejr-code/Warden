@@ -35,7 +35,12 @@ two required secrets, then provision the edge:
 ```bash
 gcloud secrets create MCP_OAUTH_OWNER_PASSPHRASE --replication-policy=automatic
 openssl rand -base64 36 | gcloud secrets versions add MCP_OAUTH_OWNER_PASSPHRASE --data-file=-
-gcloud projects add-iam-policy-binding booming-key-500220-d9 \
+gcloud secrets add-iam-policy-binding WARDEN_BRAIN_DATABASE_URL \
+  --project=booming-key-500220-d9 \
+  --member=serviceAccount:341941245324-compute@developer.gserviceaccount.com \
+  --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding MCP_OAUTH_OWNER_PASSPHRASE \
+  --project=booming-key-500220-d9 \
   --member=serviceAccount:341941245324-compute@developer.gserviceaccount.com \
   --role=roles/secretmanager.secretAccessor
 gcloud compute firewall-rules create warden-mcp-edge-web \
