@@ -27,6 +27,7 @@ from src.warden.personal_memory import get_workstream, load_profile, update_prof
 log = logging.getLogger(__name__)
 
 WARDEN_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:8125")
+WARDEN_AUTH_MODE = os.getenv("WARDEN_AUTH_MODE", "none").strip().lower()
 from src.warden.paths import data_root as _warden_data_root
 MCTABLE_ROOT = _warden_data_root()
 BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
@@ -256,13 +257,34 @@ def _semantic_recall(query: str, limit: int) -> list[dict]:
 # Tools
 # ---------------------------------------------------------------------------
 
+def _warden_request_headers() -> dict[str, str]:
+    """Return short-lived GCE identity headers for the private Cloud Run API."""
+    if WARDEN_AUTH_MODE not in {"gce", "gce_metadata", "google"}:
+        return {}
+    import urllib.parse
+    import urllib.request
+
+    audience = os.getenv("WARDEN_AUTH_AUDIENCE", WARDEN_URL).rstrip("/")
+    metadata_url = (
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?"
+        + urllib.parse.urlencode({"audience": audience, "format": "full"})
+    )
+    request = urllib.request.Request(metadata_url, headers={"Metadata-Flavor": "Google"})
+    with urllib.request.urlopen(request, timeout=3) as response:
+        token = response.read().decode().strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
 @mcp.tool()
 def warden_health() -> str:
     """Check Warden brain health: API reachability, memory count, semantic index, ingest paths."""
     try:
         import httpx
         try:
-            r = httpx.get(f"{WARDEN_URL}/api/mcharness/health", timeout=3.0)
+            r = httpx.get(
+                f"{WARDEN_URL}/api/mcharness/health",
+                headers=_warden_request_headers(),
+                timeout=3.0,
+            )
             api_ok = r.status_code < 500
         except Exception:
             api_ok = False
@@ -284,6 +306,7 @@ def warden_health() -> str:
 
         caller = _current_caller_identity()
         from src.warden.cloud_brain import cloud_brain_status
+        from src.warden.mcp_state import durable_state_status
         return _ok("warden_health", {
             "warden_api_reachable": api_ok,
             "warden_url": WARDEN_URL,
@@ -292,6 +315,7 @@ def warden_health() -> str:
             "semantic_index_available": semantic_ok,
             "vector_count": vec_count,
             "storage": cloud_brain_status(),
+            "mcp_identity_store": durable_state_status(),
             "embed_model": brain_embed.EMBED_MODEL,
             "ingest_paths_found": [str(p) for p in obsidian_paths],
             "session_id": caller["session_id"],
@@ -332,7 +356,8 @@ def _mail_accounts_status_data(verify_live: bool) -> dict[str, Any]:
 
     query = "?verify_live=true" if verify_live else ""
     url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts{query}"
-    with urllib.request.urlopen(url, timeout=15) as response:
+    request = urllib.request.Request(url, headers=_warden_request_headers())
+    with urllib.request.urlopen(request, timeout=15) as response:
         data = json.loads(response.read())
     accounts = data.get("accounts", [])
     return {
@@ -2438,7 +2463,7 @@ def warden_mail_search(account_id: str, query: str, limit: int = 10) -> str:
         import urllib.request, urllib.parse, json
         params = urllib.parse.urlencode({"account_id": account_id, "q": query, "limit": limit})
         url = f"{WARDEN_URL}/api/mcharness/warden/mail/search?{params}"
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=_warden_request_headers()), timeout=15) as r:
             data = json.loads(r.read())
         return _ok("warden_mail_search", {
             "account_id": account_id,
@@ -2468,7 +2493,7 @@ def warden_mail_read_message(account_id: str, message_id: str) -> str:
     try:
         import urllib.request, json
         url = f"{WARDEN_URL}/api/mcharness/warden/mail/messages/{urllib.parse.quote(account_id)}/{urllib.parse.quote(message_id)}"
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=_warden_request_headers()), timeout=15) as r:
             data = json.loads(r.read())
         return _ok("warden_mail_read_message", {"message": data.get("message", {})})
     except Exception as exc:

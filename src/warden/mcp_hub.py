@@ -48,6 +48,7 @@ log = logging.getLogger(__name__)
 
 GATEWAY_URL = os.getenv("WARDEN_MCP_HUB_URL", "http://127.0.0.1:8082/mcp")
 GATEWAY_TOKEN = os.getenv("WARDEN_MCP_HUB_TOKEN", "")
+HUB_ENABLED = os.getenv("WARDEN_MCP_HUB_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 CONTEXT7_URL = os.getenv("WARDEN_CONTEXT7_MCP_URL", "https://mcp.context7.com/mcp")
 DISCOVERY_TIMEOUT_SECONDS = 10.0
 CALL_TIMEOUT_SECONDS = 60.0
@@ -361,7 +362,12 @@ def bootstrap_hub(mcp: FastMCP) -> HubStatus:
 
     native_names = set(name for name in mcp._tool_manager._tools.keys() if name not in _tool_routes)
     _tool_routes.clear()
-    status = HubStatus(native_tool_count=len(native_names))
+    status = HubStatus(enabled=HUB_ENABLED, native_tool_count=len(native_names))
+    if not HUB_ENABLED:
+        status.last_discovery_at = datetime.now(timezone.utc).isoformat()
+        _hub_status = status
+        log.warning("mcp_hub: disabled; no McServer/upstream tools will be mounted")
+        return status
     registered: list[str] = []
     skipped: list[str] = []
     blocked: list[str] = []
