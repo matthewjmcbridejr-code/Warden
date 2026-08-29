@@ -44,7 +44,11 @@ async function googleAccessToken() {
       subject_token: subjectToken,
     }),
   });
-  if (!sts.ok) throw new Error(`Google STS rejected Vercel OIDC (${sts.status})`);
+  if (!sts.ok) {
+    const detail = await sts.text();
+    console.error(`Google STS rejected Vercel OIDC (${sts.status}): ${detail.slice(0, 500)}`);
+    throw new Error(`Google STS rejected Vercel OIDC (${sts.status})`);
+  }
   const stsBody = await sts.json();
   if (!stsBody.access_token) throw new Error("Google STS returned no access token");
 
