@@ -213,19 +213,21 @@ def main() -> int:
     applied = 0
     try:
         plane.ensure_schema()
-        for kind, ident, payload in items:
-            plane.upsert_record(kind, ident, payload, source_updated_at=_timestamp(payload))
-            applied += 1
+        applied = plane.upsert_records(items)
+        event_batch = []
         for payload in events:
             event_id = str(payload.get("id") or payload.get("event_id"))
             idem = payload.get("idempotency_key") or f"migrate-chat:{event_id}"
-            plane.append_event(
-                str(payload.get("conversation_id") or "conv_warden_team"),
-                str(payload.get("event_type") or "human_message"),
-                payload,
-                event_id=event_id,
-                idempotency_key=str(idem),
+            event_batch.append(
+                (
+                    str(payload.get("conversation_id") or "conv_warden_team"),
+                    str(payload.get("event_type") or "human_message"),
+                    payload,
+                    event_id,
+                    str(idem),
+                )
             )
+        report["applied_events"] = plane.append_events(event_batch)
     except Exception as exc:
         report["failures"].append({"error": str(exc), "after_records": applied})
     report["applied_records"] = applied

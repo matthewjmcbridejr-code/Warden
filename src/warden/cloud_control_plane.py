@@ -133,6 +133,27 @@ class CloudControlPlane:
                 )
             conn.commit()
 
+    def upsert_records(self, records: list[tuple[str, str, dict[str, Any]]]) -> int:
+        """Upsert a batch in one Cloud SQL transaction."""
+        if not records:
+            return 0
+        with self._connect() as conn:
+            self.ensure_schema_on(conn)
+            with conn.cursor() as cur:
+                for record_type, record_id, payload in records:
+                    encoded = json.dumps(payload, sort_keys=True, default=str)
+                    cur.execute(
+                        RECORD_UPSERT_SQL,
+                        (
+                            record_type,
+                            record_id,
+                            encoded,
+                            _as_datetime(payload.get("updated_at") or payload.get("decided_at") or payload.get("created_at")),
+                        ),
+                    )
+            conn.commit()
+        return len(records)
+
     def get_record(self, record_type: str, record_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             self.ensure_schema_on(conn)
@@ -202,6 +223,47 @@ class CloudControlPlane:
                 )
             conn.commit()
             return stored, True
+
+    def append_events(self, events: list[tuple[str, str, dict[str, Any], str, str | None]]) -> int:
+        """Append an idempotent event batch in one Cloud SQL transaction."""
+        if not events:
+            return 0
+        appended = 0
+        with self._connect() as conn:
+            self.ensure_schema_on(conn)
+            with conn.cursor() as cur:
+                for stream_id, event_type, payload, event_id, idempotency_key in events:
+                    if idempotency_key:
+                        cur.execute(
+                            "SELECT 1 FROM warden_control_events WHERE idempotency_key = %s",
+                            (idempotency_key,),
+                        )
+                        if cur.fetchone():
+                            continue
+                    cur.execute(
+                        "INSERT INTO warden_control_streams (stream_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                        (stream_id,),
+                    )
+                    cur.execute(
+                        "SELECT last_seq FROM warden_control_streams WHERE stream_id = %s FOR UPDATE",
+                        (stream_id,),
+                    )
+                    seq = int(cur.fetchone()[0]) + 1
+                    stored = dict(payload)
+                    stored.update({"event_id": event_id, "seq": seq, "stream_id": stream_id, "event_type": event_type})
+                    cur.execute(
+                        """INSERT INTO warden_control_events
+                           (event_id, stream_id, seq, event_type, idempotency_key, payload)
+                           VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
+                        (event_id, stream_id, seq, event_type, idempotency_key, json.dumps(stored, default=str)),
+                    )
+                    cur.execute(
+                        "UPDATE warden_control_streams SET last_seq = %s WHERE stream_id = %s",
+                        (seq, stream_id),
+                    )
+                    appended += 1
+            conn.commit()
+        return appended
 
     def list_events(self, stream_id: str, *, since_seq: int = 0, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
