@@ -42,7 +42,11 @@ gcloud run services describe warden-api --region=us-central1 \
 ```
 
 Copy the resulting Cloud Run URL into the `destination` in `vercel.json`,
-replacing `warden-api-REPLACE_ME-uc.a.run.app`, and commit that change.
+replacing `warden-api-REPLACE_ME-uc.a.run.app`, and commit that change. The
+service is private by default. Before the Vercel UI can call it, add an
+authenticated Vercel-to-GCP bridge (for example a Vercel server-side proxy
+using workload identity federation) or use an approved identity-aware load
+balancer. Do not make the personal Brain API public as a shortcut.
 
 ## Connect GitHub and Vercel
 

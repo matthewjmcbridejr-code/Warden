@@ -29,7 +29,6 @@ steps:
       - --image=us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
       - --region=${_REGION}
       - --platform=managed
-      - --allow-unauthenticated
       - --port=8080
       - --min-instances=1
       - --max-instances=3
