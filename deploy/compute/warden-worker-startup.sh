@@ -93,6 +93,7 @@ EnvironmentFile=/etc/warden-worker.env
 Environment=PYTHONPATH=/opt/warden
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden
+Environment=WARDEN_BRAIN_BACKEND=postgres
 Environment=MCHARNESS_PUBLIC_WRITE_ENABLED=false
 Environment=MCHARNESS_TMUX_RUNNER_ENABLED=false
 Environment=MCHARNESS_CODEX_RUNNER_ENABLED=false
