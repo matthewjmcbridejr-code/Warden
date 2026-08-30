@@ -125,7 +125,7 @@ Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
 Environment=WARDEN_BRAIN_BACKEND=postgres
 Environment=WARDEN_MCP_STATE_BACKEND=postgres
 Environment=WARDEN_MCP_HUB_ENABLED=false
-Environment=MCP_OAUTH_ISSUER_URL=https://${DOMAIN}
+Environment=MCP_OAUTH_ISSUER_URL=https://mcp.mctable.online
 Environment=WARDEN_URL=https://warden-api-cpjzhcvbha-uc.a.run.app
 Environment=WARDEN_AUTH_MODE=gce_metadata
 Environment=WARDEN_AUTH_AUDIENCE=https://warden-api-cpjzhcvbha-uc.a.run.app
