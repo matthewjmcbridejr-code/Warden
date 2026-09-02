@@ -6,6 +6,7 @@ const {
   currentUser,
   exchangeCode,
   parseCookies,
+  redirectUri,
 } = require("../_vercel-auth");
 
 module.exports = async function handler(req, res) {
@@ -14,13 +15,21 @@ module.exports = async function handler(req, res) {
   const returnedState = String(query.state || "");
   const cookies = parseCookies(req.headers.cookie);
   const verifier = String(cookies[PKCE_COOKIE] || "");
-  if (
-    !code ||
-    !returnedState ||
-    !cookies[STATE_COOKIE] ||
-    !verifier ||
-    !cryptoSafeEqual(returnedState, cookies[STATE_COOKIE])
-  ) {
+  let invalidReason = "";
+  if (!code) invalidReason = "missing_code";
+  else if (!returnedState) invalidReason = "missing_query_state";
+  else if (!cookies[STATE_COOKIE]) invalidReason = "missing_state_cookie";
+  else if (!verifier) invalidReason = "missing_pkce_cookie";
+  else if (!cryptoSafeEqual(returnedState, cookies[STATE_COOKIE])) invalidReason = "state_mismatch";
+  if (invalidReason) {
+    console.error("oauth callback rejected", {
+      reason: invalidReason,
+      query_code_present: Boolean(code),
+      query_state_present: Boolean(returnedState),
+      stored_state_present: Boolean(cookies[STATE_COOKIE]),
+      pkce_verifier_present: Boolean(verifier),
+      redirect_uri: safeRedirectUri(req),
+    });
     return res.status(400).json({ ok: false, error: "Invalid Vercel OAuth callback" });
   }
   try {
@@ -35,9 +44,26 @@ module.exports = async function handler(req, res) {
     res.writeHead(302, { Location: "/" });
     return res.end();
   } catch (error) {
+    console.error("oauth callback failed", {
+      reason: "token_exchange_or_identity_failure",
+      message: error instanceof Error ? error.message : "unknown_error",
+      query_code_present: Boolean(code),
+      query_state_present: Boolean(returnedState),
+      stored_state_present: Boolean(cookies[STATE_COOKIE]),
+      pkce_verifier_present: Boolean(verifier),
+      redirect_uri: safeRedirectUri(req),
+    });
     return res.status(503).json({ ok: false, error: "Vercel sign-in unavailable" });
   }
 };
+
+function safeRedirectUri(req) {
+  try {
+    return redirectUri(req);
+  } catch (_) {
+    return "unavailable";
+  }
+}
 
 function cryptoSafeEqual(left, right) {
   const a = Buffer.from(String(left));
