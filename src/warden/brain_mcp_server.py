@@ -57,6 +57,7 @@ mcp = FastMCP(
         "Warden Brain gives you access to the current operator's local second brain. "
         "Start every session by calling warden_bootstrap, which accepts an empty task during cold start. "
         "Read its constraints, recent decisions, active claims, and available service catalog before using connected services. "
+        "For Slack, call warden_slack_status first, then warden_slack_list_channels, warden_slack_search, or warden_slack_read_channel as needed. "
         "Use warden_remember to save important decisions, proofs, or failures when you're done. "
         "Use warden_workstream to see recent activity across all projects."
     ),
@@ -436,6 +437,8 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             "configured": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
             "tool_names": [
                 "warden_slack_status",
+                "warden_slack_list_channels",
+                "warden_slack_search",
                 "warden_slack_read_channel",
             ],
             "background_sync": {
@@ -2278,6 +2281,104 @@ async def warden_slack_status() -> str:
         })
     except Exception as exc:
         return _err("warden_slack_status", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_list_channels(include_private: bool = True) -> str:
+    """List Slack conversations accessible to the Warden bot.
+
+    Args:
+        include_private: Include private channels, group DMs, and DMs that the bot can access.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_list_channels"):
+            return _err("warden_slack_list_channels", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _err("warden_slack_list_channels", "SLACK_BOT_TOKEN is not configured")
+        from .slack_sync import _list_channels
+        import httpx
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            rows = await _list_channels(client, token)
+        channels = []
+        for row in rows:
+            if not include_private and (row.get("is_private") or row.get("is_im") or row.get("is_mpim")):
+                continue
+            kind = "dm" if row.get("is_im") else "group_dm" if row.get("is_mpim") else "private_channel" if row.get("is_private") else "public_channel"
+            channels.append({
+                "id": row.get("id"),
+                "name": row.get("name") or row.get("id"),
+                "kind": kind,
+                "is_member": bool(row.get("is_member")),
+                "topic": (row.get("topic") or {}).get("value", ""),
+                "purpose": (row.get("purpose") or {}).get("value", ""),
+            })
+        return _ok("warden_slack_list_channels", {"count": len(channels), "channels": channels})
+    except Exception as exc:
+        return _err("warden_slack_list_channels", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_search(query: str, channel: str = "", limit: int = 20) -> str:
+    """Search recent Slack history accessible to Warden using local keyword matching.
+
+    This does not require Slack's global search scope. It reads bounded recent
+    history from accessible conversations and returns messages containing all
+    whitespace-separated query terms. Use ``channel`` for a channel ID/name.
+
+    Args:
+        query: One or more keywords to match, case-insensitively.
+        channel: Optional Slack channel ID or exact name without ``#``.
+        limit: Maximum matches to return, capped at 50.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_search"):
+            return _err("warden_slack_search", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        terms = [term.lower() for term in query.split() if term.strip()]
+        if not token:
+            return _err("warden_slack_search", "SLACK_BOT_TOKEN is not configured")
+        if not terms:
+            return _err("warden_slack_search", "query must contain at least one keyword")
+        from .slack_sync import _list_channels, _slack
+        import httpx
+        wanted = channel.strip().lstrip("#")
+        bounded_limit = max(1, min(int(limit), 50))
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            channels = await _list_channels(client, token)
+            if wanted:
+                channels = [row for row in channels if row.get("id") == wanted or row.get("name") == wanted]
+            async def read(row: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                payload = await _slack(client, token, "conversations.history", channel=row["id"], limit=100)
+                return row, payload.get("messages", [])
+            results = await asyncio.gather(*(read(row) for row in channels), return_exceptions=True)
+        matches = []
+        errors = []
+        for result in results:
+            if isinstance(result, Exception):
+                errors.append(str(result))
+                continue
+            row, messages = result
+            for message in messages:
+                text = str(message.get("text") or "")
+                if all(term in text.lower() for term in terms):
+                    matches.append({
+                        "channel_id": row.get("id"),
+                        "channel_name": row.get("name") or row.get("id"),
+                        "ts": message.get("ts"),
+                        "user": message.get("user") or message.get("username"),
+                        "text": text,
+                        "thread_ts": message.get("thread_ts"),
+                    })
+        matches.sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
+        return _ok("warden_slack_search", {
+            "query": query,
+            "match_count": min(len(matches), bounded_limit),
+            "matches": matches[:bounded_limit],
+            "errors": errors[:10],
+        })
+    except Exception as exc:
+        return _err("warden_slack_search", str(exc))
 
 
 @mcp.tool()
