@@ -3183,6 +3183,39 @@ def main():
         # legacy shared WARDEN_BRAIN_TOKEN, all unified in one place).
         mcp_app = mcp.streamable_http_app()
 
+        async def process_slack_event(payload: dict[str, Any]) -> None:
+            """Answer only explicit Warden mentions; never echo bot messages."""
+            event = payload.get("event") or {}
+            if event.get("bot_id") or event.get("subtype"):
+                return
+            if event.get("type") not in {"app_mention", "message"}:
+                return
+            text = str(event.get("text") or "")
+            if event.get("type") == "message" and "<@" not in text:
+                return
+            prompt = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+            if not prompt:
+                prompt = "Provide a concise status update."
+            result = await warden_ask_marius(prompt)
+            answer = str(result)
+            try:
+                parsed = json.loads(answer)
+                answer = str(parsed.get("data", {}).get("answer") or parsed.get("data", {}).get("response") or parsed.get("error") or answer)
+            except (TypeError, json.JSONDecodeError):
+                pass
+            token = os.getenv("SLACK_BOT_TOKEN", "")
+            channel = str(event.get("channel") or "")
+            if not token or not channel:
+                return
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"channel": channel, "text": answer[:39000]},
+                )
+                response.raise_for_status()
+
         # Pure ASGI wrapper — no Starlette nesting that breaks FastMCP routing.
         # Only special-cases paths FastMCP doesn't serve itself: /health (no
         # auth) and the two consent-screen routes (gated by
@@ -3229,6 +3262,11 @@ def main():
 
                 if path == "/oauth/consent/submit" and scope.get("method") == "POST":
                     await _handle_oauth_consent_submit(scope, receive, send)
+                    return
+
+                if path == "/slack/events" and scope.get("method") == "POST":
+                    from .slack_bridge import handle_events
+                    await handle_events(scope, receive, send, process_slack_event)
                     return
 
                 # Everything else (/mcp, /authorize, /token, /register,
