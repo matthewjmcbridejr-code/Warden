@@ -56,6 +56,15 @@ async def _slack(client: httpx.AsyncClient, token: str, method: str, **params: A
     return payload
 
 
+async def _slack_post(client: httpx.AsyncClient, token: str, method: str, **params: Any) -> dict[str, Any]:
+    response = await client.post(f"{SLACK_API}/{method}", headers={"Authorization": f"Bearer {token}"}, data=params)
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack {method} failed: {payload.get('error', 'unknown error')}")
+    return payload
+
+
 async def _list_channels(client: httpx.AsyncClient, token: str) -> list[dict[str, Any]]:
     channels: list[dict[str, Any]] = []
     cursor = ""
@@ -104,6 +113,12 @@ async def run_once() -> dict[str, Any]:
         for channel in channels:
             if len(messages) >= MAX_MESSAGES:
                 break
+            if channel.get("is_channel") and not channel.get("is_private") and not channel.get("is_member"):
+                try:
+                    await _slack_post(client, token, "conversations.join", channel=channel["id"])
+                except Exception as exc:
+                    channel_errors.append(f"{channel.get('name') or channel['id']}: join failed: {exc}")
+                    continue
             previous = state.get("channels", {}).get(channel["id"], {}).get("last_ts")
             oldest = str(previous or max(0, now - LOOKBACK_HOURS * 3600))
             try:
