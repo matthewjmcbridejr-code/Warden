@@ -63,7 +63,7 @@ secret_value() {
   access_token="$(metadata_token)"
   curl -fsS -H "Authorization: Bearer ${access_token}" \
     "https://secretmanager.googleapis.com/v1/projects/${PROJECT_ID}/secrets/${secret_name}/versions/latest:access" \
-    | python3 -c 'import base64,json,sys; print(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode())'
+    | python3 -c 'import base64,json,sys; sys.stdout.write(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode())'
 }
 
 # Transform Cloud Run's Cloud SQL socket path to the local Auth Proxy socket.
@@ -119,7 +119,7 @@ Type=simple
 User=warden
 WorkingDirectory=/opt/warden
 EnvironmentFile=/etc/warden-mcp-edge.env
-Environment=PYTHONPATH=/opt/warden
+Environment=PYTHONPATH=/opt/warden/src
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
 Environment=WARDEN_BRAIN_BACKEND=postgres

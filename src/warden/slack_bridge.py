@@ -43,17 +43,17 @@ async def handle_events(scope: dict[str, Any], receive: Callable[..., Awaitable[
         if not message.get("more_body"):
             break
     body = b"".join(chunks)
-    if not verify_signature(scope, body):
-        payload = b'{"ok":false,"error":"invalid signature"}'
-        await send({"type": "http.response.start", "status": 401, "headers": [[b"content-type", b"application/json"], [b"content-length", str(len(payload)).encode()]]})
-        await send({"type": "http.response.body", "body": payload})
-        return
     try:
         event = json.loads(body)
     except json.JSONDecodeError:
         event = {}
     if event.get("type") == "url_verification":
         payload = json.dumps({"challenge": event.get("challenge", "")}).encode()
+    elif not verify_signature(scope, body):
+        payload = b'{"ok":false,"error":"invalid signature"}'
+        await send({"type": "http.response.start", "status": 401, "headers": [[b"content-type", b"application/json"], [b"content-length", str(len(payload)).encode()]]})
+        await send({"type": "http.response.body", "body": payload})
+        return
     else:
         import asyncio
         asyncio.create_task(process(event))
