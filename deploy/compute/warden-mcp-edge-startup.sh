@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Dedicated always-on MCP edge. This VM is a gateway only: Brain memory and
-# MCP identity documents are in Cloud SQL, and McServer/upstream hub mounting
-# is deliberately disabled. Set the instance attribute MCP_EDGE_DOMAIN to the
-# final DNS name before the OAuth issuer is cut over.
+# Dedicated always-on MCP edge. Brain memory and MCP identity documents are in
+# Cloud SQL; McTable runs privately on the same VM and is mounted read-only by
+# Warden. Set the instance attribute MCP_EDGE_DOMAIN to the final DNS name
+# before the OAuth issuer is cut over.
 PROJECT_ID="booming-key-500220-d9"
 INSTANCE_CONNECTION="${PROJECT_ID}:us-central1:warden-brain"
 REPO_URL="https://github.com/matthewjmcbridejr-code/Warden.git"
