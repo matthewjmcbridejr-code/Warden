@@ -429,6 +429,23 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             ],
             "error": mail_error,
         },
+        {
+            "service_id": "slack",
+            "kind": "warden_connector",
+            "operational": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+            "configured": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+            "tool_names": [
+                "warden_slack_status",
+                "warden_slack_read_channel",
+            ],
+            "background_sync": {
+                "enabled": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+                "interval": "6h",
+                "storage": "summaries in shared Warden memory; raw sync transcripts are not retained",
+            },
+            "access_rule": "The bot can read only conversations it has joined or been invited to; public channels are auto-joined when Slack permits it.",
+            "capabilities": ["read_conversation", "six_hour_digest", "mention_reply"],
+        },
     ]
     for upstream in hub.upstreams:
         services.append({
@@ -2216,6 +2233,93 @@ def warden_memory_context(query: str = "") -> str:
         })
     except Exception as exc:
         return _err("warden_memory_context", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_status() -> str:
+    """Report read-only Slack connectivity and sync readiness.
+
+    Credentials stay server-side. This reports the authenticated Slack bot,
+    visible conversation counts, and whether the six-hour Warden sync is
+    configured; it never returns a token or message content.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_status"):
+            return _err("warden_slack_status", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _ok("warden_slack_status", {
+                "configured": False,
+                "operational": False,
+                "reason": "SLACK_BOT_TOKEN is not configured",
+            })
+        from .slack_sync import _slack
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            auth = await _slack(client, token, "auth.test")
+            conversations = await _slack(
+                client, token, "conversations.list",
+                types="public_channel,private_channel,mpim,im",
+                exclude_archived="true", limit=200,
+            )
+        rows = conversations.get("channels", [])
+        return _ok("warden_slack_status", {
+            "configured": True,
+            "operational": True,
+            "team": auth.get("team"),
+            "bot_user": auth.get("user"),
+            "conversation_count": len(rows),
+            "member_count": sum(1 for row in rows if row.get("is_member")),
+            "public_channel_count": sum(1 for row in rows if row.get("is_channel") and not row.get("is_private")),
+            "private_channel_count": sum(1 for row in rows if row.get("is_private")),
+            "dm_count": sum(1 for row in rows if row.get("is_im") or row.get("is_mpim")),
+            "capabilities": ["status", "read_conversation", "six_hour_digest", "mention_reply"],
+            "privacy": "Raw messages are available only from conversations the Slack bot can access; digests are stored in shared Warden memory.",
+        })
+    except Exception as exc:
+        return _err("warden_slack_status", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_read_channel(channel: str, limit: int = 50) -> str:
+    """Read recent messages from a Slack channel the Warden bot can access.
+
+    Args:
+        channel: Slack channel ID or exact channel name without ``#``.
+        limit: Maximum messages to return, capped at 200.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_read_channel"):
+            return _err("warden_slack_read_channel", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _err("warden_slack_read_channel", "SLACK_BOT_TOKEN is not configured")
+        from .slack_sync import _list_channels, _slack
+        import httpx
+        wanted = channel.strip().lstrip("#")
+        bounded_limit = max(1, min(int(limit), 200))
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            channels = await _list_channels(client, token)
+            match = next((row for row in channels if row.get("id") == wanted or row.get("name") == wanted), None)
+            if not match:
+                return _err("warden_slack_read_channel", f"Channel not found or not accessible: {channel}")
+            payload = await _slack(client, token, "conversations.history", channel=match["id"], limit=bounded_limit)
+        messages = []
+        for message in reversed(payload.get("messages", [])[:bounded_limit]):
+            messages.append({
+                "ts": message.get("ts"),
+                "user": message.get("user") or message.get("username"),
+                "text": message.get("text", ""),
+                "thread_ts": message.get("thread_ts"),
+            })
+        return _ok("warden_slack_read_channel", {
+            "channel_id": match.get("id"),
+            "channel_name": match.get("name") or match.get("id"),
+            "message_count": len(messages),
+            "messages": messages,
+        })
+    except Exception as exc:
+        return _err("warden_slack_read_channel", str(exc))
 
 
 # ---------------------------------------------------------------------------
