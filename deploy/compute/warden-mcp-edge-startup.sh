@@ -71,14 +71,18 @@ secret_value() {
 RAW_DSN="$(secret_value WARDEN_BRAIN_DATABASE_URL)"
 BRAIN_DSN="$(RAW_DSN="${RAW_DSN}" python3 -c 'import os; d=os.environ["RAW_DSN"]; print(d.replace("/cloudsql/booming-key-500220-d9:us-central1:warden-brain", "/run/warden-cloudsql/booming-key-500220-d9:us-central1:warden-brain"))')"
 OAUTH_PASSPHRASE="$(secret_value MCP_OAUTH_OWNER_PASSPHRASE)"
+SLACK_BOT_TOKEN="$(secret_value WARDEN_SLACK_BOT_TOKEN)"
+SLACK_SIGNING_SECRET="$(secret_value WARDEN_SLACK_SIGNING_SECRET)"
 umask 077
 printf '%s\n' \
   "WARDEN_BRAIN_DATABASE_URL=${BRAIN_DSN}" \
   "MCP_OAUTH_OWNER_PASSPHRASE=${OAUTH_PASSPHRASE}" \
+  "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}" \
+  "SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}" \
   > /etc/warden-mcp-edge.env
 chown root:warden /etc/warden-mcp-edge.env
 chmod 0640 /etc/warden-mcp-edge.env
-unset RAW_DSN BRAIN_DSN OAUTH_PASSPHRASE
+unset RAW_DSN BRAIN_DSN OAUTH_PASSPHRASE SLACK_BOT_TOKEN SLACK_SIGNING_SECRET
 
 # Pin the proxy version used by the startup contract and run it with the VM's
 # attached service account (roles/cloudsql.client; no static key file).
