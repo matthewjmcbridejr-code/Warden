@@ -170,6 +170,7 @@ Environment=MCP_OAUTH_ISSUER_URL=https://mcp.mctable.online
 Environment=WARDEN_URL=https://warden-api-cpjzhcvbha-uc.a.run.app
 Environment=WARDEN_AUTH_MODE=gce_metadata
 Environment=WARDEN_AUTH_AUDIENCE=https://warden-api-cpjzhcvbha-uc.a.run.app
+ExecStartPre=/bin/sh -c 'for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:8082/health >/dev/null && exit 0; sleep 2; done; exit 1'
 ExecStart=/opt/warden/.venv/bin/python -m warden.brain_mcp_server --http --host 127.0.0.1 --port 8126
 Restart=always
 RestartSec=5
@@ -179,6 +180,7 @@ WantedBy=multi-user.target
 UNIT
 
 install -m 0644 "${APP_DIR}/scripts/systemd/mctable-edge.service" /etc/systemd/system/mctable-edge.service
+install -m 0644 "${APP_DIR}/scripts/systemd/warden-mcp-edge.service" /etc/systemd/system/warden-mcp-edge.service
 
 install -m 0644 /dev/stdin /etc/caddy/Caddyfile <<UNIT
 ${DOMAIN} {

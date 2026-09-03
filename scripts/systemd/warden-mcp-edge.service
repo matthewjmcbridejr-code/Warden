@@ -1,0 +1,30 @@
+[Unit]
+Description=Warden Cloud Brain MCP edge
+Requires=warden-cloudsql-proxy.service mctable-edge.service
+After=warden-cloudsql-proxy.service mctable-edge.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=warden
+WorkingDirectory=/opt/warden
+EnvironmentFile=/etc/warden-mcp-edge.env
+Environment=PYTHONPATH=/opt/warden/src
+Environment=PYTHONUNBUFFERED=1
+Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
+Environment=WARDEN_BRAIN_BACKEND=postgres
+Environment=WARDEN_MCP_STATE_BACKEND=postgres
+Environment=WARDEN_MCP_HUB_ENABLED=true
+Environment=WARDEN_MCP_HUB_URL=http://127.0.0.1:8082/mcp/
+Environment=WARDEN_MCP_HUB_POLICY=read_only
+Environment=MCP_OAUTH_ISSUER_URL=https://mcp.mctable.online
+Environment=WARDEN_URL=https://warden-api-cpjzhcvbha-uc.a.run.app
+Environment=WARDEN_AUTH_MODE=gce_metadata
+Environment=WARDEN_AUTH_AUDIENCE=https://warden-api-cpjzhcvbha-uc.a.run.app
+ExecStartPre=/bin/sh -c 'for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:8082/health >/dev/null && exit 0; sleep 2; done; exit 1'
+ExecStart=/opt/warden/.venv/bin/python -m warden.brain_mcp_server --http --host 127.0.0.1 --port 8126
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
