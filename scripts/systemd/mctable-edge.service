@@ -1,0 +1,18 @@
+[Unit]
+Description=McTable private control plane for Warden
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mctable
+WorkingDirectory=/opt/mctable
+EnvironmentFile=/etc/mctable-edge.env
+Environment=PYTHONPATH=/opt/mctable/src
+Environment=MCTABLE_DATA_ROOT=/var/lib/mctable-edge
+ExecStart=/opt/mctable/.venv/bin/python -m uvicorn src.server.api:app --host 127.0.0.1 --port 8082 --log-level warning
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

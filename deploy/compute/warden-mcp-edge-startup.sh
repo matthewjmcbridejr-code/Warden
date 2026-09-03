@@ -11,6 +11,10 @@ REPO_URL="https://github.com/matthewjmcbridejr-code/Warden.git"
 REPO_BRANCH="feat/mission-control-product-completion"
 APP_DIR="/opt/warden"
 DATA_DIR="/var/lib/warden-mcp-edge"
+MCTABLE_DIR="/opt/mctable"
+MCTABLE_DATA_DIR="/var/lib/mctable-edge"
+MCTABLE_REPO_URL="https://github.com/matthewjmcbridejr-code/marius-mind-code.git"
+MCTABLE_REPO_BRANCH="main"
 DOMAIN="$(curl -fsS -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/attributes/MCP_EDGE_DOMAIN' \
   2>/dev/null || true)"
@@ -32,8 +36,10 @@ apt-get update
 apt-get install -y caddy
 
 id -u warden >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/warden --shell /usr/sbin/nologin warden
-mkdir -p "${APP_DIR}" "${DATA_DIR}"
+id -u mctable >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/mctable --shell /usr/sbin/nologin mctable
+mkdir -p "${APP_DIR}" "${DATA_DIR}" "${MCTABLE_DIR}" "${MCTABLE_DATA_DIR}"
 chown -R warden:warden "${APP_DIR}" "${DATA_DIR}"
+chown -R mctable:mctable "${MCTABLE_DIR}" "${MCTABLE_DATA_DIR}"
 
 git_warden() {
   runuser -u warden -- git "$@"
@@ -44,6 +50,17 @@ if [ ! -d "${APP_DIR}/.git" ]; then
 else
   git_warden -C "${APP_DIR}" fetch origin "${REPO_BRANCH}"
   git_warden -C "${APP_DIR}" merge --ff-only "origin/${REPO_BRANCH}"
+fi
+
+git_mctable() {
+  runuser -u mctable -- git "$@"
+}
+
+if [ ! -d "${MCTABLE_DIR}/.git" ]; then
+  git_mctable clone --branch "${MCTABLE_REPO_BRANCH}" --single-branch "${MCTABLE_REPO_URL}" "${MCTABLE_DIR}"
+else
+  git_mctable -C "${MCTABLE_DIR}" fetch origin "${MCTABLE_REPO_BRANCH}"
+  git_mctable -C "${MCTABLE_DIR}" merge --ff-only "origin/${MCTABLE_REPO_BRANCH}"
 fi
 
 python3 -m venv "${APP_DIR}/.venv"
@@ -73,16 +90,34 @@ BRAIN_DSN="$(RAW_DSN="${RAW_DSN}" python3 -c 'import os; d=os.environ["RAW_DSN"]
 OAUTH_PASSPHRASE="$(secret_value MCP_OAUTH_OWNER_PASSPHRASE)"
 SLACK_BOT_TOKEN="$(secret_value WARDEN_SLACK_BOT_TOKEN)"
 SLACK_SIGNING_SECRET="$(secret_value WARDEN_SLACK_SIGNING_SECRET)"
+MCTABLE_API_KEY="$(secret_value MCTABLE_API_KEY 2>/dev/null || true)"
 umask 077
 printf '%s\n' \
   "WARDEN_BRAIN_DATABASE_URL=${BRAIN_DSN}" \
   "MCP_OAUTH_OWNER_PASSPHRASE=${OAUTH_PASSPHRASE}" \
+  "WARDEN_MCP_HUB_URL=http://127.0.0.1:8082/mcp/" \
+  "WARDEN_MCP_HUB_TOKEN=${MCTABLE_API_KEY}" \
   "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}" \
   "SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}" \
   > /etc/warden-mcp-edge.env
 chown root:warden /etc/warden-mcp-edge.env
 chmod 0640 /etc/warden-mcp-edge.env
 unset RAW_DSN BRAIN_DSN OAUTH_PASSPHRASE SLACK_BOT_TOKEN SLACK_SIGNING_SECRET
+
+if [ -n "${MCTABLE_API_KEY}" ]; then
+  printf 'MCTABLE_API_KEY=%s\n' "${MCTABLE_API_KEY}" > /etc/mctable-edge.env
+else
+  : > /etc/mctable-edge.env
+fi
+chown root:mctable /etc/mctable-edge.env
+chmod 0640 /etc/mctable-edge.env
+unset MCTABLE_API_KEY
+
+python3 -m venv "${MCTABLE_DIR}/.venv"
+"${MCTABLE_DIR}/.venv/bin/pip" install --upgrade pip
+"${MCTABLE_DIR}/.venv/bin/pip" install "${MCTABLE_DIR}[cloud]" 2>/dev/null || \
+  "${MCTABLE_DIR}/.venv/bin/pip" install -r "${MCTABLE_DIR}/requirements.txt"
+chown -R mctable:mctable "${MCTABLE_DIR}" "${MCTABLE_DATA_DIR}"
 
 # Pin the proxy version used by the startup contract and run it with the VM's
 # attached service account (roles/cloudsql.client; no static key file).
@@ -114,8 +149,8 @@ UNIT
 install -m 0644 /dev/stdin /etc/systemd/system/warden-mcp-edge.service <<'UNIT'
 [Unit]
 Description=Warden Cloud Brain MCP edge
-Requires=warden-cloudsql-proxy.service
-After=warden-cloudsql-proxy.service network-online.target
+Requires=warden-cloudsql-proxy.service mctable-edge.service
+After=warden-cloudsql-proxy.service mctable-edge.service network-online.target
 Wants=network-online.target
 
 [Service]
@@ -128,7 +163,9 @@ Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
 Environment=WARDEN_BRAIN_BACKEND=postgres
 Environment=WARDEN_MCP_STATE_BACKEND=postgres
-Environment=WARDEN_MCP_HUB_ENABLED=false
+Environment=WARDEN_MCP_HUB_ENABLED=true
+Environment=WARDEN_MCP_HUB_URL=http://127.0.0.1:8082/mcp/
+Environment=WARDEN_MCP_HUB_POLICY=read_only
 Environment=MCP_OAUTH_ISSUER_URL=https://mcp.mctable.online
 Environment=WARDEN_URL=https://warden-api-cpjzhcvbha-uc.a.run.app
 Environment=WARDEN_AUTH_MODE=gce_metadata
@@ -140,6 +177,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+install -m 0644 "${APP_DIR}/scripts/systemd/mctable-edge.service" /etc/systemd/system/mctable-edge.service
 
 install -m 0644 /dev/stdin /etc/caddy/Caddyfile <<UNIT
 ${DOMAIN} {
