@@ -31,8 +31,14 @@ WARDEN_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:8125")
 WARDEN_AUTH_MODE = os.getenv("WARDEN_AUTH_MODE", "none").strip().lower()
 from src.warden.paths import data_root as _warden_data_root
 MCTABLE_ROOT = _warden_data_root()
-BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
+_BOARD_ROOT_ENV = os.getenv("WARDEN_BOARD_ROOT") or os.getenv("MCTABLE_BOARD_ROOT")
+BOARD_ROOT = Path(_BOARD_ROOT_ENV).expanduser() if _BOARD_ROOT_ENV else _warden_data_root() / "board"
 SESSION_ID = str(uuid.uuid4())[:8]
+
+# Per-process client activity is intentionally metadata-only. It gives every
+# connected client a useful liveness view without persisting bearer tokens or
+# message contents.
+_CLIENT_ACTIVITY: dict[str, dict[str, Any]] = {}
 
 # Server-status tools: read-only, no arbitrary shell exec.
 WORKSPACES_ROOT = Path(os.getenv("WARDEN_WORKSPACES_ROOT", str(Path.home() / "workspaces")))
@@ -96,10 +102,34 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 def _ok(tool: str, data: Any) -> str:
+    try:
+        caller = _current_caller_identity()
+        _CLIENT_ACTIVITY[caller["agent_id"]] = {
+            "agent_id": caller["agent_id"],
+            "client_name": caller["client_name"],
+            "client_id_prefix": caller["client_id_prefix"],
+            "last_tool": tool,
+            "last_status": "ok",
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception:
+        pass
     return json.dumps({"schema": "warden.brain.v1", "tool": tool, "ok": True, "data": data}, default=str)
 
 
 def _err(tool: str, message: str) -> str:
+    try:
+        caller = _current_caller_identity()
+        _CLIENT_ACTIVITY[caller["agent_id"]] = {
+            "agent_id": caller["agent_id"],
+            "client_name": caller["client_name"],
+            "client_id_prefix": caller["client_id_prefix"],
+            "last_tool": tool,
+            "last_status": "error",
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception:
+        pass
     return json.dumps({"schema": "warden.brain.v1", "tool": tool, "ok": False, "error": message})
 
 
@@ -359,7 +389,7 @@ def _mail_accounts_status_data(verify_live: bool) -> dict[str, Any]:
     query = "?verify_live=true" if verify_live else ""
     url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts{query}"
     request = urllib.request.Request(url, headers=_warden_request_headers())
-    with urllib.request.urlopen(request, timeout=15) as response:
+    with urllib.request.urlopen(request, timeout=15 if verify_live else 3) as response:
         data = json.loads(response.read())
     accounts = data.get("accounts", [])
     return {
@@ -464,6 +494,9 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             "error": upstream.get("error"),
         })
 
+    artifact_backend = os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower()
+    artifact_bucket = bool(os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip())
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "credentials": "Provider credentials remain server-side and are never returned.",
@@ -475,6 +508,12 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             "upstream_tool_count": hub.hub_tool_count,
             "mail_configured_count": mail["configured_count"],
             "mail_operational_count": mail["operational_count"],
+        },
+        "artifact_storage": {
+            "backend": "gcs" if artifact_backend == "gcs" and artifact_bucket else "local_fs",
+            "durable": True,
+            "cloud_configured": artifact_backend == "gcs" and artifact_bucket,
+            "resource_uri_scheme": "warden://artifacts/<artifact_id>",
         },
         "services": services,
     }
@@ -497,6 +536,314 @@ def warden_service_catalog(verify_live_mail: bool = True) -> str:
         return _ok("warden_service_catalog", _service_catalog_data(verify_live_mail))
     except Exception as exc:
         return _err("warden_service_catalog", str(exc))
+
+
+def _capability_catalog_data() -> dict[str, Any]:
+    """Return client-facing capability bundles derived from the live catalog.
+
+    A bundle is a product capability, rather than a raw list of MCP methods.
+    This lets Codex, Spark, Claude, and other clients make the same decision
+    about what they can do without each client maintaining its own integration
+    map.
+    """
+    services = _service_catalog_data(verify_live_mail=False)
+    by_id = {str(row.get("service_id")): row for row in services.get("services", [])}
+    native = by_id.get("warden", {})
+    upstream = {sid: row for sid, row in by_id.items() if sid.startswith("upstream:")}
+    native_tools = set(native.get("tool_names") or [])
+    mctable = upstream.get("upstream:mctable", {})
+    context7 = upstream.get("upstream:context7", {})
+    bundles = [
+        {
+            "capability_id": "shared_context",
+            "title": "Shared context and memory",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_bootstrap", "warden_context_pack", "warden_context_delta",
+                "warden_recall", "warden_search_docs", "warden_memory_context",
+                "warden_remember", "brain_search", "brain_list_sources",
+                "brain_index_status", "brain_reindex_embeddings",
+            })),
+            "resources": ["memory", "decisions", "constraints", "proofs", "documents"],
+            "notes": "Every authenticated client receives revisioned context and citations.",
+        },
+        {
+            "capability_id": "coordination",
+            "title": "Tasks, claims, handoffs, and team rooms",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_board", "warden_post_task", "warden_claim_task", "warden_handoff",
+                "warden_update_task", "warden_cancel_task", "warden_supersede_task",
+                "warden_team_inbox", "warden_team_send", "warden_team_rooms",
+                "warden_team_history", "warden_reconcile",
+            })),
+            "resources": ["task_board", "claims", "handoffs", "team_mailbox"],
+            "notes": "Board state is shared; writes remain subject to Warden policy and proof gates.",
+        },
+        {
+            "capability_id": "research_and_code",
+            "title": "Research, GitHub, and current documentation",
+            "ready": bool(mctable.get("operational") or context7.get("operational")),
+            "tools": sorted(set(mctable.get("tool_names") or []) | set(context7.get("tool_names") or [])),
+            "resources": ["GitHub", "McTable", "Context7"],
+            "notes": "Only policy-approved upstream tools are exposed to remote clients.",
+        },
+        {
+            "capability_id": "communication",
+            "title": "Slack and connected mail",
+            "ready": bool(by_id.get("slack", {}).get("operational") or by_id.get("mail", {}).get("operational")),
+            "tools": sorted(set(by_id.get("slack", {}).get("tool_names") or []) | set(by_id.get("mail", {}).get("tool_names") or [])),
+            "resources": ["Slack conversations", "mail summaries"],
+            "notes": "Mail tools are available only when an account passes a live health check.",
+        },
+        {
+            "capability_id": "execution_and_artifacts",
+            "title": "Bounded execution, runs, and artifacts",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_captain_plan", "warden_captain_dispatch_step", "warden_run_get",
+                "warden_artifact_store", "warden_artifact_get", "warden_artifact_list",
+                "warden_service_health", "warden_server_status",
+            })),
+            "resources": ["plans", "run records", "proof artifacts", "logs"],
+            "resource_templates": ["warden://artifacts/{artifact_id}"],
+            "notes": "Execution stays bounded and reports evidence; deployment and external side effects require grants.",
+        },
+        {
+            "capability_id": "shared_skills",
+            "title": "Shared agent skill packages",
+            "ready": bool(mctable.get("operational")),
+            "tools": sorted(set(mctable.get("tool_names") or []).intersection({
+                "mctable_list_shared_agent_skills", "mctable_get_shared_agent_skill",
+                "mctable_search_shared_agent_skills", "mctable_list_skill_sources",
+            }) | native_tools.intersection({"warden_skill_catalog", "warden_skill_get"})),
+            "resources": ["50 shared skill metadata records"],
+            "notes": "Skill metadata is visible today; execution grants and dependency checks are explicit per package.",
+        },
+    ]
+    try:
+        catalog_revision = compute_tool_catalog_revision()
+    except Exception:
+        catalog_revision = {"revision_hash": None}
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "catalog_revision": catalog_revision,
+        "artifact_storage": services.get("artifact_storage", {}),
+        "capabilities": bundles,
+        "policy": {
+            "read_actions": "available after bootstrap",
+            "writes": "proof-gated",
+            "external_side_effects": "require scoped capability grant and/or operator approval",
+            "credentials": "remain server-side",
+        },
+    }
+
+
+@mcp.tool()
+def warden_capability_catalog() -> str:
+    """Return product-level capabilities available to this authenticated client.
+
+    Call after ``warden_bootstrap``. The response is intentionally stable and
+    client-neutral: it describes capabilities, readiness, tools, and policy
+    requirements instead of exposing provider secrets or implementation state.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_capability_catalog"):
+            return _err("warden_capability_catalog", error)
+        return _ok("warden_capability_catalog", _capability_catalog_data())
+    except Exception as exc:
+        return _err("warden_capability_catalog", str(exc))
+
+
+def _local_skill_catalog_data() -> list[dict[str, Any]]:
+    from src.warden.workbench import ROLE_SAFETY_PROFILES, WorkbenchStore
+    rows: list[dict[str, Any]] = []
+    for profile in ROLE_SAFETY_PROFILES:
+        rows.append({
+            "skill_id": f"role:{profile.role or profile.profile_id}",
+            "title": profile.title,
+            "description": profile.summary,
+            "source": "warden_builtin",
+            "enabled": True,
+            "execution": {
+                "write_allowed": profile.write_allowed,
+                "dispatch_allowed": profile.dispatch_allowed,
+                "allowed_actions": profile.allowed_actions,
+                "forbidden_actions": profile.forbidden_actions,
+                "requires_operator_approval": profile.write_allowed or profile.dispatch_allowed,
+            },
+        })
+    try:
+        for skill in WorkbenchStore().list_skills():
+            rows.append({
+                "skill_id": skill.skill_id,
+                "title": skill.title,
+                "description": skill.description,
+                "source": "warden_workbench",
+                "enabled": skill.enabled,
+                "when_to_use": skill.when_to_use,
+                "inspect_files": skill.inspect_files,
+                "commands_allowed": skill.commands_allowed,
+                "commands_forbidden": skill.commands_forbidden,
+                "proof_format": skill.proof_format,
+                "acceptance_checks": skill.acceptance_checks,
+                "rollback_notes": skill.rollback_notes,
+            })
+    except Exception:
+        pass
+    return rows
+
+
+@mcp.tool()
+def warden_skill_catalog() -> str:
+    """List executable Warden role envelopes and locally registered playbooks."""
+    try:
+        if error := _remote_bootstrap_error("warden_skill_catalog"):
+            return _err("warden_skill_catalog", error)
+        rows = _local_skill_catalog_data()
+        return _ok("warden_skill_catalog", {
+            "count": len(rows),
+            "skills": rows,
+            "execution_policy": "Skills describe bounded work; writes and external side effects still require Warden grants or approval.",
+        })
+    except Exception as exc:
+        return _err("warden_skill_catalog", str(exc))
+
+
+@mcp.tool()
+def warden_skill_get(skill_id: str) -> str:
+    """Get one executable role envelope or local playbook by ID."""
+    try:
+        if error := _remote_bootstrap_error("warden_skill_get"):
+            return _err("warden_skill_get", error)
+        row = next((item for item in _local_skill_catalog_data() if item["skill_id"] == skill_id.strip()), None)
+        if row is None:
+            return _err("warden_skill_get", f"Skill {skill_id!r} not found.")
+        return _ok("warden_skill_get", row)
+    except Exception as exc:
+        return _err("warden_skill_get", str(exc))
+
+
+@mcp.tool()
+def warden_client_health() -> str:
+    """Return the current client's connection, handshake, and capability health."""
+    try:
+        if error := _remote_bootstrap_error("warden_client_health"):
+            return _err("warden_client_health", error)
+        caller = _current_caller_identity()
+        activity = _CLIENT_ACTIVITY.get(caller["agent_id"], {})
+        health_payload = json.loads(warden_health())
+        health = health_payload.get("data", {}) if health_payload.get("ok") else {"error": health_payload.get("error")}
+        catalog = _capability_catalog_data()
+        return _ok("warden_client_health", {
+            "client": caller,
+            "authenticated": caller.get("transport_identity") == "authenticated_mcp" or caller.get("transport_identity") == "local",
+            "bootstrapped": bool(_BOOTSTRAPPED_CALLERS.intersection(_caller_bootstrap_keys())),
+            "last_activity": activity or None,
+            "warden": {
+                "api_reachable": health.get("warden_api_reachable"),
+                "memory_available": health.get("memory_available"),
+                "memory_count": health.get("memory_count"),
+                "semantic_index_available": health.get("semantic_index_available"),
+                "vector_count": health.get("vector_count"),
+                "mcp_identity_store": health.get("mcp_identity_store"),
+            },
+            "capability_summary": [
+                {"capability_id": item["capability_id"], "ready": item["ready"], "tool_count": len(item["tools"])}
+                for item in catalog["capabilities"]
+            ],
+            "tool_catalog_revision": catalog.get("catalog_revision"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        return _err("warden_client_health", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_store(
+    content: str,
+    type: str = "agent_result",
+    mime_type: str = "text/plain",
+    project: str = "warden",
+    task_id: str = "",
+    run_id: str = "",
+) -> str:
+    """Store an immutable, content-addressed artifact and return its resource URI."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_store"):
+            return _err("warden_artifact_store", error)
+        if len(content.encode("utf-8")) > 2_000_000:
+            return _err("warden_artifact_store", "Artifact exceeds the 2 MB text limit.")
+        from src.warden.artifacts_protocol import store_artifact
+        ref = store_artifact(
+            content,
+            type=type,  # type: ignore[arg-type]
+            mime_type=mime_type,
+            project=project.strip() or "warden",
+            task_id=task_id.strip() or None,
+            run_id=run_id.strip() or None,
+            created_by=_current_caller_identity()["agent_id"],
+        )
+        return _ok("warden_artifact_store", ref.model_dump(mode="json"))
+    except Exception as exc:
+        return _err("warden_artifact_store", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_get(artifact_id: str, include_content: bool = False) -> str:
+    """Retrieve artifact metadata, with an optional bounded text payload."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_get"):
+            return _err("warden_artifact_get", error)
+        from src.warden.artifacts_protocol import read_artifact_content
+        item = read_artifact_content(artifact_id.strip())
+        if not item:
+            return _err("warden_artifact_get", f"Artifact {artifact_id!r} not found.")
+        ref, raw = item
+        data: dict[str, Any] = {"ref": ref.model_dump(mode="json")}
+        if include_content:
+            if len(raw) > 512_000:
+                return _err("warden_artifact_get", "Artifact is larger than the 512 KB inline limit; use its resource URI.")
+            try:
+                data["content"] = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                import base64
+                data["content_base64"] = base64.b64encode(raw).decode("ascii")
+                data["content_encoding"] = "base64"
+        return _ok("warden_artifact_get", data)
+    except Exception as exc:
+        return _err("warden_artifact_get", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_list(project: str = "", limit: int = 50) -> str:
+    """List artifact references created in this Warden process or loaded from storage."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_list"):
+            return _err("warden_artifact_list", error)
+        from src.warden.artifacts_protocol import list_artifact_refs
+        rows = [ref.model_dump(mode="json") for ref in list_artifact_refs(project=project.strip(), limit=limit)]
+        return _ok("warden_artifact_list", {"count": len(rows), "artifacts": rows})
+    except Exception as exc:
+        return _err("warden_artifact_list", str(exc))
+
+
+@mcp.resource(
+    "warden://artifacts/{artifact_id}",
+    name="warden_artifact",
+    title="Warden artifact",
+    description="Immutable Warden artifact content addressed by artifact ID.",
+    mime_type="application/octet-stream",
+)
+def warden_artifact_resource(artifact_id: str) -> bytes:
+    """Expose artifact content through a standard MCP resource URI."""
+    if error := _remote_bootstrap_error("warden_artifact_resource"):
+        raise PermissionError(error)
+    from src.warden.artifacts_protocol import read_artifact_content
+    item = read_artifact_content(artifact_id.strip())
+    if not item:
+        raise ValueError(f"Artifact {artifact_id!r} not found")
+    return item[1]
 
 
 def _read_meminfo() -> dict[str, Any]:
@@ -2742,6 +3089,68 @@ def brain_status() -> str:
         })
     except Exception as e:
         return _err("brain_status", str(e))
+
+
+@mcp.tool()
+def brain_index_status() -> str:
+    """Report searchable source and embedding readiness for shared context."""
+    try:
+        from src.warden.brain import index as brain_index
+        try:
+            source_count = len(brain_index.list_sources(limit=100000))
+        except Exception:
+            source_count = 0
+        return _ok("brain_index_status", {
+            "semantic_backend_available": brain_embed.is_available(),
+            "embedding_model": brain_embed.EMBED_MODEL,
+            "vector_count": brain_vector_store.count(),
+            "source_count": source_count,
+            "keyword_search_available": True,
+            "recommended_action": (
+                "Start the configured embedding backend, then call brain_reindex_embeddings."
+                if not brain_embed.is_available() else "Semantic indexing is ready."
+            ),
+        })
+    except Exception as exc:
+        return _err("brain_index_status", str(exc))
+
+
+@mcp.tool()
+def brain_reindex_embeddings(limit: int = 25) -> str:
+    """Backfill semantic vectors for recent memory records in bounded batches."""
+    try:
+        if error := _remote_bootstrap_error("brain_reindex_embeddings"):
+            return _err("brain_reindex_embeddings", error)
+        if not brain_embed.is_available():
+            return _ok("brain_reindex_embeddings", {
+                "embedded": 0,
+                "skipped": 0,
+                "semantic_backend_available": False,
+                "reason": f"Embedding backend unavailable at {brain_embed.OLLAMA_URL} for model {brain_embed.EMBED_MODEL}.",
+            })
+        max_items = max(1, min(int(limit), 100))
+        memories = sorted(_store().list_memories(), key=lambda item: item.updated_at, reverse=True)[:max_items]
+        embedded = 0
+        failed = 0
+        for memory in memories:
+            embedding = brain_embed.get_embedding(memory.raw_content or memory.summary)
+            if not embedding:
+                failed += 1
+                continue
+            brain_vector_store.upsert(memory.memory_id, embedding, {
+                "kind": memory.kind,
+                "project": memory.project_id or memory.scope,
+            })
+            embedded += 1
+        return _ok("brain_reindex_embeddings", {
+            "attempted": len(memories),
+            "embedded": embedded,
+            "failed": failed,
+            "vector_count": brain_vector_store.count(),
+            "embedding_model": brain_embed.EMBED_MODEL,
+        })
+    except Exception as exc:
+        return _err("brain_reindex_embeddings", str(exc))
 
 
 @mcp.tool()
