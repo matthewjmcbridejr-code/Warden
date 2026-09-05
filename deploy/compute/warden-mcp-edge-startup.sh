@@ -172,6 +172,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
 Environment=WARDEN_BRAIN_BACKEND=postgres
 Environment=WARDEN_EMBED_MODEL=nomic-embed-text
+Environment=WARDEN_EMBED_TIMEOUT_SECONDS=60
 Environment=WARDEN_MCP_STATE_BACKEND=postgres
 Environment=WARDEN_MCP_HUB_ENABLED=true
 Environment=WARDEN_MCP_HUB_URL=http://127.0.0.1:8082/mcp/
