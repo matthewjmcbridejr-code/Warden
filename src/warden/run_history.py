@@ -39,6 +39,41 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _cloud_plane():
+    from .cloud_control_plane import CloudControlPlane, cloud_control_enabled
+    return CloudControlPlane() if cloud_control_enabled() else None
+
+
+def _sync_cloud_record(record_type: str, record_id: str, record: dict[str, Any]) -> None:
+    plane = _cloud_plane()
+    if plane is None:
+        return
+    try:
+        plane.upsert_record(record_type, record_id, record, source_updated_at=record.get("updated_at") or record.get("created_at"))
+    except Exception:
+        plane.enqueue_record(record_type, record_id, record)
+
+
+def _cloud_record(record_type: str, record_id: str) -> dict[str, Any] | None:
+    plane = _cloud_plane()
+    if plane is None:
+        return None
+    try:
+        return plane.get_record(record_type, record_id)
+    except Exception:
+        return None
+
+
+def _cloud_records(record_type: str, limit: int) -> list[dict[str, Any]] | None:
+    plane = _cloud_plane()
+    if plane is None:
+        return None
+    try:
+        return plane.list_records(record_type, limit=limit)
+    except Exception:
+        return None
+
+
 def runs_index_path(root: Path) -> Path:
     return root / "runs" / "runs.json"
 
@@ -165,6 +200,7 @@ def create_run_record(
         rows = [row for row in rows if row.get("run_id") != run_id]
         rows.insert(0, record)
         _write_json_list(path, rows[:200])
+    _sync_cloud_record("run", run_id, record)
     return sanitize_run_summary(record)
 
 
@@ -194,10 +230,15 @@ def update_run_record(root: Path, run_id: str, **fields: Any) -> dict[str, Any] 
         if updated is None:
             return None
         _write_json_list(path, rows)
+    if updated is not None:
+        _sync_cloud_record("run", run_id, updated)
     return sanitize_run_summary(updated)
 
 
 def get_run_record(root: Path, run_id: str) -> dict[str, Any] | None:
+    cloud = _cloud_record("run", run_id)
+    if cloud is not None:
+        return sanitize_run_detail(cloud)
     with _FILE_LOCK:
         rows = _read_json_list(runs_index_path(root))
     for row in rows:
@@ -207,6 +248,9 @@ def get_run_record(root: Path, run_id: str) -> dict[str, Any] | None:
 
 
 def list_recent_runs(root: Path, *, limit: int = 50) -> list[dict[str, Any]]:
+    cloud = _cloud_records("run", limit)
+    if cloud:
+        return [sanitize_run_summary(row) for row in cloud]
     with _FILE_LOCK:
         rows = _read_json_list(runs_index_path(root))
     return [sanitize_run_summary(row) for row in rows[:limit]]
@@ -215,6 +259,11 @@ def list_recent_runs(root: Path, *, limit: int = 50) -> list[dict[str, Any]]:
 def find_run_by_session(root: Path, session_id: str) -> dict[str, Any] | None:
     if not session_id:
         return None
+    cloud = _cloud_records("run", 200)
+    if cloud:
+        for row in cloud:
+            if row.get("session_id") == session_id:
+                return row
     with _FILE_LOCK:
         rows = _read_json_list(runs_index_path(root))
     for row in rows:
@@ -276,10 +325,30 @@ def create_evidence_record(
                 run_rows[index]["evidence_ids"] = evidence_ids
                 break
             _write_json_list(runs_path, run_rows)
+            if run_id:
+                attached = next((row for row in run_rows if row.get("run_id") == run_id), None)
+                if attached is not None:
+                    _sync_cloud_record("run", str(run_id), attached)
+    # Cloud Run and the edge have separate local cache roots. Always update
+    # the authoritative run record directly when the run was created by a
+    # different instance, so evidence associations survive cross-instance
+    # reads and replacements.
+    if run_id:
+        cloud_run = _cloud_record("run", str(run_id))
+        if cloud_run is not None:
+            evidence_ids = list(cloud_run.get("evidence_ids") or [])
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+                cloud_run["evidence_ids"] = evidence_ids
+                _sync_cloud_record("run", str(run_id), cloud_run)
+    _sync_cloud_record("evidence", evidence_id, record)
     return sanitize_evidence_summary(record)
 
 
 def get_evidence_record(root: Path, evidence_id: str) -> dict[str, Any] | None:
+    cloud = _cloud_record("evidence", evidence_id)
+    if cloud is not None:
+        return sanitize_evidence_detail(cloud)
     with _FILE_LOCK:
         rows = _read_json_list(evidence_index_path(root))
     for row in rows:
@@ -296,6 +365,9 @@ def get_evidence_record(root: Path, evidence_id: str) -> dict[str, Any] | None:
 
 
 def list_recent_evidence(root: Path, *, limit: int = 50) -> list[dict[str, Any]]:
+    cloud = _cloud_records("evidence", limit)
+    if cloud:
+        return [sanitize_evidence_summary(row) for row in cloud]
     with _FILE_LOCK:
         rows = _read_json_list(evidence_index_path(root))
     return [sanitize_evidence_summary(row) for row in rows[:limit]]
@@ -304,6 +376,9 @@ def list_recent_evidence(root: Path, *, limit: int = 50) -> list[dict[str, Any]]
 def evidence_summaries_for_run(root: Path, evidence_ids: list[str]) -> list[dict[str, Any]]:
     if not evidence_ids:
         return []
+    cloud = [_cloud_record("evidence", str(evidence_id)) for evidence_id in evidence_ids]
+    if any(row is not None for row in cloud):
+        return [sanitize_evidence_summary(row) for row in cloud if row is not None]
     with _FILE_LOCK:
         rows = _read_json_list(evidence_index_path(root))
     by_id = {row.get("evidence_id"): row for row in rows}

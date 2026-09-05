@@ -1,0 +1,47 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Dockerfile.cloudrun", "-t", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "."]
+  - name: gcr.io/cloud-builders/docker
+    args: ["run", "--rm", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID", "python", "-c", "import playwright; from src.server.api import app; print(app.title)"]
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker run -d --name warden-api-smoke -e PORT=8080 -p 18080:8080 us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
+        trap 'docker rm -f warden-api-smoke >/dev/null 2>&1 || true' EXIT
+        for attempt in $(seq 1 30); do
+          if docker run --rm --network host curlimages/curl:8.12.1 -fsS http://127.0.0.1:18080/api/mcharness/health; then
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs warden-api-smoke
+        exit 1
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID"]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
+      - --region=${_REGION}
+      - --platform=managed
+      - --port=8080
+      - --min-instances=1
+      - --max-instances=3
+      - --memory=2Gi
+      - --cpu=1
+      - --timeout=300
+      - --set-env-vars=MCHARNESS_DATA_ROOT=/tmp/warden-data,MCHARNESS_PUBLIC_WRITE_ENABLED=false,MCHARNESS_TMUX_RUNNER_ENABLED=false,MCHARNESS_CODEX_RUNNER_ENABLED=false,WARDEN_GOOGLE_BRAIN_ENABLED=true,WARDEN_GOOGLE_PROJECT_ID=${PROJECT_ID},WARDEN_BRAIN_BACKEND=postgres,WARDEN_ARTIFACT_BACKEND=gcs,WARDEN_ARTIFACT_BUCKET=${PROJECT_ID}-warden-brain,WARDEN_QUEUE_BACKEND=pubsub,WARDEN_MISSIONS_TOPIC=projects/${PROJECT_ID}/topics/warden-missions
+      - --add-cloudsql-instances=${PROJECT_ID}:${_REGION}:warden-brain
+      - --set-secrets=WARDEN_BRAIN_DATABASE_URL=WARDEN_BRAIN_DATABASE_URL:latest
+images:
+  - us-central1-docker.pkg.dev/booming-key-500220-d9/warden/warden-api:$BUILD_ID
+substitutions:
+  _SERVICE: warden-api
+  _REGION: us-central1
+options:
+  logging: CLOUD_LOGGING_ONLY

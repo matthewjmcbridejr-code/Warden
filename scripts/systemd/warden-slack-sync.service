@@ -1,0 +1,15 @@
+[Unit]
+Description=Warden six-hour Slack memory sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=warden
+WorkingDirectory=/opt/warden
+Environment=PYTHONPATH=/opt/warden:/opt/warden/src
+Environment=WARDEN_BRAIN_BACKEND=postgres
+Environment=WARDEN_MCP_STATE_BACKEND=postgres
+Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
+EnvironmentFile=/etc/warden-mcp-edge.env
+ExecStart=/opt/warden/.venv/bin/python -m warden.slack_sync

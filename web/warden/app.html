@@ -9,7 +9,7 @@
     content="Warden captures your browser, inbox, notes, and agent work into Warden Brain, then lets the Warden assistant answer or act with source-backed proof."
   />
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./app.css?v=phase2-redesign" />
+  <link rel="stylesheet" href="./app.css?v=mission-browser-slice-1" />
   <link rel="stylesheet" href="./captain-deck.css?v=1" />
   <link rel="stylesheet" href="./theme.css?v=obsidian-1" />
 </head>
@@ -80,6 +80,22 @@
       <!-- SECTION: AGENTIC GROUP CHAT -->
       <section id="warden-section-group-chat" class="workspace-section cmd-section active" data-section="group-chat" data-testid="warden-section-group-chat">
         <div class="group-chat-container">
+          <aside class="mission-control-rail" aria-label="Mission navigation">
+            <div class="mission-rail-brand">WARDEN</div>
+            <button type="button" class="mission-rail-link active" data-mission-view="home">
+              <span>Home</span>
+            </button>
+            <button type="button" class="mission-rail-link" data-mission-view="needs-you">
+              <span>Needs You</span>
+              <span id="mission-needs-count" class="mission-count" hidden>0</span>
+            </button>
+            <div class="mission-rail-heading">PROJECTS</div>
+            <div class="mission-project-name">Warden</div>
+            <div id="mission-rail-list" class="mission-rail-list">
+              <div class="mission-rail-empty">No browser missions yet</div>
+            </div>
+          </aside>
+
           <!-- Rooms Rail (Hidden by default for max workspace width) -->
           <div class="chat-rooms-sidebar" style="display:none;">
             <div class="chat-sidebar-header">
@@ -105,13 +121,10 @@
             <div class="chat-header">
               <div class="chat-header-info">
                 <div class="chat-header-title-row">
-                  <h2 id="chat-room-title">Warden Team</h2>
+                  <h2 id="chat-room-title">Mission Control</h2>
                   <span class="chat-working-badge idle" id="chat-working-badge">● Ready</span>
                 </div>
                 <div class="chat-header-participants" id="chat-header-participants">
-                  <span class="p-badge ready"><span class="dot">●</span> Claude</span>
-                  <span class="p-badge ready"><span class="dot">●</span> Codex</span>
-                  <span class="p-badge ready"><span class="dot">●</span> Spark</span>
                   <span class="p-badge warden"><span class="dot">●</span> Warden</span>
                 </div>
               </div>
@@ -120,6 +133,19 @@
                 <button type="button" id="chat-toggle-team-panel-btn" class="btn small chat-drawer-toggle" data-testid="team-work-btn">Team &amp; Work</button>
               </div>
             </div>
+
+            <section id="mission-browser-work" class="mission-browser-work" hidden aria-live="polite">
+              <div class="mission-section-heading">
+                <div>
+                  <span class="mission-eyebrow">CURRENT MISSION</span>
+                  <h3 id="mission-current-objective">Browser work</h3>
+                  <div id="mission-current-description" class="mission-current-description"></div>
+                </div>
+                <span id="mission-current-status" class="mission-status status-working">Working</span>
+              </div>
+              <div id="mission-needs-you-surface"></div>
+              <div id="mission-browser-card-list"></div>
+            </section>
 
             <!-- Messages Stream -->
             <div class="chat-messages-stream" id="chat-messages-stream">
@@ -155,6 +181,17 @@
             </div>
           </div>
 
+          <aside id="browser-work-surface" class="browser-work-surface" aria-hidden="true" aria-label="Browser Work details">
+            <div class="browser-surface-header">
+              <div>
+                <span class="mission-eyebrow">CONTEXTUAL WORK SURFACE</span>
+                <h3>Browser Work</h3>
+              </div>
+              <button type="button" id="browser-work-close" class="browser-surface-close" aria-label="Close Browser Work">&times;</button>
+            </div>
+            <div id="browser-work-surface-body" class="browser-surface-body"></div>
+          </aside>
+
           <!-- Slide-Over Drawer: Warden Context (Closed by default) -->
           <div class="chat-team-panel chat-team-drawer" id="chat-team-panel">
             <div class="drawer-header">
@@ -168,37 +205,16 @@
                 <div class="team-agent-card">
                   <div class="agent-info">
                     <span class="team-agent-name">Warden Captain</span>
-                    <span class="agent-subtext">Continuous Orchestrator · Gemini 2.5</span>
+                    <span class="agent-subtext">Mission coordinator</span>
                   </div>
-                  <span class="team-agent-status status-online">Operational</span>
-                </div>
-                <div class="team-agent-card">
-                  <div class="agent-info">
-                    <span class="team-agent-name">Claude UX</span>
-                    <span class="agent-subtext">Working · Settings screen</span>
-                  </div>
-                  <span class="team-agent-status status-working">Working</span>
-                </div>
-                <div class="team-agent-card">
-                  <div class="agent-info">
-                    <span class="team-agent-name">Codex Builder</span>
-                    <span class="agent-subtext">Waiting · Verification</span>
-                  </div>
-                  <span class="team-agent-status status-waiting">Waiting</span>
-                </div>
-                <div class="team-agent-card">
-                  <div class="agent-info">
-                    <span class="team-agent-name">Spark Research</span>
-                    <span class="agent-subtext">Working · Specs &amp; Research</span>
-                  </div>
-                  <span class="team-agent-status status-working">Working</span>
+                  <span class="team-agent-status status-online">Ready</span>
                 </div>
               </div>
               <div class="drawer-divider"></div>
               <div class="chat-panel-section work-summary-section">
                 <div class="work-summary-row">
-                  <span class="work-summary-item"><strong id="drawer-active-tasks-count">1</strong> active task</span>
-                  <span class="work-summary-item"><strong id="drawer-waiting-count">1</strong> waiting</span>
+                  <span class="work-summary-item"><strong id="drawer-active-tasks-count">0</strong> active tasks</span>
+                  <span class="work-summary-item"><strong id="drawer-waiting-count">0</strong> waiting</span>
                   <span class="work-summary-item"><strong id="drawer-approvals-count">0</strong> approvals</span>
                 </div>
                 <button type="button" id="chat-open-captain-desk-btn" class="btn primary full-width drawer-captain-btn">Open Captain Desk</button>
@@ -1365,12 +1381,14 @@
     </div>
   </div>
 
-  <script src="./app.js?v=phase8-wire-fresh"></script>
+  <script src="./mission-control.js?v=browser-slice-1"></script>
+  <script src="./app.js?v=mission-browser-slice-1"></script>
   <script src="./memory.js"></script>
   <script src="./agent.js"></script>
   <script src="./gateway.js"></script>
   <script src="./runners.js"></script>
   <script src="./inbox.js"></script>
   <script src="./brain-graph.js"></script>
+  <script src="./auth.js"></script>
 </body>
 </html>

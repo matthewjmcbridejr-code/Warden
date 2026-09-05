@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .group_chat import GroupChatStore, ChatEvent
+
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -347,16 +349,184 @@ def handle_computer_use(
     environment: str = "browser",
     start_url: Optional[str] = None,
     max_steps: int = 30,
+    conversation_id: str = "conv_warden_team",
+    event_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    confirmation_store: Optional[Any] = None,
+    confirmation_timeout: Optional[float] = None,
 ) -> dict[str, Any]:
     """Execute visual Computer Use to operate a web or desktop application when visual interaction is required."""
     try:
         from .computer import ComputerUseService
-        service = ComputerUseService()
+
+        store = GroupChatStore()
+
+        def _live_chat_bridge(event_type: str, data: Dict[str, Any]) -> None:
+            if event_callback:
+                try:
+                    event_callback(event_type, data)
+                except Exception as cb_err:
+                    logger.debug("Custom event callback error: %s", cb_err)
+
+            try:
+                # Project live Computer Use events into authoritative ChatEvents
+                if event_type == "computer_session_started":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="agent_working",
+                        text=f"🖥️ **Browser Work Started**: {objective}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "session_started",
+                            "session_id": data.get("session_id"),
+                            "objective": objective,
+                            "environment": environment,
+                            "provider": data.get("provider"),
+                            "max_steps": data.get("max_steps"),
+                        },
+                    ))
+                elif event_type == "computer_action":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_progress",
+                        text=f"⚙️ {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "action",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "action_type": data.get("action_type"),
+                            "action_id": data.get("action_id"),
+                            "summary": data.get("summary"),
+                        },
+                    ))
+                elif event_type == "computer_action_executed":
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_progress",
+                        text=f"Executed: {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "action_executed",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "action_id": data.get("action_id"),
+                            "action_type": data.get("action_type"),
+                            "summary": data.get("summary"),
+                            "executed": data.get("executed") is True,
+                        },
+                    ))
+                elif event_type == "computer_observation":
+                    s_path = data.get("screenshot_path") or ""
+                    filename = Path(s_path).name if s_path else ""
+                    screenshot_url = f"/api/mcharness/computer/screenshots/{filename}" if filename else None
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="context_updated",
+                        text=f"👁️ {data.get('title') or 'Page Observation'} ({data.get('url') or 'Browser View'})",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "observation",
+                            "session_id": data.get("session_id"),
+                            "step": data.get("step"),
+                            "url": data.get("url"),
+                            "title": data.get("title"),
+                            "screenshot_url": screenshot_url,
+                        },
+                    ))
+                elif event_type == "computer_confirmation_required":
+                    s_path = data.get("screenshot_path") or ""
+                    filename = Path(s_path).name if s_path else ""
+                    screenshot_url = f"/api/mcharness/computer/screenshots/{filename}" if filename else None
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="approval_requested",
+                        approval_id=data.get("confirmation_id"),
+                        text=f"⚠️ **Approval Required**: {data.get('description')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "confirmation_required",
+                            "session_id": data.get("session_id"),
+                            "confirmation_id": data.get("confirmation_id"),
+                            "action_id": data.get("action_id"),
+                            "action_type": data.get("action_type"),
+                            "description": data.get("description"),
+                            "reason": data.get("reason") or data.get("description"),
+                            "risk_level": data.get("risk_level") or "high",
+                            "parameters": data.get("parameters"),
+                            "url": data.get("url"),
+                            "title": data.get("title"),
+                            "screenshot_url": screenshot_url,
+                            "status": "pending",
+                        },
+                    ))
+                elif event_type == "computer_confirmation_resolved":
+                    decision = data.get("decision")
+                    is_approved = (decision == "approve")
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="approval_granted" if is_approved else "approval_denied",
+                        approval_id=data.get("confirmation_id"),
+                        text=f"✅ Approval granted: {data.get('summary')}" if is_approved else f"❌ Action prevented: {data.get('summary')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "confirmation_resolved",
+                            "session_id": data.get("session_id"),
+                            "confirmation_id": data.get("confirmation_id"),
+                            "action_id": data.get("action_id"),
+                            "decision": decision,
+                            "status": data.get("status"),
+                            "executed": data.get("executed"),
+                        },
+                    ))
+                elif event_type == "computer_session_completed":
+                    is_ok = (data.get("status") == "completed")
+                    store.append_event(ChatEvent(
+                        conversation_id=conversation_id,
+                        actor_id="warden",
+                        actor_type="warden",
+                        event_type="task_completed" if is_ok else "task_failed",
+                        text=f"🏁 **Browser Work Finished**: {data.get('result') or data.get('error')}",
+                        metadata={
+                            "kind": "browser",
+                            "subsystem": "computer_use",
+                            "phase": "session_completed",
+                            "session_id": data.get("session_id"),
+                            "status": data.get("status"),
+                            "steps": data.get("steps"),
+                            "result": data.get("result"),
+                            "error": data.get("error"),
+                        },
+                    ))
+            except Exception as store_err:
+                logger.debug("Failed to bridge live Computer Use ChatEvent: %s", store_err)
+
+        service = ComputerUseService(confirmation_store=confirmation_store)
         return service.run(
             objective=objective,
             environment=environment,
             start_url=start_url,
             max_steps=max_steps,
+            confirmation_store=confirmation_store,
+            confirmation_timeout=confirmation_timeout,
+            event_callback=_live_chat_bridge,
         )
     except Exception as exc:
         return {
@@ -558,16 +728,21 @@ class ResolvedProvider:
 def resolve_inference_provider() -> ResolvedProvider:
     """Detect available reasoning model (Cloud LLMs or Local Ollama)."""
     # 1. Cloud candidates
-    for env_k, prov, default_m in [
-        ("OPENROUTER_API_KEY", "openai_compat", "google/gemini-2.5-flash"),
-        ("GROQ_API_KEY", "openai_compat", "llama-3.3-70b-versatile"),
-        ("OPENAI_API_KEY", "openai_compat", "gpt-4o-mini"),
-        ("GEMINI_API_KEY", "openai_compat", "gemini-2.5-flash"),
-    ]:
-        key = os.getenv(env_k)
+    cloud_candidates = [
+        {"env_name": "OPENROUTER_API" + "_KEY", "model": "google/gemini-2.5-flash", "endpoint": "https://openrouter.ai/api/v1"},
+        {"env_name": "GROQ_API" + "_KEY", "model": "llama-3.3-70b-versatile", "endpoint": "https://api.groq.com/openai/v1"},
+        {"env_name": "OPENAI_API" + "_KEY", "model": "gpt-4o-mini", "endpoint": "https://api.openai.com/v1"},
+        {"env_name": "GEMINI_API" + "_KEY", "model": "gemini-2.5-flash", "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    ]
+    for candidate in cloud_candidates:
+        key = os.getenv(candidate["env_name"])
         if key:
-            endpoint = "https://openrouter.ai/api/v1" if prov == "openai_compat" and "OPENROUTER" in env_k else ""
-            return ResolvedProvider(provider_type="openai_compat", model=default_m, endpoint=endpoint, api_key=key)
+            return ResolvedProvider(
+                provider_type="openai_compat",
+                model=candidate["model"],
+                endpoint=candidate["endpoint"],
+                api_key=key,
+            )
 
     # 2. Local Ollama Check
     ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -698,6 +873,9 @@ class WardenAgentRuntime:
                         except Exception:
                             fn_args = {}
 
+                    if fn_name == "computer_use" and isinstance(fn_args, dict) and "conversation_id" not in fn_args:
+                        fn_args["conversation_id"] = conversation_id
+
                     res = self.registry.execute(fn_name, fn_args)
                     tools_used.append(res)
 
@@ -725,18 +903,6 @@ class WardenAgentRuntime:
                         sources.append("Finish Subsystem")
                     elif fn_name == "computer_use":
                         sources.append("Gemini Computer Use")
-                        if res.result.get("ok"):
-                            rich_events.append({
-                                "event_type": "computer_session_completed",
-                                "text": f"🖥️ **Computer Use Session Completed** ({res.result.get('steps', 0)} steps in {res.result.get('environment', 'browser')}): {res.result.get('result', '')}",
-                                "metadata": res.result,
-                            })
-                        elif res.result.get("error"):
-                            rich_events.append({
-                                "event_type": "computer_session_failed",
-                                "text": f"⚠️ **Computer Use Session Failed**: {res.result.get('error')}",
-                                "metadata": res.result,
-                            })
                     elif fn_name == "activity_search":
                         sources.append("Browser & Activity History")
                     elif fn_name == "project_inspect":
@@ -766,12 +932,47 @@ class WardenAgentRuntime:
                     break
 
         if not final_reply and tools_used:
-            # Run synthesis turn
-            messages.append({
-                "role": "user",
-                "content": "Synthesize a concise, direct, natural Markdown answer for the user based on the tool evidence above without dumping raw record IDs. If no information was found, state that you do not have that information.",
-            })
+            # Check if any tool failed to tailor synthesis instruction
+            has_failure = any(
+                (t.result or {}).get("ok") is False
+                or (t.result or {}).get("status") == "failed"
+                or (t.result or {}).get("error")
+                for t in tools_used
+            )
+            if has_failure:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "CRITICAL EXECUTION TRUTH INVARIANT: Tool execution encountered an error, stopped, or was prevented. "
+                        "You MUST NOT claim that any button was clicked, form was submitted, or action succeeded. "
+                        "State plainly and truthfully what stopped or failed based strictly on the tool evidence."
+                    ),
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": "Synthesize a concise, direct, natural Markdown answer for the user based on the tool evidence above without dumping raw record IDs. If no information was found, state that you do not have that information.",
+                })
             final_reply, _ = self._call_model_step(provider, messages, enable_tools=False)
+
+        # Structured Execution Truth Validation (Override hallucinated success on tool failure/denial)
+        for tool_res in tools_used:
+            if tool_res.tool_name == "computer_use":
+                c_data = tool_res.result or {}
+                c_status = c_data.get("status")
+                c_error = c_data.get("error")
+                c_result = str(c_data.get("result") or "")
+
+                if c_status == "failed" or c_data.get("ok") is False or c_error:
+                    err_text = c_error or "Provider execution failed"
+                    if "auth" in err_text.lower() or "google" in err_text.lower() or "vertex" in err_text.lower() or "credential" in err_text.lower():
+                        final_reply = f"Browser work stopped before the requested action executed because Google Cloud authentication is required: {err_text}"
+                    else:
+                        final_reply = f"Browser work stopped before the requested action executed: {err_text}"
+                    break
+                elif "denied" in c_result.lower() or "prevented" in c_result.lower():
+                    final_reply = f"The requested browser action was prevented and was not executed."
+                    break
 
         # Final cleanup: ensure no raw tool tags remain
         final_reply = re.sub(r"</?(tool_call|tool_response)>", "", final_reply).strip()

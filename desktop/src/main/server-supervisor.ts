@@ -5,8 +5,24 @@ import { join, resolve } from 'node:path';
 export class ServerSupervisor {
   private child: ChildProcess | null = null;
   private startedByUs = false;
+  private startPromise: Promise<boolean> | null = null;
+  private lastError: string | null = null;
 
   async ensureRunning(): Promise<boolean> {
+    if (await this.isHealthy()) return true;
+
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    this.startPromise = this._startInternal().finally(() => {
+      this.startPromise = null;
+    });
+
+    return this.startPromise;
+  }
+
+  private async _startInternal(): Promise<boolean> {
     if (await this.isHealthy()) return true;
 
     const candidatePaths = [
@@ -40,10 +56,12 @@ export class ServerSupervisor {
     }
 
     if (!pythonBin || !repoRoot) {
+      this.lastError = 'Python environment or Warden repository root could not be located.';
       return false;
     }
 
     try {
+      this.lastError = null;
       const pythonPath = `${repoRoot}:${join(repoRoot, 'src')}`;
       this.child = spawn(
         pythonBin,
@@ -63,6 +81,7 @@ export class ServerSupervisor {
       this.startedByUs = true;
 
       this.child.on('error', (err) => {
+        this.lastError = `Server failed to spawn: ${err.message}`;
         console.error('[warden supervisor] Server failed to spawn:', err);
       });
 
@@ -73,13 +92,20 @@ export class ServerSupervisor {
         this.child = null;
       });
 
-      const deadline = Date.now() + 5000;
+      // Poll until healthy or deadline (up to 12s)
+      const deadline = Date.now() + 12000;
       while (Date.now() < deadline) {
         if (await this.isHealthy()) return true;
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 250));
       }
-      return await this.isHealthy();
+
+      const finalHealth = await this.isHealthy();
+      if (!finalHealth && !this.lastError) {
+        this.lastError = 'Server process started but did not respond to health checks in time.';
+      }
+      return finalHealth;
     } catch (e) {
+      this.lastError = e instanceof Error ? e.message : String(e);
       console.error('[warden supervisor] Failed to start server:', e);
       return false;
     }
@@ -87,11 +113,19 @@ export class ServerSupervisor {
 
   async isHealthy(): Promise<boolean> {
     try {
-      const res = await fetch('http://127.0.0.1:6969/api/mcharness/health', { signal: AbortSignal.timeout(400) });
+      const res = await fetch('http://127.0.0.1:6969/api/mcharness/health', { signal: AbortSignal.timeout(600) });
       return res.ok;
     } catch {
       return false;
     }
+  }
+
+  getStatus(): { healthy: boolean; starting: boolean; error: string | null } {
+    return {
+      healthy: this.child !== null || false,
+      starting: this.startPromise !== null,
+      error: this.lastError,
+    };
   }
 
   shutdown(): void {

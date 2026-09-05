@@ -5,8 +5,8 @@ Desktop, Codex CLI, etc.) instead of sharing one static WARDEN_BRAIN_TOKEN
 for everyone. Only the SHA-256 hash of each token is ever stored on disk —
 the raw token is shown once at issue time and cannot be recovered later.
 
-Storage: ~/.local/share/warden/mcp_clients/tokens.json (mode 0600), a JSON
-list of client records:
+Storage in local mode is ~/.local/share/warden/mcp_clients/tokens.json (mode
+0600). In cloud mode the same list is a Cloud SQL document:
   {client_id, name, token_hash, created_at, revoked_at, last_used_at}
 
 This is intentionally simple (a JSON file + file lock), matching the
@@ -49,6 +49,10 @@ def _hash_token(raw_token: str) -> str:
 
 
 def _load() -> list[dict]:
+    from .mcp_state import cloud_state_enabled, load_document
+    if cloud_state_enabled():
+        document = load_document("mcp.client_tokens")
+        return document if isinstance(document, list) else []
     path = _tokens_path()
     if not path.exists():
         return []
@@ -59,6 +63,10 @@ def _load() -> list[dict]:
 
 
 def _save(records: list[dict]) -> None:
+    from .mcp_state import cloud_state_enabled, save_document
+    if cloud_state_enabled():
+        save_document("mcp.client_tokens", records)
+        return
     path = _tokens_path()
     path.write_text(json.dumps(records, indent=2))
     try:

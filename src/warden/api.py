@@ -56,6 +56,7 @@ from .workbench import (
     WorkbenchThreadCreateRequest,
     WorkbenchThreadUpdateRequest,
 )
+from .cloud_brain import get_memory_store, is_cloud_primary
 from .worker import WorkerStub, ALLOWED_COMMANDS
 from .captain_plans import (
     complete_step as complete_captain_plan_step,
@@ -134,6 +135,11 @@ from .assistant import (
     chat_with_assistant,
 )
 
+# Memory is the first cloud-primary Workbench boundary. Keep selection dynamic
+# so local tests/offline Desk instances can swap their Workbench root safely.
+def _memory_store():
+    return get_memory_store() if is_cloud_primary() else WORKBENCH_STORE
+
 router = APIRouter(prefix="/api/marius", tags=["marius-desktop"])
 router.include_router(captain_router)
 router.include_router(workbench_router)
@@ -141,11 +147,13 @@ router.include_router(workbench_router)
 from .projects import router as projects_router
 from .webstudio.api import router as webstudio_router
 from .finish.api import router as finish_router
+from .computer.api import router as computer_router
 
 mcharness_router = APIRouter(prefix="/api/mcharness", tags=["mcharness"])
 mcharness_router.include_router(projects_router)
 mcharness_router.include_router(webstudio_router)
 mcharness_router.include_router(finish_router)
+mcharness_router.include_router(computer_router)
 legacy_router = APIRouter(tags=["marius-desktop-legacy"])
 
 _CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -531,6 +539,8 @@ class McHarnessCaptainPlanRequest(BaseModel):
     check_command: Optional[str] = None
     max_dispatches: int = Field(default=0, ge=0, le=50)
     scope_paths: list[str] = Field(default_factory=list)
+    execution_target: Literal["local", "cloud", "auto"] = "auto"
+    cloud_operation: Optional[Literal["artifact_proof", "repo_status"]] = None
 
     @field_validator("goal")
     @classmethod
@@ -764,14 +774,21 @@ def _service_mode_label() -> str:
 
 
 def _run_history_write_enabled() -> bool:
-    return _codex_runner_ready()
+    # Cloud-primary mode permits authenticated control-plane writes while the
+    # execution lanes remain independently gated by _codex_runner_ready().
+    return _codex_runner_ready() or is_cloud_primary()
 
 
 def _run_history_read_enabled() -> bool:
-    return _codex_runner_ready()
+    return _codex_runner_ready() or is_cloud_primary()
 
 
 def _require_private_memory_access(request: Request = None) -> None:
+    # Cloud Run is already protected by authenticated IAM and the memory
+    # adapter is cloud-primary. Brain reads/writes must not depend on worker
+    # execution flags; those flags govern shell/agent lanes only.
+    if is_cloud_primary():
+        return
     if _codex_runner_ready():
         return
     if _env_flag("MCHARNESS_LOCAL_DEV", "WARDEN_LOCAL_DESK", default="false"):
@@ -1187,6 +1204,8 @@ def _captain_plan_response(plan: dict[str, Any], *, notes: list[str] | None = No
         "current_gate_status": current_gate_status,
         "current_gate_label": gate_ui_label(current_gate_status),
         "auto_advance": bool(plan.get("auto_advance", False)),
+        "execution_target": plan.get("execution_target", "auto"),
+        "cloud_operation": plan.get("cloud_operation"),
         "steps": steps,
         "decision_log": list(plan.get("decision_log") or []),
         "notes": list(notes or []),
@@ -1418,15 +1437,42 @@ def _artifact_blob_path(thread_id: str, kind: str, extension: str) -> Path:
 def _create_artifact(thread_id: str, kind: str, title: str, body: str, summary: Optional[str] = None, extension: str = "txt") -> dict[str, Any]:
     path = _artifact_blob_path(thread_id, kind, extension)
     path.write_text(body, encoding="utf-8")
+    artifact_id = f"artifact_{uuid.uuid4().hex[:8]}"
+    artifact_path = str(path)
+    artifact_notes = None
+    if os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower() == "gcs" and os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip():
+        # Cloud Run's filesystem is ephemeral. Keep the local file as a short
+        # lived cache, but make the immutable content-addressed GCS object the
+        # artifact authority and expose its hash in the Workbench registry.
+        from .artifacts_protocol import store_artifact
+
+        type_map = {
+            "diff": "diff",
+            "proof": "proof",
+            "test_report": "test_report",
+            "report": "report",
+            "log": "log_excerpt",
+        }
+        ref = store_artifact(
+            body,
+            type=type_map.get(kind, "agent_result"),
+            mime_type="text/markdown" if extension.lower() in {"md", "markdown"} else "text/plain",
+            project="warden",
+            task_id=thread_id,
+            created_by="warden",
+        )
+        artifact_id = ref.artifact_id
+        artifact_path = f"gs://{os.environ['WARDEN_ARTIFACT_BUCKET']}/{ref.metadata.get('gcs_object', f'artifacts/{ref.artifact_id}') }"
+        artifact_notes = f"sha256={ref.sha256}; immutable GCS object"
     artifact = WORKBENCH_STORE.create_artifact(
         WorkbenchArtifactCreateRequest(
-            artifact_id=f"artifact_{uuid.uuid4().hex[:8]}",
+            artifact_id=artifact_id,
             kind=kind,
             title=title,
-            path=str(path),
+            path=artifact_path,
             thread_id=thread_id,
             summary=summary or title,
-            notes=None,
+            notes=artifact_notes,
         )
     )
     return artifact.model_dump(mode="json")
@@ -1706,7 +1752,7 @@ def build_agent_prompt_with_memory(
             "already_injected": True,
         }
     try:
-        pack = WORKBENCH_STORE.build_memory_context_pack(
+        pack = _memory_store().build_memory_context_pack(
             project_id=project_id,
             repo_path=repo_path,
             agent=agent,
@@ -1744,7 +1790,7 @@ def _remember_run_memory(
     tags: Optional[list[str]] = None,
 ) -> Optional[str]:
     try:
-        memory = WORKBENCH_STORE.remember_memory(
+        memory = _memory_store().remember_memory(
             WorkbenchMemoryRememberRequest(
                 scope=scope,
                 content=content[:4000],
@@ -2012,6 +2058,8 @@ def get_mcharness_health():
     # _lane_entries(), which shell out to git and probe CLI executables per
     # item and can push this endpoint past client-side timeouts (e.g. the
     # browser extension's 2s abort).
+    from .cloud_queue import queue_status
+
     return {
         "ok": True,
         "service": "mcharness-control-plane",
@@ -2025,6 +2073,7 @@ def get_mcharness_health():
         "available_lanes_count": len(AGENT_LANES),
         "repo_count": len(SAFE_REPO_PATHS),
         "manual_mode": True,
+        "queue": queue_status(),
     }
 
 
@@ -2299,7 +2348,7 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
     planning_goal = payload.goal
     if payload.include_memory_context:
         try:
-            pack = WORKBENCH_STORE.build_memory_context_pack(
+            pack = _memory_store().build_memory_context_pack(
                 project_id=repo["repo_id"], user_prompt=payload.goal, max_memories=8,
             )
             context_text = str(pack.get("context") or "").strip()
@@ -2349,6 +2398,8 @@ def create_mcharness_captain_plan(payload: McHarnessCaptainPlanRequest):
     plan["check_command"] = payload.check_command
     plan["max_dispatches"] = payload.max_dispatches
     plan["scope_paths"] = list(payload.scope_paths)
+    plan["execution_target"] = payload.execution_target
+    plan["cloud_operation"] = payload.cloud_operation
 
     # Persist plan (best-effort — don't fail the response if write fails)
     persisted = None
@@ -2479,6 +2530,27 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
     if not _codex_runner_ready():
         import uuid
         run_id = "blocked-" + str(uuid.uuid4())[:8]
+        queue_result = None
+        try:
+            from .cloud_queue import enqueue_mission
+
+            queue_result = enqueue_mission(
+                mission_id=f"{plan_id}:{step_id}:{run_id}",
+                kind="captain_step",
+                body={
+                    "plan_id": plan_id,
+                    "step_id": step_id,
+                    "run_id": run_id,
+                    "repo_id": repo_id,
+                    "lane_id": lane_id,
+                    "prompt": prompt,
+                    "execution_target": plan.get("execution_target", "auto"),
+                    "operation": plan.get("cloud_operation"),
+                },
+                idempotency_key=f"captain-step:{plan_id}:{step_id}:{run_id}",
+            )
+        except Exception:
+            queue_result = None
         create_run_record(
             MCTABLE_ROOT,
             run_id=run_id,
@@ -2488,7 +2560,7 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             repo_id=repo_id,
             branch=None,
             prompt=prompt,
-            status="blocked",
+            status="queued" if queue_result is not None else "blocked",
             plan_id=plan_id,
             created_by="captain_dispatch",
             service_mode="public",
@@ -2510,7 +2582,9 @@ def post_mcharness_captain_plan_step_dispatch(plan_id: str, step_id: str):
             "service": "mcharness-control-plane",
             "run_id": run_id,
             "memory_id": mem_id,
-            "message": "Runner unavailable — blocked attempt saved to Memory",
+            "queued": queue_result is not None,
+            "queue": queue_result,
+            "message": "Mission queued for the cloud worker" if queue_result is not None else "Runner unavailable — blocked attempt saved to Memory",
             "plan": _captain_plan_response(plan),
             "dispatch": {},
         }
@@ -3216,12 +3290,13 @@ async def post_marius_agent_memory_remember(request: Request):
 @mcharness_router.get("/memory/health", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memory_health():
     from src.warden.brain_vector_store import count as vec_count
+    from .cloud_brain import cloud_brain_status
     vec = 0
     try:
         vec = vec_count()
     except Exception:
         pass
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     active = [m for m in memories if m.status != "forgotten"]
     kinds: dict = {}
     for m in active:
@@ -3233,12 +3308,13 @@ def get_warden_memory_health():
         "total_count": len(memories),
         "vector_count": vec,
         "kinds": kinds,
+        "storage": cloud_brain_status(),
     }
 
 
 @mcharness_router.get("/memories", dependencies=[Depends(_require_private_memory_access)])
 def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Optional[str] = None):
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     active = [m for m in memories if m.status != "forgotten"]
     if kind:
         active = [m for m in active if m.kind == kind]
@@ -3256,7 +3332,7 @@ def get_warden_memories(limit: int = 200, kind: Optional[str] = None, scope: Opt
 @mcharness_router.get("/memories/search", dependencies=[Depends(_require_private_memory_access)])
 @mcharness_router.get("/memories/recall", dependencies=[Depends(_require_private_memory_access)])
 def recall_warden_memories(q: str = "", scope: Optional[str] = None, kind: Optional[str] = None, limit: int = 20):
-    memories = WORKBENCH_STORE.search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
+    memories = _memory_store().search_memories(q, scope=scope, limit=max(1, min(limit, 100)))
     if kind:
         memories = [m for m in memories if m.kind == kind]
     return {
@@ -3284,7 +3360,7 @@ class MemoryPatchRequest(BaseModel):
 
 @mcharness_router.patch("/memories/{memory_id}", dependencies=[Depends(_require_private_memory_access)])
 def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
-    path = WORKBENCH_STORE._path("memories", memory_id)
+    path = _memory_store()._path("memories", memory_id)
     if not path.exists():
         raise HTTPException(404, f"Memory not found: {memory_id}")
     from src.warden.workbench import WorkbenchMemory, _atomic_write_json, _now
@@ -3303,13 +3379,15 @@ def patch_warden_memory(memory_id: str, payload: MemoryPatchRequest):
         memory.confidence = payload.confidence
     memory.updated_at = _now()
     _atomic_write_json(path, memory.model_dump(mode="json"))
+    if hasattr(_memory_store(), "save_memory"):
+        _memory_store().save_memory(memory)
     return {"ok": True, "memory": memory.model_dump(mode="json")}
 
 
 @mcharness_router.post("/memories", dependencies=[Depends(_require_private_memory_access)])
 def create_warden_memory(payload: WorkbenchMemoryCreateRequest):
     try:
-        memory = WORKBENCH_STORE.create_memory(payload)
+        memory = _memory_store().create_memory(payload)
         return {"ok": True, "memory": memory.model_dump(mode="json")}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3323,7 +3401,7 @@ async def remember_warden_memory(request: Request):
         if not payload.get("content"):
             payload["content"] = payload.get("summary") or payload.get("note") or ""
         req = WorkbenchMemoryRememberRequest(**payload)
-        memory = WORKBENCH_STORE.remember_memory(req)
+        memory = _memory_store().remember_memory(req)
         return {"ok": True, "memory": memory.model_dump(mode="json")}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3336,7 +3414,7 @@ def post_warden_memory_context_pack(payload: WardenMemoryContextPackRequest):
     try:
         return {
             "ok": True,
-            **WORKBENCH_STORE.build_memory_context_pack(
+            **_memory_store().build_memory_context_pack(
                 project_id=payload.project_id,
                 repo_path=payload.repo_path,
                 agent=payload.agent,
@@ -4670,7 +4748,7 @@ def get_command_deck_events():
 
 
 class _DemoSeedRequest(BaseModel):
-    title: str = "Demo Mission"
+    title: str = "Sample Workflow"
     description: str = "Demonstrate Warden Command Deck dispatch loop."
     agent: str = "cl"
     priority: str = "medium"
@@ -5692,7 +5770,7 @@ def get_brain_inbox(limit: int = 50):
     """Read-only reviewable feed of raw captures (newest first). PR 2 of the
     personal AI OS plan: make capture-fidelity gaps visible before automating."""
     limit = max(1, min(int(limit), 200))
-    memories = WORKBENCH_STORE.list_memories()
+    memories = _memory_store().list_memories()
     items = [
         m for m in memories
         if m.status == "active" and (m.source in _CAPTURE_SOURCES or "auto" in m.tags)
@@ -5726,7 +5804,7 @@ def post_memory_promote(memory_id: str):
     """Explicit, user-triggered promotion of a memory into a durable Brain vault
     note (PR 5). Never automatic; sets source_ref to the created note path."""
     try:
-        memory = WORKBENCH_STORE.get_memory(memory_id)
+        memory = _memory_store().get_memory(memory_id)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     if memory.source_ref:
@@ -5751,7 +5829,7 @@ def post_memory_promote(memory_id: str):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"vault write failed: {exc}")
-    updated = WORKBENCH_STORE.update_memory_promotion(memory_id, source_ref=result.get("path"))
+    updated = _memory_store().update_memory_promotion(memory_id, source_ref=result.get("path"))
     return {"ok": True, "already_promoted": False, "note_path": result.get("path"), "memory_id": updated.memory_id}
 
 
@@ -5760,7 +5838,7 @@ def post_memory_discard(memory_id: str):
     """Explicit discard from the Brain Inbox: marks the memory forgotten (kept on
     disk, excluded from search/feeds). Never deletes files."""
     try:
-        updated = WORKBENCH_STORE.update_memory_promotion(memory_id, status="forgotten")
+        updated = _memory_store().update_memory_promotion(memory_id, status="forgotten")
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True, "memory_id": updated.memory_id, "status": updated.status}
@@ -6570,27 +6648,44 @@ async def api_stream_chat_events(conversation_id: str, request: Request, last_ev
     store = GroupChatStore()
 
     since_seq = 0
-    if last_event_id and last_event_id.isdigit():
+    if last_event_id and str(last_event_id).isdigit():
         since_seq = int(last_event_id)
+    else:
+        hdr = request.headers.get("last-event-id") or request.headers.get("Last-Event-ID")
+        if hdr and str(hdr).isdigit():
+            since_seq = int(hdr)
 
     async def sse_generator():
-        # 1. Replay past events since cursor
-        initial_events = store.list_events(conversation_id=conversation_id, since_seq=since_seq)
-        for evt in initial_events:
-            payload = json.dumps(evt.model_dump(mode="json"))
-            yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
-
-        # 2. Subscribe to live events stream
+        # Subscribe before replaying so an event cannot fall into the replay/live gap.
         q = store.subscribe()
+        last_sent_seq = since_seq
         try:
+            replay_cursor = since_seq
+            while True:
+                initial_events = store.list_events(
+                    conversation_id=conversation_id,
+                    since_seq=replay_cursor,
+                    limit=500,
+                )
+                for evt in initial_events:
+                    if evt.seq <= last_sent_seq:
+                        continue
+                    payload = json.dumps(evt.model_dump(mode="json"))
+                    yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                    last_sent_seq = evt.seq
+                if len(initial_events) < 500:
+                    break
+                replay_cursor = last_sent_seq
+
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=15.0)
-                    if evt.conversation_id == conversation_id:
+                    if evt.conversation_id == conversation_id and evt.seq > last_sent_seq:
                         payload = json.dumps(evt.model_dump(mode="json"))
                         yield f"id: {evt.seq}\nevent: message\ndata: {payload}\n\n"
+                        last_sent_seq = evt.seq
                 except asyncio.TimeoutError:
                     # Heartbeat keepalive
                     yield f": heartbeat {int(time.time())}\n\n"

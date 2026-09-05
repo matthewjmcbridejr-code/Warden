@@ -176,5 +176,6 @@ class PlaywrightBrowserExecutor(BaseComputerExecutor):
 
         except Exception as exc:
             logger.warning("Action execution error (%s): %s", act_type, exc)
+            raise RuntimeError(f"Browser action '{act_type.value}' failed: {exc}") from exc
 
         return self.capture_screenshot()

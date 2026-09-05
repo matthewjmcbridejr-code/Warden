@@ -7,7 +7,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .api import captain_watcher_background_loop, dropzone_watcher_background_loop, mcharness_router
+from .api import (
+    captain_watcher_background_loop,
+    dropzone_watcher_background_loop,
+    mcharness_router,
+    router as warden_router,
+)
 from .branding import CATEGORY, PRODUCT_NAME, PUBLIC_URL, REPO_NAME, TAGLINE
 from .brain.graph_api import router as brain_graph_router
 
@@ -44,6 +49,11 @@ def create_app() -> FastAPI:
         "category": CATEGORY,
     }
     app.include_router(mcharness_router)
+    # The Warden/Captain/Workbench surface is part of the private cloud
+    # service as well as the local Desk. Cloud Run IAM protects this router;
+    # the Workbench adapters decide whether state is Cloud SQL-primary or
+    # local/offline.
+    app.include_router(warden_router)
     app.include_router(brain_graph_router)
     app.add_middleware(NoCacheWebAssetsMiddleware)
 
@@ -71,6 +81,27 @@ def create_app() -> FastAPI:
         task = getattr(app.state, "dropzone_watcher_task", None)
         if task is not None:
             task.cancel()
+
+    @app.on_event("startup")
+    def start_cloud_mission_consumer():
+        # The e2-medium opts in explicitly. Cloud Run and the MCP edge do not
+        # subscribe, so a deployment cannot accidentally create duplicate
+        # workers. Execution remains separately gated by the worker env.
+        from .cloud_queue import CloudQueueUnavailable, MissionConsumer, consumer_enabled
+
+        if not consumer_enabled():
+            return
+        try:
+            app.state.cloud_mission_consumer = MissionConsumer().start()
+        except CloudQueueUnavailable as exc:
+            app.state.cloud_mission_consumer_error = str(exc)
+            print(f"Cloud mission consumer unavailable: {exc}")
+
+    @app.on_event("shutdown")
+    def stop_cloud_mission_consumer():
+        consumer = getattr(app.state, "cloud_mission_consumer", None)
+        if consumer is not None:
+            consumer.stop()
 
     # Marius Core Integration
     try:

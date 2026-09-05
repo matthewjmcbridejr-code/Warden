@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Confirmation Test</title>
+</head>
+<body>
+<h1>Confirmation Test</h1>
+<p id="status">No action executed</p>
+<button id="dangerous-btn" onclick="executeAction()">Dangerous Action</button>
+<script>
+let count = 0;
+function executeAction() {
+  count++;
+  document.getElementById('status').innerText = count === 1 ? 'Executed once' : 'Executed ' + count + ' times';
+}
+</script>
+</body>
+</html>

@@ -7,10 +7,12 @@ standard authorization-code + PKCE grant, instead of being handed a
 manually-pasted bearer token (which only works for local apps like Claude
 Desktop / Codex CLI — see mcp_tokens.py for that simpler Phase 1 path).
 
-Storage follows the same convention as mcp_tokens.py / connectors/store.py:
-JSON files under ~/.local/share/warden/mcp_oauth/ (mode 0600), secrets
+Local mode follows the same convention as mcp_tokens.py / connectors/store.py:
+JSON files under ~/.local/share/warden/mcp_oauth/ (mode 0600). In cloud mode,
+the same documents are stored in Cloud SQL so an edge restart or replacement
+does not lose client registrations, pending approvals, or tokens. Secrets are
 hashed with SHA-256 before persisting, raw values only ever held in memory
-long enough to hand back to the caller once.
+long enough to hand them back to the caller once.
 
 Every token kind this server accepts funnels through load_access_token():
   1. an OAuth access token minted by this module, or
@@ -80,6 +82,10 @@ def _hash(value: str) -> str:
 
 
 def _load(name: str) -> dict:
+    from .mcp_state import cloud_state_enabled, load_document
+    if cloud_state_enabled():
+        document = load_document(f"mcp.oauth.{name}")
+        return document if isinstance(document, dict) else {}
     path = _path(name)
     if not path.exists():
         return {}
@@ -90,6 +96,10 @@ def _load(name: str) -> dict:
 
 
 def _save(name: str, data: dict) -> None:
+    from .mcp_state import cloud_state_enabled, save_document
+    if cloud_state_enabled():
+        save_document(f"mcp.oauth.{name}", data)
+        return
     path = _path(name)
     path.write_text(json.dumps(data, indent=2))
     try:

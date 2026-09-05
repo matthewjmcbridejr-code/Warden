@@ -199,6 +199,34 @@ secret directly in the JSON value. Example:
 ]
 ```
 
+Hyperagent can be mounted as a read-only upstream after completing its OAuth
+browser sign-in on a trusted operator workstation. Store the resulting bearer
+token in the private `/etc/warden-hyperagent.env` EnvironmentFile (never in
+git), then set the extra-upstream list to the review-only tools:
+
+```json
+[
+  {
+    "name": "hyperagent",
+    "url": "https://hyperagent.com/api/mcp",
+    "prefix": "hyperagent",
+    "header_env": {"Authorization": "HYPERAGENT_AUTHORIZATION"},
+    "allow_tools": [
+      "list_agents",
+      "list_threads",
+      "get_thread",
+      "list_pending_approvals"
+    ]
+  }
+]
+```
+
+Use the least-privilege Hyperagent scopes `threads:read` and
+`approvals:read` (plus `offline_access` when refresh is required). Keep
+`create_thread`, `send_message`, and `resolve_approval` out of `allow_tools`.
+The hub's default `read_only` policy also blocks every unlisted third-party
+tool.
+
 Unknown third-party tools are not exposed unless named in that upstream's
 `allow_tools` list. For a reviewed exception on the McTable gateway, set
 `WARDEN_MCP_HUB_ALLOW_TOOLS` to a comma-separated list of exact tool names.

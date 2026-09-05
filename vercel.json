@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
+  "rewrites": [
+    {
+      "source": "/api/mcharness/:path*",
+      "destination": "/api/mcharness?path=:path*"
+    },
+    {
+      "source": "/",
+      "destination": "/web/warden/app.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/web/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    }
+  ]
+}

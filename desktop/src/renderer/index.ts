@@ -5,10 +5,13 @@ import '@fontsource-variable/sora/wght.css';
 import './styles.css';
 import type { AppInfo, BrowserProfile, ContextPack, ExecutionMode, InterfaceMode, PlatformMenuAction, PlatformPreset, PlatformStatus, ProjectWorkspace, ProviderAuthReport, StructuredProviderId, TerminalMetadata, WardenRun, WebPlatform, WorkspaceId } from '../shared/types';
 import { initSimpleBuild, onSimpleBuildRunsChanged, setMode, syncSimpleBuild } from './simple-build';
+import { startMissionFromPrompt } from './modules/mission';
+import { ui as stateUi } from './modules/state';
 
 const $ = <T extends Element = HTMLElement>(selector: string): T => { const element = document.querySelector<T>(selector); if (!element) throw new Error(`Missing element: ${selector}`); return element; };
 type UiTerminal = { metadata: TerminalMetadata; terminal: Terminal; fit: FitAddon; lineBuffer: string };
 const ui = { mode: 'simple' as InterfaceMode, workspace: 'chat' as WorkspaceId, platformId: '', splitPlatformId: undefined as string | undefined, editingPlatformId: undefined as string | undefined, execution: 'local' as ExecutionMode, cwd: '', activeProjectId: undefined as string | undefined, activeTerminal: null as string | null, activeRun: null as string | null, appInfo: undefined as AppInfo | undefined, runs: new Map<string, WardenRun>(), terminals: new Map<string, UiTerminal>(), platforms: new Map<string, WebPlatform>(), profiles: [] as BrowserProfile[], presets: [] as PlatformPreset[], projects: [] as ProjectWorkspace[], platformStatus: new Map<string, PlatformStatus>(), auth: new Map<StructuredProviderId, ProviderAuthReport>() };
+(window as any).ui = ui;
 const buildProviderNames: Record<StructuredProviderId, string> = { codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini CLI', grok: 'Grok Build' };
 
 function notice(message?: string): void { const box = $('#notice'); box.textContent = message || ''; box.toggleAttribute('hidden', !message); }
@@ -228,6 +231,12 @@ async function initialize(): Promise<void> {
   $('#restart-terminal').addEventListener('click', async () => { const id = ui.activeTerminal; if (!id) return; const active = ui.terminals.get(id); if (!active || active.metadata.status === 'running') return; active.terminal.dispose(); ui.terminals.delete(id); await createTerminal(active.metadata); });
   $('#close-terminal').addEventListener('click', async () => { const id = ui.activeTerminal; if (!id) return; const active = ui.terminals.get(id); if (!active) return; if (active.metadata.status === 'running' && !confirm(`Close ${active.metadata.name} and terminate its process?`)) return; await window.wardenDesk.terminal.kill(id); active.terminal.dispose(); ui.terminals.delete(id); ui.activeTerminal = ui.terminals.keys().next().value || null; if (ui.activeTerminal) activateTerminal(ui.activeTerminal); else $('#terminal-empty').removeAttribute('hidden'); renderTabs(); });
   const historyDialog = $('#history-dialog') as HTMLDialogElement; $('#show-history').addEventListener('click', () => { const active = ui.activeTerminal ? ui.terminals.get(ui.activeTerminal) : undefined; const list = $('#history-list'); list.replaceChildren(); for (const command of active?.metadata.history || []) { const li = document.createElement('li'); li.textContent = command; list.append(li); } historyDialog.showModal(); }); $('[data-close-dialog]').addEventListener('click', () => historyDialog.close()); $('#clear-history').addEventListener('click', async () => { const active = ui.activeTerminal ? ui.terminals.get(ui.activeTerminal) : undefined; if (active) { await window.wardenDesk.terminal.clearHistory(active.metadata.id); active.metadata.history = []; } historyDialog.close(); });
+  
+  $('#home-start-mission-btn')?.addEventListener('click', () => {
+    const prompt = ($('#home-prompt') as HTMLTextAreaElement).value.trim();
+    if (prompt) startMissionFromPrompt(prompt);
+  });
+  
   window.wardenDesk.platform.onStatus(renderProviderStatus); window.wardenDesk.platform.onMenuAction((action) => void handleMenuAction(action)); window.wardenDesk.terminal.onData(({ id, data }) => ui.terminals.get(id)?.terminal.write(data)); window.wardenDesk.terminal.onState((metadata) => { const item = ui.terminals.get(metadata.id); if (item) item.metadata = metadata; renderTabs(); });
   window.wardenDesk.runs.onChanged((run) => { if (!ui.activeProjectId || run.projectId === ui.activeProjectId) ui.runs.set(run.id, run); renderRuns(); if (ui.activeRun === run.id) renderRun(run); onSimpleBuildRunsChanged(run); });
   window.addEventListener('keydown', (event) => {
@@ -243,5 +252,9 @@ async function initialize(): Promise<void> {
   });
   new ResizeObserver(() => { providerBounds(); fitActiveTerminal(); }).observe(document.body); window.addEventListener('beforeunload', () => void window.wardenDesk.platform.hide());
   await Promise.all([refreshRuns(), refreshProviderAuth()]); if (activeProject) { ui.execution = activeProject.executionMode; selectExecution(ui.execution); } if (ui.platformId && state.workspace === 'chat') await selectPlatform(ui.platformId, ui.splitPlatformId); else await selectWorkspace(state.workspace); applyMode(); if (!state.onboardingComplete) await openOnboarding();
+  
+  stateUi.projects = ui.projects;
+  stateUi.activeProjectId = ui.activeProjectId;
+  stateUi.missions = (window as any).uiMissions = stateUi.missions;
 }
 void initialize();

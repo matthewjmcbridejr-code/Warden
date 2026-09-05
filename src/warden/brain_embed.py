@@ -9,6 +9,7 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.getenv("WARDEN_EMBED_MODEL", "mxbai-embed-large")
+EMBED_TIMEOUT_SECONDS = float(os.getenv("WARDEN_EMBED_TIMEOUT_SECONDS", "60"))
 
 
 def get_embedding(text: str) -> Optional[list[float]]:
@@ -16,7 +17,11 @@ def get_embedding(text: str) -> Optional[list[float]]:
     try:
         import httpx
         payload = {"model": EMBED_MODEL, "prompt": text[:8000]}
-        resp = httpx.post(f"{OLLAMA_URL}/api/embeddings", json=payload, timeout=15.0)
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/embeddings",
+            json=payload,
+            timeout=EMBED_TIMEOUT_SECONDS,
+        )
         resp.raise_for_status()
         return resp.json().get("embedding")
     except Exception as exc:

@@ -5,6 +5,7 @@ Or:       scripts/warden-brain-mcp
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -27,10 +28,17 @@ from src.warden.personal_memory import get_workstream, load_profile, update_prof
 log = logging.getLogger(__name__)
 
 WARDEN_URL = os.getenv("WARDEN_URL", "http://127.0.0.1:8125")
+WARDEN_AUTH_MODE = os.getenv("WARDEN_AUTH_MODE", "none").strip().lower()
 from src.warden.paths import data_root as _warden_data_root
 MCTABLE_ROOT = _warden_data_root()
-BOARD_ROOT = Path(os.getenv("WARDEN_BOARD_ROOT", os.getenv("MCTABLE_BOARD_ROOT", "~/.local/share/warden/board"))).expanduser()
+_BOARD_ROOT_ENV = os.getenv("WARDEN_BOARD_ROOT") or os.getenv("MCTABLE_BOARD_ROOT")
+BOARD_ROOT = Path(_BOARD_ROOT_ENV).expanduser() if _BOARD_ROOT_ENV else _warden_data_root() / "board"
 SESSION_ID = str(uuid.uuid4())[:8]
+
+# Per-process client activity is intentionally metadata-only. It gives every
+# connected client a useful liveness view without persisting bearer tokens or
+# message contents.
+_CLIENT_ACTIVITY: dict[str, dict[str, Any]] = {}
 
 # Server-status tools: read-only, no arbitrary shell exec.
 WORKSPACES_ROOT = Path(os.getenv("WARDEN_WORKSPACES_ROOT", str(Path.home() / "workspaces")))
@@ -56,6 +64,7 @@ mcp = FastMCP(
         "Warden Brain gives you access to the current operator's local second brain. "
         "Start every session by calling warden_bootstrap, which accepts an empty task during cold start. "
         "Read its constraints, recent decisions, active claims, and available service catalog before using connected services. "
+        "For Slack, call warden_slack_status first, then warden_slack_list_channels, warden_slack_search, or warden_slack_read_channel as needed. "
         "Use warden_remember to save important decisions, proofs, or failures when you're done. "
         "Use warden_workstream to see recent activity across all projects."
     ),
@@ -93,16 +102,40 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 def _ok(tool: str, data: Any) -> str:
+    try:
+        caller = _current_caller_identity()
+        _CLIENT_ACTIVITY[caller["agent_id"]] = {
+            "agent_id": caller["agent_id"],
+            "client_name": caller["client_name"],
+            "client_id_prefix": caller["client_id_prefix"],
+            "last_tool": tool,
+            "last_status": "ok",
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception:
+        pass
     return json.dumps({"schema": "warden.brain.v1", "tool": tool, "ok": True, "data": data}, default=str)
 
 
 def _err(tool: str, message: str) -> str:
+    try:
+        caller = _current_caller_identity()
+        _CLIENT_ACTIVITY[caller["agent_id"]] = {
+            "agent_id": caller["agent_id"],
+            "client_name": caller["client_name"],
+            "client_id_prefix": caller["client_id_prefix"],
+            "last_tool": tool,
+            "last_status": "error",
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception:
+        pass
     return json.dumps({"schema": "warden.brain.v1", "tool": tool, "ok": False, "error": message})
 
 
 def _store():
-    from src.warden.workbench import WorkbenchStore
-    return WorkbenchStore()
+    from src.warden.cloud_brain import get_memory_store
+    return get_memory_store()
 
 
 def _brain_ingest():
@@ -256,13 +289,34 @@ def _semantic_recall(query: str, limit: int) -> list[dict]:
 # Tools
 # ---------------------------------------------------------------------------
 
+def _warden_request_headers() -> dict[str, str]:
+    """Return short-lived GCE identity headers for the private Cloud Run API."""
+    if WARDEN_AUTH_MODE not in {"gce", "gce_metadata", "google"}:
+        return {}
+    import urllib.parse
+    import urllib.request
+
+    audience = os.getenv("WARDEN_AUTH_AUDIENCE", WARDEN_URL).rstrip("/")
+    metadata_url = (
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?"
+        + urllib.parse.urlencode({"audience": audience, "format": "full"})
+    )
+    request = urllib.request.Request(metadata_url, headers={"Metadata-Flavor": "Google"})
+    with urllib.request.urlopen(request, timeout=3) as response:
+        token = response.read().decode().strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
 @mcp.tool()
 def warden_health() -> str:
     """Check Warden brain health: API reachability, memory count, semantic index, ingest paths."""
     try:
         import httpx
         try:
-            r = httpx.get(f"{WARDEN_URL}/api/mcharness/health", timeout=3.0)
+            r = httpx.get(
+                f"{WARDEN_URL}/api/mcharness/health",
+                headers=_warden_request_headers(),
+                timeout=3.0,
+            )
             api_ok = r.status_code < 500
         except Exception:
             api_ok = False
@@ -283,6 +337,8 @@ def warden_health() -> str:
         ]
 
         caller = _current_caller_identity()
+        from src.warden.cloud_brain import cloud_brain_status
+        from src.warden.mcp_state import durable_state_status
         return _ok("warden_health", {
             "warden_api_reachable": api_ok,
             "warden_url": WARDEN_URL,
@@ -290,6 +346,8 @@ def warden_health() -> str:
             "memory_count": mem_count,
             "semantic_index_available": semantic_ok,
             "vector_count": vec_count,
+            "storage": cloud_brain_status(),
+            "mcp_identity_store": durable_state_status(),
             "embed_model": brain_embed.EMBED_MODEL,
             "ingest_paths_found": [str(p) for p in obsidian_paths],
             "session_id": caller["session_id"],
@@ -330,7 +388,8 @@ def _mail_accounts_status_data(verify_live: bool) -> dict[str, Any]:
 
     query = "?verify_live=true" if verify_live else ""
     url = f"{WARDEN_URL}/api/mcharness/warden/mail/accounts{query}"
-    with urllib.request.urlopen(url, timeout=15) as response:
+    request = urllib.request.Request(url, headers=_warden_request_headers())
+    with urllib.request.urlopen(request, timeout=15 if verify_live else 3) as response:
         data = json.loads(response.read())
     accounts = data.get("accounts", [])
     return {
@@ -402,6 +461,25 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             ],
             "error": mail_error,
         },
+        {
+            "service_id": "slack",
+            "kind": "warden_connector",
+            "operational": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+            "configured": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+            "tool_names": [
+                "warden_slack_status",
+                "warden_slack_list_channels",
+                "warden_slack_search",
+                "warden_slack_read_channel",
+            ],
+            "background_sync": {
+                "enabled": bool(os.getenv("SLACK_BOT_TOKEN", "").strip()),
+                "interval": "6h",
+                "storage": "summaries in shared Warden memory; raw sync transcripts are not retained",
+            },
+            "access_rule": "The bot can read only conversations it has joined or been invited to; public channels are auto-joined when Slack permits it.",
+            "capabilities": ["read_conversation", "six_hour_digest", "mention_reply"],
+        },
     ]
     for upstream in hub.upstreams:
         services.append({
@@ -416,6 +494,9 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             "error": upstream.get("error"),
         })
 
+    artifact_backend = os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower()
+    artifact_bucket = bool(os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip())
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "credentials": "Provider credentials remain server-side and are never returned.",
@@ -427,6 +508,12 @@ def _service_catalog_data(verify_live_mail: bool) -> dict[str, Any]:
             "upstream_tool_count": hub.hub_tool_count,
             "mail_configured_count": mail["configured_count"],
             "mail_operational_count": mail["operational_count"],
+        },
+        "artifact_storage": {
+            "backend": "gcs" if artifact_backend == "gcs" and artifact_bucket else "local_fs",
+            "durable": True,
+            "cloud_configured": artifact_backend == "gcs" and artifact_bucket,
+            "resource_uri_scheme": "warden://artifacts/<artifact_id>",
         },
         "services": services,
     }
@@ -449,6 +536,314 @@ def warden_service_catalog(verify_live_mail: bool = True) -> str:
         return _ok("warden_service_catalog", _service_catalog_data(verify_live_mail))
     except Exception as exc:
         return _err("warden_service_catalog", str(exc))
+
+
+def _capability_catalog_data() -> dict[str, Any]:
+    """Return client-facing capability bundles derived from the live catalog.
+
+    A bundle is a product capability, rather than a raw list of MCP methods.
+    This lets Codex, Spark, Claude, and other clients make the same decision
+    about what they can do without each client maintaining its own integration
+    map.
+    """
+    services = _service_catalog_data(verify_live_mail=False)
+    by_id = {str(row.get("service_id")): row for row in services.get("services", [])}
+    native = by_id.get("warden", {})
+    upstream = {sid: row for sid, row in by_id.items() if sid.startswith("upstream:")}
+    native_tools = set(native.get("tool_names") or [])
+    mctable = upstream.get("upstream:mctable", {})
+    context7 = upstream.get("upstream:context7", {})
+    bundles = [
+        {
+            "capability_id": "shared_context",
+            "title": "Shared context and memory",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_bootstrap", "warden_context_pack", "warden_context_delta",
+                "warden_recall", "warden_search_docs", "warden_memory_context",
+                "warden_remember", "brain_search", "brain_list_sources",
+                "brain_index_status", "brain_reindex_embeddings",
+            })),
+            "resources": ["memory", "decisions", "constraints", "proofs", "documents"],
+            "notes": "Every authenticated client receives revisioned context and citations.",
+        },
+        {
+            "capability_id": "coordination",
+            "title": "Tasks, claims, handoffs, and team rooms",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_board", "warden_post_task", "warden_claim_task", "warden_handoff",
+                "warden_update_task", "warden_cancel_task", "warden_supersede_task",
+                "warden_team_inbox", "warden_team_send", "warden_team_rooms",
+                "warden_team_history", "warden_reconcile",
+            })),
+            "resources": ["task_board", "claims", "handoffs", "team_mailbox"],
+            "notes": "Board state is shared; writes remain subject to Warden policy and proof gates.",
+        },
+        {
+            "capability_id": "research_and_code",
+            "title": "Research, GitHub, and current documentation",
+            "ready": bool(mctable.get("operational") or context7.get("operational")),
+            "tools": sorted(set(mctable.get("tool_names") or []) | set(context7.get("tool_names") or [])),
+            "resources": ["GitHub", "McTable", "Context7"],
+            "notes": "Only policy-approved upstream tools are exposed to remote clients.",
+        },
+        {
+            "capability_id": "communication",
+            "title": "Slack and connected mail",
+            "ready": bool(by_id.get("slack", {}).get("operational") or by_id.get("mail", {}).get("operational")),
+            "tools": sorted(set(by_id.get("slack", {}).get("tool_names") or []) | set(by_id.get("mail", {}).get("tool_names") or [])),
+            "resources": ["Slack conversations", "mail summaries"],
+            "notes": "Mail tools are available only when an account passes a live health check.",
+        },
+        {
+            "capability_id": "execution_and_artifacts",
+            "title": "Bounded execution, runs, and artifacts",
+            "ready": bool(native.get("operational")),
+            "tools": sorted(native_tools.intersection({
+                "warden_captain_plan", "warden_captain_dispatch_step", "warden_run_get",
+                "warden_artifact_store", "warden_artifact_get", "warden_artifact_list",
+                "warden_service_health", "warden_server_status",
+            })),
+            "resources": ["plans", "run records", "proof artifacts", "logs"],
+            "resource_templates": ["warden://artifacts/{artifact_id}"],
+            "notes": "Execution stays bounded and reports evidence; deployment and external side effects require grants.",
+        },
+        {
+            "capability_id": "shared_skills",
+            "title": "Shared agent skill packages",
+            "ready": bool(mctable.get("operational")),
+            "tools": sorted(set(mctable.get("tool_names") or []).intersection({
+                "mctable_list_shared_agent_skills", "mctable_get_shared_agent_skill",
+                "mctable_search_shared_agent_skills", "mctable_list_skill_sources",
+            }) | native_tools.intersection({"warden_skill_catalog", "warden_skill_get"})),
+            "resources": ["50 shared skill metadata records"],
+            "notes": "Skill metadata is visible today; execution grants and dependency checks are explicit per package.",
+        },
+    ]
+    try:
+        catalog_revision = compute_tool_catalog_revision()
+    except Exception:
+        catalog_revision = {"revision_hash": None}
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "catalog_revision": catalog_revision,
+        "artifact_storage": services.get("artifact_storage", {}),
+        "capabilities": bundles,
+        "policy": {
+            "read_actions": "available after bootstrap",
+            "writes": "proof-gated",
+            "external_side_effects": "require scoped capability grant and/or operator approval",
+            "credentials": "remain server-side",
+        },
+    }
+
+
+@mcp.tool()
+def warden_capability_catalog() -> str:
+    """Return product-level capabilities available to this authenticated client.
+
+    Call after ``warden_bootstrap``. The response is intentionally stable and
+    client-neutral: it describes capabilities, readiness, tools, and policy
+    requirements instead of exposing provider secrets or implementation state.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_capability_catalog"):
+            return _err("warden_capability_catalog", error)
+        return _ok("warden_capability_catalog", _capability_catalog_data())
+    except Exception as exc:
+        return _err("warden_capability_catalog", str(exc))
+
+
+def _local_skill_catalog_data() -> list[dict[str, Any]]:
+    from src.warden.workbench import ROLE_SAFETY_PROFILES, WorkbenchStore
+    rows: list[dict[str, Any]] = []
+    for profile in ROLE_SAFETY_PROFILES:
+        rows.append({
+            "skill_id": f"role:{profile.role or profile.profile_id}",
+            "title": profile.title,
+            "description": profile.summary,
+            "source": "warden_builtin",
+            "enabled": True,
+            "execution": {
+                "write_allowed": profile.write_allowed,
+                "dispatch_allowed": profile.dispatch_allowed,
+                "allowed_actions": profile.allowed_actions,
+                "forbidden_actions": profile.forbidden_actions,
+                "requires_operator_approval": profile.write_allowed or profile.dispatch_allowed,
+            },
+        })
+    try:
+        for skill in WorkbenchStore().list_skills():
+            rows.append({
+                "skill_id": skill.skill_id,
+                "title": skill.title,
+                "description": skill.description,
+                "source": "warden_workbench",
+                "enabled": skill.enabled,
+                "when_to_use": skill.when_to_use,
+                "inspect_files": skill.inspect_files,
+                "commands_allowed": skill.commands_allowed,
+                "commands_forbidden": skill.commands_forbidden,
+                "proof_format": skill.proof_format,
+                "acceptance_checks": skill.acceptance_checks,
+                "rollback_notes": skill.rollback_notes,
+            })
+    except Exception:
+        pass
+    return rows
+
+
+@mcp.tool()
+def warden_skill_catalog() -> str:
+    """List executable Warden role envelopes and locally registered playbooks."""
+    try:
+        if error := _remote_bootstrap_error("warden_skill_catalog"):
+            return _err("warden_skill_catalog", error)
+        rows = _local_skill_catalog_data()
+        return _ok("warden_skill_catalog", {
+            "count": len(rows),
+            "skills": rows,
+            "execution_policy": "Skills describe bounded work; writes and external side effects still require Warden grants or approval.",
+        })
+    except Exception as exc:
+        return _err("warden_skill_catalog", str(exc))
+
+
+@mcp.tool()
+def warden_skill_get(skill_id: str) -> str:
+    """Get one executable role envelope or local playbook by ID."""
+    try:
+        if error := _remote_bootstrap_error("warden_skill_get"):
+            return _err("warden_skill_get", error)
+        row = next((item for item in _local_skill_catalog_data() if item["skill_id"] == skill_id.strip()), None)
+        if row is None:
+            return _err("warden_skill_get", f"Skill {skill_id!r} not found.")
+        return _ok("warden_skill_get", row)
+    except Exception as exc:
+        return _err("warden_skill_get", str(exc))
+
+
+@mcp.tool()
+def warden_client_health() -> str:
+    """Return the current client's connection, handshake, and capability health."""
+    try:
+        if error := _remote_bootstrap_error("warden_client_health"):
+            return _err("warden_client_health", error)
+        caller = _current_caller_identity()
+        activity = _CLIENT_ACTIVITY.get(caller["agent_id"], {})
+        health_payload = json.loads(warden_health())
+        health = health_payload.get("data", {}) if health_payload.get("ok") else {"error": health_payload.get("error")}
+        catalog = _capability_catalog_data()
+        return _ok("warden_client_health", {
+            "client": caller,
+            "authenticated": caller.get("transport_identity") == "authenticated_mcp" or caller.get("transport_identity") == "local",
+            "bootstrapped": bool(_BOOTSTRAPPED_CALLERS.intersection(_caller_bootstrap_keys())),
+            "last_activity": activity or None,
+            "warden": {
+                "api_reachable": health.get("warden_api_reachable"),
+                "memory_available": health.get("memory_available"),
+                "memory_count": health.get("memory_count"),
+                "semantic_index_available": health.get("semantic_index_available"),
+                "vector_count": health.get("vector_count"),
+                "mcp_identity_store": health.get("mcp_identity_store"),
+            },
+            "capability_summary": [
+                {"capability_id": item["capability_id"], "ready": item["ready"], "tool_count": len(item["tools"])}
+                for item in catalog["capabilities"]
+            ],
+            "tool_catalog_revision": catalog.get("catalog_revision"),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        return _err("warden_client_health", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_store(
+    content: str,
+    type: str = "agent_result",
+    mime_type: str = "text/plain",
+    project: str = "warden",
+    task_id: str = "",
+    run_id: str = "",
+) -> str:
+    """Store an immutable, content-addressed artifact and return its resource URI."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_store"):
+            return _err("warden_artifact_store", error)
+        if len(content.encode("utf-8")) > 2_000_000:
+            return _err("warden_artifact_store", "Artifact exceeds the 2 MB text limit.")
+        from src.warden.artifacts_protocol import store_artifact
+        ref = store_artifact(
+            content,
+            type=type,  # type: ignore[arg-type]
+            mime_type=mime_type,
+            project=project.strip() or "warden",
+            task_id=task_id.strip() or None,
+            run_id=run_id.strip() or None,
+            created_by=_current_caller_identity()["agent_id"],
+        )
+        return _ok("warden_artifact_store", ref.model_dump(mode="json"))
+    except Exception as exc:
+        return _err("warden_artifact_store", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_get(artifact_id: str, include_content: bool = False) -> str:
+    """Retrieve artifact metadata, with an optional bounded text payload."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_get"):
+            return _err("warden_artifact_get", error)
+        from src.warden.artifacts_protocol import read_artifact_content
+        item = read_artifact_content(artifact_id.strip())
+        if not item:
+            return _err("warden_artifact_get", f"Artifact {artifact_id!r} not found.")
+        ref, raw = item
+        data: dict[str, Any] = {"ref": ref.model_dump(mode="json")}
+        if include_content:
+            if len(raw) > 512_000:
+                return _err("warden_artifact_get", "Artifact is larger than the 512 KB inline limit; use its resource URI.")
+            try:
+                data["content"] = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                import base64
+                data["content_base64"] = base64.b64encode(raw).decode("ascii")
+                data["content_encoding"] = "base64"
+        return _ok("warden_artifact_get", data)
+    except Exception as exc:
+        return _err("warden_artifact_get", str(exc))
+
+
+@mcp.tool()
+def warden_artifact_list(project: str = "", limit: int = 50) -> str:
+    """List artifact references created in this Warden process or loaded from storage."""
+    try:
+        if error := _remote_bootstrap_error("warden_artifact_list"):
+            return _err("warden_artifact_list", error)
+        from src.warden.artifacts_protocol import list_artifact_refs
+        rows = [ref.model_dump(mode="json") for ref in list_artifact_refs(project=project.strip(), limit=limit)]
+        return _ok("warden_artifact_list", {"count": len(rows), "artifacts": rows})
+    except Exception as exc:
+        return _err("warden_artifact_list", str(exc))
+
+
+@mcp.resource(
+    "warden://artifacts/{artifact_id}",
+    name="warden_artifact",
+    title="Warden artifact",
+    description="Immutable Warden artifact content addressed by artifact ID.",
+    mime_type="application/octet-stream",
+)
+def warden_artifact_resource(artifact_id: str) -> bytes:
+    """Expose artifact content through a standard MCP resource URI."""
+    if error := _remote_bootstrap_error("warden_artifact_resource"):
+        raise PermissionError(error)
+    from src.warden.artifacts_protocol import read_artifact_content
+    item = read_artifact_content(artifact_id.strip())
+    if not item:
+        raise ValueError(f"Artifact {artifact_id!r} not found")
+    return item[1]
 
 
 def _read_meminfo() -> dict[str, Any]:
@@ -2191,6 +2586,191 @@ def warden_memory_context(query: str = "") -> str:
         return _err("warden_memory_context", str(exc))
 
 
+@mcp.tool()
+async def warden_slack_status() -> str:
+    """Report read-only Slack connectivity and sync readiness.
+
+    Credentials stay server-side. This reports the authenticated Slack bot,
+    visible conversation counts, and whether the six-hour Warden sync is
+    configured; it never returns a token or message content.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_status"):
+            return _err("warden_slack_status", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _ok("warden_slack_status", {
+                "configured": False,
+                "operational": False,
+                "reason": "SLACK_BOT_TOKEN is not configured",
+            })
+        from .slack_sync import _slack
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            auth = await _slack(client, token, "auth.test")
+            conversations = await _slack(
+                client, token, "conversations.list",
+                types="public_channel,private_channel,mpim,im",
+                exclude_archived="true", limit=200,
+            )
+        rows = conversations.get("channels", [])
+        return _ok("warden_slack_status", {
+            "configured": True,
+            "operational": True,
+            "team": auth.get("team"),
+            "bot_user": auth.get("user"),
+            "conversation_count": len(rows),
+            "member_count": sum(1 for row in rows if row.get("is_member")),
+            "public_channel_count": sum(1 for row in rows if row.get("is_channel") and not row.get("is_private")),
+            "private_channel_count": sum(1 for row in rows if row.get("is_private")),
+            "dm_count": sum(1 for row in rows if row.get("is_im") or row.get("is_mpim")),
+            "capabilities": ["status", "read_conversation", "six_hour_digest", "mention_reply"],
+            "privacy": "Raw messages are available only from conversations the Slack bot can access; digests are stored in shared Warden memory.",
+        })
+    except Exception as exc:
+        return _err("warden_slack_status", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_list_channels(include_private: bool = True) -> str:
+    """List Slack conversations accessible to the Warden bot.
+
+    Args:
+        include_private: Include private channels, group DMs, and DMs that the bot can access.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_list_channels"):
+            return _err("warden_slack_list_channels", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _err("warden_slack_list_channels", "SLACK_BOT_TOKEN is not configured")
+        from .slack_sync import _list_channels
+        import httpx
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            rows = await _list_channels(client, token)
+        channels = []
+        for row in rows:
+            if not include_private and (row.get("is_private") or row.get("is_im") or row.get("is_mpim")):
+                continue
+            kind = "dm" if row.get("is_im") else "group_dm" if row.get("is_mpim") else "private_channel" if row.get("is_private") else "public_channel"
+            channels.append({
+                "id": row.get("id"),
+                "name": row.get("name") or row.get("id"),
+                "kind": kind,
+                "is_member": bool(row.get("is_member")),
+                "topic": (row.get("topic") or {}).get("value", ""),
+                "purpose": (row.get("purpose") or {}).get("value", ""),
+            })
+        return _ok("warden_slack_list_channels", {"count": len(channels), "channels": channels})
+    except Exception as exc:
+        return _err("warden_slack_list_channels", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_search(query: str, channel: str = "", limit: int = 20) -> str:
+    """Search recent Slack history accessible to Warden using local keyword matching.
+
+    This does not require Slack's global search scope. It reads bounded recent
+    history from accessible conversations and returns messages containing all
+    whitespace-separated query terms. Use ``channel`` for a channel ID/name.
+
+    Args:
+        query: One or more keywords to match, case-insensitively.
+        channel: Optional Slack channel ID or exact name without ``#``.
+        limit: Maximum matches to return, capped at 50.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_search"):
+            return _err("warden_slack_search", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        terms = [term.lower() for term in query.split() if term.strip()]
+        if not token:
+            return _err("warden_slack_search", "SLACK_BOT_TOKEN is not configured")
+        if not terms:
+            return _err("warden_slack_search", "query must contain at least one keyword")
+        from .slack_sync import _list_channels, _slack
+        import httpx
+        wanted = channel.strip().lstrip("#")
+        bounded_limit = max(1, min(int(limit), 50))
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            channels = await _list_channels(client, token)
+            if wanted:
+                channels = [row for row in channels if row.get("id") == wanted or row.get("name") == wanted]
+            async def read(row: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                payload = await _slack(client, token, "conversations.history", channel=row["id"], limit=100)
+                return row, payload.get("messages", [])
+            results = await asyncio.gather(*(read(row) for row in channels), return_exceptions=True)
+        matches = []
+        errors = []
+        for result in results:
+            if isinstance(result, Exception):
+                errors.append(str(result))
+                continue
+            row, messages = result
+            for message in messages:
+                text = str(message.get("text") or "")
+                if all(term in text.lower() for term in terms):
+                    matches.append({
+                        "channel_id": row.get("id"),
+                        "channel_name": row.get("name") or row.get("id"),
+                        "ts": message.get("ts"),
+                        "user": message.get("user") or message.get("username"),
+                        "text": text,
+                        "thread_ts": message.get("thread_ts"),
+                    })
+        matches.sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
+        return _ok("warden_slack_search", {
+            "query": query,
+            "match_count": min(len(matches), bounded_limit),
+            "matches": matches[:bounded_limit],
+            "errors": errors[:10],
+        })
+    except Exception as exc:
+        return _err("warden_slack_search", str(exc))
+
+
+@mcp.tool()
+async def warden_slack_read_channel(channel: str, limit: int = 50) -> str:
+    """Read recent messages from a Slack channel the Warden bot can access.
+
+    Args:
+        channel: Slack channel ID or exact channel name without ``#``.
+        limit: Maximum messages to return, capped at 200.
+    """
+    try:
+        if error := _remote_bootstrap_error("warden_slack_read_channel"):
+            return _err("warden_slack_read_channel", error)
+        token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+        if not token:
+            return _err("warden_slack_read_channel", "SLACK_BOT_TOKEN is not configured")
+        from .slack_sync import _list_channels, _slack
+        import httpx
+        wanted = channel.strip().lstrip("#")
+        bounded_limit = max(1, min(int(limit), 200))
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            channels = await _list_channels(client, token)
+            match = next((row for row in channels if row.get("id") == wanted or row.get("name") == wanted), None)
+            if not match:
+                return _err("warden_slack_read_channel", f"Channel not found or not accessible: {channel}")
+            payload = await _slack(client, token, "conversations.history", channel=match["id"], limit=bounded_limit)
+        messages = []
+        for message in reversed(payload.get("messages", [])[:bounded_limit]):
+            messages.append({
+                "ts": message.get("ts"),
+                "user": message.get("user") or message.get("username"),
+                "text": message.get("text", ""),
+                "thread_ts": message.get("thread_ts"),
+            })
+        return _ok("warden_slack_read_channel", {
+            "channel_id": match.get("id"),
+            "channel_name": match.get("name") or match.get("id"),
+            "message_count": len(messages),
+            "messages": messages,
+        })
+    except Exception as exc:
+        return _err("warden_slack_read_channel", str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Captain + Dispatch tools
 # ---------------------------------------------------------------------------
@@ -2436,7 +3016,7 @@ def warden_mail_search(account_id: str, query: str, limit: int = 10) -> str:
         import urllib.request, urllib.parse, json
         params = urllib.parse.urlencode({"account_id": account_id, "q": query, "limit": limit})
         url = f"{WARDEN_URL}/api/mcharness/warden/mail/search?{params}"
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=_warden_request_headers()), timeout=15) as r:
             data = json.loads(r.read())
         return _ok("warden_mail_search", {
             "account_id": account_id,
@@ -2466,7 +3046,7 @@ def warden_mail_read_message(account_id: str, message_id: str) -> str:
     try:
         import urllib.request, json
         url = f"{WARDEN_URL}/api/mcharness/warden/mail/messages/{urllib.parse.quote(account_id)}/{urllib.parse.quote(message_id)}"
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=_warden_request_headers()), timeout=15) as r:
             data = json.loads(r.read())
         return _ok("warden_mail_read_message", {"message": data.get("message", {})})
     except Exception as exc:
@@ -2509,6 +3089,68 @@ def brain_status() -> str:
         })
     except Exception as e:
         return _err("brain_status", str(e))
+
+
+@mcp.tool()
+def brain_index_status() -> str:
+    """Report searchable source and embedding readiness for shared context."""
+    try:
+        from src.warden.brain import index as brain_index
+        try:
+            source_count = len(brain_index.list_sources(limit=100000))
+        except Exception:
+            source_count = 0
+        return _ok("brain_index_status", {
+            "semantic_backend_available": brain_embed.is_available(),
+            "embedding_model": brain_embed.EMBED_MODEL,
+            "vector_count": brain_vector_store.count(),
+            "source_count": source_count,
+            "keyword_search_available": True,
+            "recommended_action": (
+                "Start the configured embedding backend, then call brain_reindex_embeddings."
+                if not brain_embed.is_available() else "Semantic indexing is ready."
+            ),
+        })
+    except Exception as exc:
+        return _err("brain_index_status", str(exc))
+
+
+@mcp.tool()
+def brain_reindex_embeddings(limit: int = 25) -> str:
+    """Backfill semantic vectors for recent memory records in bounded batches."""
+    try:
+        if error := _remote_bootstrap_error("brain_reindex_embeddings"):
+            return _err("brain_reindex_embeddings", error)
+        if not brain_embed.is_available():
+            return _ok("brain_reindex_embeddings", {
+                "embedded": 0,
+                "skipped": 0,
+                "semantic_backend_available": False,
+                "reason": f"Embedding backend unavailable at {brain_embed.OLLAMA_URL} for model {brain_embed.EMBED_MODEL}.",
+            })
+        max_items = max(1, min(int(limit), 100))
+        memories = sorted(_store().list_memories(), key=lambda item: item.updated_at, reverse=True)[:max_items]
+        embedded = 0
+        failed = 0
+        for memory in memories:
+            embedding = brain_embed.get_embedding(memory.raw_content or memory.summary)
+            if not embedding:
+                failed += 1
+                continue
+            brain_vector_store.upsert(memory.memory_id, embedding, {
+                "kind": memory.kind,
+                "project": memory.project_id or memory.scope,
+            })
+            embedded += 1
+        return _ok("brain_reindex_embeddings", {
+            "attempted": len(memories),
+            "embedded": embedded,
+            "failed": failed,
+            "vector_count": brain_vector_store.count(),
+            "embedding_model": brain_embed.EMBED_MODEL,
+        })
+    except Exception as exc:
+        return _err("brain_reindex_embeddings", str(exc))
 
 
 @mcp.tool()
@@ -3156,6 +3798,39 @@ def main():
         # legacy shared WARDEN_BRAIN_TOKEN, all unified in one place).
         mcp_app = mcp.streamable_http_app()
 
+        async def process_slack_event(payload: dict[str, Any]) -> None:
+            """Answer only explicit Warden mentions; never echo bot messages."""
+            event = payload.get("event") or {}
+            if event.get("bot_id") or event.get("subtype"):
+                return
+            if event.get("type") not in {"app_mention", "message"}:
+                return
+            text = str(event.get("text") or "")
+            if event.get("type") == "message" and "<@" not in text:
+                return
+            prompt = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+            if not prompt:
+                prompt = "Provide a concise status update."
+            result = await warden_ask_marius(prompt)
+            answer = str(result)
+            try:
+                parsed = json.loads(answer)
+                answer = str(parsed.get("data", {}).get("answer") or parsed.get("data", {}).get("response") or parsed.get("error") or answer)
+            except (TypeError, json.JSONDecodeError):
+                pass
+            token = os.getenv("SLACK_BOT_TOKEN", "")
+            channel = str(event.get("channel") or "")
+            if not token or not channel:
+                return
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    "https://slack.com/api/chat.postMessage",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"channel": channel, "text": answer[:39000]},
+                )
+                response.raise_for_status()
+
         # Pure ASGI wrapper — no Starlette nesting that breaks FastMCP routing.
         # Only special-cases paths FastMCP doesn't serve itself: /health (no
         # auth) and the two consent-screen routes (gated by
@@ -3202,6 +3877,11 @@ def main():
 
                 if path == "/oauth/consent/submit" and scope.get("method") == "POST":
                     await _handle_oauth_consent_submit(scope, receive, send)
+                    return
+
+                if path == "/slack/events" and scope.get("method") == "POST":
+                    from .slack_bridge import handle_events
+                    await handle_events(scope, receive, send, process_slack_event)
                     return
 
                 # Everything else (/mcp, /authorize, /token, /register,

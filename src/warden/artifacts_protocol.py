@@ -9,11 +9,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+MCTABLE_ROOT = Path(os.getenv("MCHARNESS_DATA_ROOT", "_mctable"))
 
 ArtifactType = Literal[
     "plan", "diff", "report", "test_report", "proof",
@@ -41,6 +44,32 @@ class ArtifactRef(BaseModel):
 
 
 _ARTIFACTS_STORE: dict[str, tuple[ArtifactRef, bytes]] = {}
+
+
+def _local_artifact_root() -> Path:
+    root = Path(os.getenv("WARDEN_ARTIFACT_ROOT", str(MCTABLE_ROOT / "artifacts"))).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _valid_artifact_id(artifact_id: str) -> bool:
+    return bool(re.fullmatch(r"art_[a-f0-9]{12}", artifact_id))
+
+
+def _gcs_enabled() -> bool:
+    return os.getenv("WARDEN_ARTIFACT_BACKEND", "local").strip().lower() == "gcs" and bool(
+        os.getenv("WARDEN_ARTIFACT_BUCKET", "").strip()
+    )
+
+
+def _gcs_blob(ref: ArtifactRef):
+    try:
+        from google.cloud import storage
+    except ImportError as exc:
+        raise RuntimeError("Install the cloud extra to use GCS artifacts") from exc
+    client = storage.Client()
+    bucket = client.bucket(os.environ["WARDEN_ARTIFACT_BUCKET"])
+    return bucket.blob(f"artifacts/{ref.artifact_id}")
 
 
 def store_artifact(
@@ -76,6 +105,29 @@ def store_artifact(
         metadata=metadata or {},
     )
 
+    if _gcs_enabled():
+        blob = _gcs_blob(ref)
+        ref.storage_backend = "gcs"
+        ref.metadata = {**ref.metadata, "gcs_object": blob.name}
+        blob.metadata = {"warden_ref": json.dumps(ref.model_dump(mode="json"), sort_keys=True)}
+        try:
+            blob.upload_from_string(raw_bytes, content_type=mime_type, if_generation_match=0)
+        except Exception as exc:
+            # A deterministic artifact ID makes retries safe. A precondition
+            # failure means the immutable object already exists.
+            if getattr(exc, "code", None) != 412:
+                raise
+    else:
+        # Local mode must remain usable across MCP requests and process
+        # restarts. Content is immutable and addressed by its SHA-256 prefix,
+        # so a pre-existing file is safe to reuse.
+        root = _local_artifact_root()
+        content_path = root / f"{artifact_id}.bin"
+        metadata_path = root / f"{artifact_id}.json"
+        if not content_path.exists():
+            content_path.write_bytes(raw_bytes)
+        if not metadata_path.exists():
+            metadata_path.write_text(json.dumps(ref.model_dump(mode="json"), sort_keys=True))
     _ARTIFACTS_STORE[artifact_id] = (ref, raw_bytes)
     return ref
 
@@ -83,12 +135,72 @@ def store_artifact(
 def get_artifact_ref(artifact_id: str) -> ArtifactRef | None:
     """Retrieves metadata ref for an artifact."""
     item = _ARTIFACTS_STORE.get(artifact_id)
-    return item[0] if item else None
+    if item:
+        return item[0]
+    if not _valid_artifact_id(artifact_id):
+        return None
+    if not _gcs_enabled():
+        try:
+            root = _local_artifact_root()
+            metadata_path = root / f"{artifact_id}.json"
+            content_path = root / f"{artifact_id}.bin"
+            if not metadata_path.exists() or not content_path.exists():
+                return None
+            ref = ArtifactRef.model_validate(json.loads(metadata_path.read_text()))
+            _ARTIFACTS_STORE[artifact_id] = (ref, content_path.read_bytes())
+            return ref
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        blob = client.bucket(os.environ["WARDEN_ARTIFACT_BUCKET"]).blob(f"artifacts/{artifact_id}")
+        blob.reload()
+        ref = ArtifactRef.model_validate(json.loads((blob.metadata or {})["warden_ref"]))
+        _ARTIFACTS_STORE[artifact_id] = (ref, blob.download_as_bytes())
+        return ref
+    except (KeyError, ValueError, FileNotFoundError):
+        return None
+
+
+def list_artifact_refs(project: str = "", limit: int = 100) -> list[ArtifactRef]:
+    """List metadata from memory plus durable local/GCS-backed references."""
+    refs: dict[str, ArtifactRef] = {artifact_id: ref for artifact_id, (ref, _) in _ARTIFACTS_STORE.items()}
+    if _gcs_enabled():
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            for blob in client.bucket(os.environ["WARDEN_ARTIFACT_BUCKET"]).list_blobs(prefix="artifacts/"):
+                try:
+                    metadata = blob.metadata or {}
+                    ref = ArtifactRef.model_validate(json.loads(metadata["warden_ref"]))
+                except (KeyError, ValueError, json.JSONDecodeError):
+                    continue
+                refs[ref.artifact_id] = ref
+        except Exception:
+            # Listing is best-effort; direct get by URI remains authoritative.
+            pass
+    else:
+        try:
+            for metadata_path in _local_artifact_root().glob("art_*.json"):
+                try:
+                    ref = ArtifactRef.model_validate(json.loads(metadata_path.read_text()))
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+                refs[ref.artifact_id] = ref
+        except OSError:
+            pass
+    rows = [ref for ref in refs.values() if not project or ref.project == project]
+    rows.sort(key=lambda ref: ref.created_at, reverse=True)
+    return rows[: max(1, min(int(limit), 100))]
 
 
 def read_artifact_content(artifact_id: str) -> tuple[ArtifactRef, bytes] | None:
     """Retrieves artifact ref and content bytes, verifying SHA-256 integrity."""
     item = _ARTIFACTS_STORE.get(artifact_id)
+    if not item:
+        ref = get_artifact_ref(artifact_id)
+        item = _ARTIFACTS_STORE.get(artifact_id) if ref else None
     if not item:
         return None
 

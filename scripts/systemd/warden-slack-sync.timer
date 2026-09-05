@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Warden Slack memory sync every six hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+Unit=warden-slack-sync.service
+
+[Install]
+WantedBy=timers.target

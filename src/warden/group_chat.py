@@ -10,6 +10,8 @@ import asyncio
 import json
 import re
 import sqlite3
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -70,7 +72,11 @@ class Conversation(BaseModel):
 
 
 class ChatEvent(BaseModel):
-    id: str = Field(default_factory=lambda: f"evt_{int(datetime.now(timezone.utc).timestamp() * 1000)}")
+    id: str = Field(
+        default_factory=lambda: (
+            f"evt_{int(datetime.now(timezone.utc).timestamp() * 1000)}_{uuid.uuid4().hex[:8]}"
+        )
+    )
     seq: int = 0
     conversation_id: str = "conv_warden_team"
     project: str = "Warden"
@@ -130,9 +136,16 @@ def map_agent_display_name(actor_id: str) -> tuple[str, str]:
 
 
 class GroupChatStore:
+    _listener_lock = threading.Lock()
+    _listeners_by_db: dict[str, list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]]] = {}
+
     def __init__(self, db_path: Path | None = None) -> None:
         self._db_path = db_path or (Path.home() / ".config" / "warden-brain" / "group_chat.sqlite")
-        self._listeners: list[asyncio.Queue] = []
+        from .cloud_control_plane import cloud_control_enabled
+        self._cloud = cloud_control_enabled()
+        listener_key = str(self._db_path.expanduser().resolve())
+        with self._listener_lock:
+            self._listeners = self._listeners_by_db.setdefault(listener_key, [])
         self._init_db()
 
     def _init_db(self) -> None:
@@ -196,6 +209,32 @@ class GroupChatStore:
         room_policy: RoomPolicy = "supervised",
         is_demo: bool = False,
     ) -> Conversation:
+        if self._cloud:
+            from .cloud_control_plane import CloudControlPlane
+            plane = CloudControlPlane()
+            try:
+                existing = plane.get_record("conversation", conversation_id)
+                if existing:
+                    return Conversation.model_validate(existing)
+                now = datetime.now(timezone.utc).isoformat()
+                record = Conversation(
+                    conversation_id=conversation_id,
+                    project=project,
+                    title=title,
+                    created_at=now,
+                    updated_at=now,
+                    created_by="operator",
+                    status="active",
+                    room_policy=room_policy,
+                    is_demo=is_demo,
+                    last_seq=0,
+                ).model_dump(mode="json")
+                plane.upsert_record("conversation", conversation_id, record, source_updated_at=now)
+                return Conversation.model_validate(record)
+            except Exception:
+                # SQLite remains the offline cache; the next event write will
+                # add an idempotent cloud outbox item if the cloud is down.
+                pass
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -237,6 +276,14 @@ class GroupChatStore:
             )
 
     def list_conversations(self, project: str = "Warden") -> list[Conversation]:
+        if self._cloud:
+            from .cloud_control_plane import CloudControlPlane
+            try:
+                rows = CloudControlPlane().list_records("conversation", limit=200)
+                if rows:
+                    return [Conversation.model_validate(row) for row in rows if row.get("project") in {project, "Warden"}]
+            except Exception:
+                pass
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -277,6 +324,58 @@ class GroupChatStore:
             event.actor_display_name = display_name
         if event.actor_type == "human" and actor_type != "human":
             event.actor_type = actor_type
+
+        if self._cloud:
+            from .cloud_control_plane import CloudControlPlane
+            plane = CloudControlPlane()
+            try:
+                self.get_or_create_conversation(
+                    conversation_id=event.conversation_id,
+                    project=event.project,
+                )
+                payload, is_new = plane.append_event(
+                    event.conversation_id,
+                    event.event_type,
+                    event.model_dump(mode="json"),
+                    event_id=event.id,
+                    idempotency_key=event.idempotency_key,
+                )
+                payload = dict(payload)
+                payload["id"] = payload.get("event_id", event.id)
+                payload.pop("event_id", None)
+                payload.pop("stream_id", None)
+                stored = ChatEvent.model_validate(payload)
+                if is_new:
+                    conversation = plane.get_record("conversation", event.conversation_id) or {}
+                    conversation.update({
+                        "conversation_id": event.conversation_id,
+                        "project": event.project,
+                        "updated_at": stored.created_at,
+                        "last_seq": stored.seq,
+                    })
+                    plane.upsert_record(
+                        "conversation", event.conversation_id, conversation,
+                        source_updated_at=stored.created_at,
+                    )
+                return stored, is_new
+            except Exception:
+                # Preserve the existing local SQLite path as the offline cache
+                # and queue the exact event for replay when Cloud SQL returns.
+                try:
+                    plane.enqueue_event(
+                        event.conversation_id,
+                        event.event_type,
+                        event.model_dump(mode="json"),
+                        event_id=event.id,
+                        idempotency_key=event.idempotency_key,
+                    )
+                except Exception:
+                    pass
+                self._cloud = False
+                try:
+                    return self.append_event(event)
+                finally:
+                    self._cloud = True
 
         # Idempotency key check
         if event.idempotency_key:
@@ -346,6 +445,18 @@ class GroupChatStore:
         return event, True
 
     def get_event_by_idempotency_key(self, idempotency_key: str) -> ChatEvent | None:
+        if self._cloud and idempotency_key:
+            from .cloud_control_plane import CloudControlPlane
+            try:
+                payload = CloudControlPlane().get_event_by_idempotency_key(idempotency_key)
+                if payload is not None:
+                    payload = dict(payload)
+                    payload["id"] = payload.get("event_id")
+                    payload.pop("event_id", None)
+                    payload.pop("stream_id", None)
+                    return ChatEvent.model_validate(payload)
+            except Exception:
+                pass
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -356,6 +467,20 @@ class GroupChatStore:
             return self._row_to_event(row)
 
     def list_events(self, conversation_id: str = "conv_warden_team", since_seq: int = 0, limit: int = 100) -> list[ChatEvent]:
+        if self._cloud:
+            from .cloud_control_plane import CloudControlPlane
+            try:
+                rows = CloudControlPlane().list_events(conversation_id, since_seq=since_seq, limit=limit)
+                events: list[ChatEvent] = []
+                for payload in rows:
+                    raw = dict(payload)
+                    raw["id"] = raw.get("event_id")
+                    raw.pop("event_id", None)
+                    raw.pop("stream_id", None)
+                    events.append(ChatEvent.model_validate(raw))
+                return events
+            except Exception:
+                pass
         with sqlite3.connect(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -422,17 +547,22 @@ class GroupChatStore:
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue()
-        self._listeners.append(q)
+        loop = asyncio.get_running_loop()
+        with self._listener_lock:
+            self._listeners.append((q, loop))
         return q
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
-        if q in self._listeners:
-            self._listeners.remove(q)
+        with self._listener_lock:
+            self._listeners[:] = [(item_q, loop) for item_q, loop in self._listeners if item_q is not q]
 
     def _notify_listeners(self, event: ChatEvent) -> None:
-        for q in list(self._listeners):
+        with self._listener_lock:
+            listeners = list(self._listeners)
+        for q, loop in listeners:
             try:
-                q.put_nowait(event)
+                if loop.is_running():
+                    loop.call_soon_threadsafe(q.put_nowait, event)
             except Exception:
                 pass
 

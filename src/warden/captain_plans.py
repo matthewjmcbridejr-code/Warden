@@ -34,6 +34,31 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _cloud_plane():
+    from .cloud_control_plane import CloudControlPlane, cloud_control_enabled
+    return CloudControlPlane() if cloud_control_enabled() else None
+
+
+def _sync_cloud_plan(plan: dict[str, Any]) -> None:
+    plane = _cloud_plane()
+    if plane is None:
+        return
+    try:
+        plane.upsert_record("mission_plan", str(plan["plan_id"]), plan, source_updated_at=plan.get("updated_at"))
+    except Exception:
+        plane.enqueue_record("mission_plan", str(plan["plan_id"]), plan)
+
+
+def _cloud_plan(plan_id: str) -> dict[str, Any] | None:
+    plane = _cloud_plane()
+    if plane is None:
+        return None
+    try:
+        return plane.get_record("mission_plan", plan_id)
+    except Exception:
+        return None
+
+
 def plans_index_path(root: Path) -> Path:
     return root / "captain" / "plans.json"
 
@@ -159,6 +184,10 @@ def persist_plan(
         "dispatch_count": max(0, int(plan_data.get("dispatch_count") or 0)),
         "scope_paths": [str(p).strip() for p in (plan_data.get("scope_paths") or []) if str(p).strip()],
         "blocker": plan_data.get("blocker"),
+        # Execution location is a property of the shared Mission contract. A
+        # cloud operation is an allowlisted capability name, never a command.
+        "execution_target": str(plan_data.get("execution_target") or "auto"),
+        "cloud_operation": plan_data.get("cloud_operation"),
     }
     if not record["decision_log"]:
         append_decision_log(record, action="plan_created", detail="Captain plan persisted.", step_id=current_step_id)
@@ -168,6 +197,7 @@ def persist_plan(
         rows = [row for row in rows if row.get("plan_id") != plan_id]
         rows.insert(0, record)
         _write_plans(path, rows[:100])
+    _sync_cloud_plan(record)
     return sanitize_plan_detail(record)
 
 
@@ -185,10 +215,14 @@ def _save_plan(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
         if not found:
             rows.insert(0, plan)
         _write_plans(path, rows[:100])
+    _sync_cloud_plan(plan)
     return plan
 
 
 def get_plan_record(root: Path, plan_id: str) -> dict[str, Any] | None:
+    cloud_plan = _cloud_plan(plan_id)
+    if cloud_plan is not None:
+        return cloud_plan
     with _FILE_LOCK:
         rows = _read_plans(plans_index_path(root))
     for row in rows:
@@ -198,6 +232,14 @@ def get_plan_record(root: Path, plan_id: str) -> dict[str, Any] | None:
 
 
 def list_recent_plans(root: Path, *, limit: int = 20) -> list[dict[str, Any]]:
+    plane = _cloud_plane()
+    if plane is not None:
+        try:
+            cloud_plans = plane.list_records("mission_plan", limit=limit)
+            if cloud_plans:
+                return [sanitize_plan_summary(row) for row in cloud_plans]
+        except Exception:
+            pass
     with _FILE_LOCK:
         rows = _read_plans(plans_index_path(root))
     return [sanitize_plan_summary(row) for row in rows[:limit]]
@@ -479,6 +521,8 @@ def sanitize_plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "dispatch_count": int(plan.get("dispatch_count") or 0),
         "scope_paths": list(plan.get("scope_paths") or []),
         "blocker": plan.get("blocker"),
+        "execution_target": plan.get("execution_target", "auto"),
+        "cloud_operation": plan.get("cloud_operation"),
         "step_count": len(steps),
         "steps": [
             {

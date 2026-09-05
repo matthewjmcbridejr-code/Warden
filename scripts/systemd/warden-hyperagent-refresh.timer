@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic Warden Hyperagent OAuth refresh
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
