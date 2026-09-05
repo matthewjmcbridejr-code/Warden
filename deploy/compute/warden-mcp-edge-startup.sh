@@ -25,13 +25,13 @@ apt-get update
 apt-get install -y ca-certificates curl git gnupg python3-venv
 
 # Keep semantic memory search available on the small edge VM without a
-# heavyweight model.  Ollama stores the model behind its local API; Warden
+# heavyweight model. Ollama stores the model behind its local API; Warden
 # only needs the service and model name, never provider credentials.
 if ! command -v ollama >/dev/null 2>&1; then
   curl -fsSL https://ollama.com/install.sh | sh
 fi
 systemctl enable --now ollama
-ollama pull nomic-embed-text
+ollama pull all-minilm
 
 # Caddy provides HTTPS termination and automatic renewal once DOMAIN's A/AAAA
 # records point at this VM. The old McServer DNS record is not changed here.
@@ -171,7 +171,7 @@ Environment=PYTHONPATH=/opt/warden/src
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
 Environment=WARDEN_BRAIN_BACKEND=postgres
-Environment=WARDEN_EMBED_MODEL=nomic-embed-text
+Environment=WARDEN_EMBED_MODEL=all-minilm
 Environment=WARDEN_EMBED_TIMEOUT_SECONDS=60
 Environment=WARDEN_MCP_STATE_BACKEND=postgres
 Environment=WARDEN_MCP_HUB_ENABLED=true
