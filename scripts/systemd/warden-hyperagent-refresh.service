@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Warden's Hyperagent OAuth token
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/warden/.venv/bin/python /opt/warden/scripts/refresh_hyperagent_token.py
+ExecStartPost=/bin/systemctl try-restart warden-mcp-edge.service

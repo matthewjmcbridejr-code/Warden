@@ -9,6 +9,10 @@ Type=simple
 User=warden
 WorkingDirectory=/opt/warden
 EnvironmentFile=/etc/warden-mcp-edge.env
+# Optional operator-managed upstream credentials and routing. This file is
+# intentionally absent on fresh installs; when present it is readable only by
+# the Warden service account and must never be committed to the repository.
+EnvironmentFile=-/etc/warden-hyperagent.env
 Environment=PYTHONPATH=/opt/warden/src
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge

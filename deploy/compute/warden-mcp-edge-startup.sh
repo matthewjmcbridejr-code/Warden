@@ -167,6 +167,9 @@ Type=simple
 User=warden
 WorkingDirectory=/opt/warden
 EnvironmentFile=/etc/warden-mcp-edge.env
+# Optional operator-managed upstream credentials and routing. This file is
+# intentionally absent on fresh installs and is never written to git.
+EnvironmentFile=-/etc/warden-hyperagent.env
 Environment=PYTHONPATH=/opt/warden/src
 Environment=PYTHONUNBUFFERED=1
 Environment=MCHARNESS_DATA_ROOT=/var/lib/warden-mcp-edge
@@ -192,6 +195,8 @@ UNIT
 
 install -m 0644 "${APP_DIR}/scripts/systemd/mctable-edge.service" /etc/systemd/system/mctable-edge.service
 install -m 0644 "${APP_DIR}/scripts/systemd/warden-mcp-edge.service" /etc/systemd/system/warden-mcp-edge.service
+install -m 0644 "${APP_DIR}/scripts/systemd/warden-hyperagent-refresh.service" /etc/systemd/system/warden-hyperagent-refresh.service
+install -m 0644 "${APP_DIR}/scripts/systemd/warden-hyperagent-refresh.timer" /etc/systemd/system/warden-hyperagent-refresh.timer
 
 install -m 0644 /dev/stdin /etc/caddy/Caddyfile <<UNIT
 ${DOMAIN} {
@@ -203,5 +208,6 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now warden-cloudsql-proxy.service
 systemctl enable --now warden-mcp-edge.service
+systemctl enable --now warden-hyperagent-refresh.timer
 systemctl enable caddy.service
 systemctl restart caddy.service
