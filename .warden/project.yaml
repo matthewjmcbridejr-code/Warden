@@ -1,0 +1,28 @@
+id: platform.warden
+name: Warden
+type: platform
+
+repositories:
+  - primary: true
+    github: matthewjmcbridejr-code/Warden
+
+context:
+  bootstrap:
+    - AGENTS.md
+    - docs/PROJECT.md
+    - docs/CURRENT-STATE.md
+
+state:
+  current_truth: docs/CURRENT-STATE.md
+  decisions_dir: docs/DECISIONS
+  tasks_dir: docs/tasks
+
+permissions:
+  source_code:
+    read: true
+    write: task_scoped
+  production:
+    write: approval_required
+
+notes:
+  - This public repository must not contain private operator credentials, client data, connector secrets, or private Warden HQ state.
