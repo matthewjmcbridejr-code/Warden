@@ -108,9 +108,8 @@ def test_feed_shows_agent_and_landing_without_note_body(tmp_path, monkeypatch):
     for event in feed["events"]:
         by_dest.setdefault(event["destination"], []).append(event)
 
-    brain = by_dest["brain"][0]
+    brain = next(row for row in by_dest["brain"] if row["title"] == "Vault decision")
     assert brain["agent"] == "cursor:test"
-    assert brain["title"] == "Vault decision"
     assert brain["ref"].endswith(".md")
 
     memory = by_dest["memory"][0]
