@@ -4737,6 +4737,31 @@ def get_command_deck_relay():
     return {"ok": True, "events": _cd_load_relay(limit=50)}
 
 
+@mcharness_router.get("/warden/activity")
+def get_warden_activity(limit: int = 80, destination: str = ""):
+    """Recent agent writes in cloud Warden: memory, MCP, missions, notes, artifacts.
+
+    Memory rows use Cloud SQL when the cloud backend is on, and follow the
+    same access gate as `/memories`. Tool arguments and note bodies are not
+    included. This is not the retired mclab port 6969 UI.
+    """
+    from src.warden.activity_feed import build_activity_feed
+
+    include_memory = True
+    memory_reason = ""
+    try:
+        _require_private_memory_access()
+    except HTTPException as exc:
+        include_memory = False
+        memory_reason = str(exc.detail)
+    return build_activity_feed(
+        limit=limit,
+        destination=destination,
+        include_memory=include_memory,
+        memory_unavailable_reason=memory_reason,
+    )
+
+
 @mcharness_router.get("/warden/command-deck/events")
 def get_command_deck_events():
     """SSE-compatible endpoint — returns latest events as JSON for polling."""
