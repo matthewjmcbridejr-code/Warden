@@ -3217,7 +3217,13 @@ def brain_write_note(title: str, body: str, tags: str = "warden,auto") -> str:
             return _err("brain_write_note", error)
         from src.warden.brain.vault import write_note
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        result = write_note(title=title, body=body, tags=tag_list)
+        caller = _current_caller_identity()
+        result = write_note(
+            title=title,
+            body=body,
+            tags=tag_list,
+            extra_frontmatter={"agent": caller.get("agent_id") or ""},
+        )
         return _ok("brain_write_note", result)
     except FileExistsError as e:
         return _err("brain_write_note", f"Note already exists: {e}")
@@ -3770,6 +3776,15 @@ def main():
 
     mcp_hub.set_call_guard(_remote_bootstrap_error)
     hub_status = mcp_hub.bootstrap_hub(mcp)
+    try:
+        from src.warden.activity_feed import write_mcp_runtime_status
+        write_mcp_runtime_status({
+            "native_tool_count": hub_status.native_tool_count,
+            "hub_tool_count": hub_status.hub_tool_count,
+            "upstreams": hub_status.upstreams,
+        })
+    except Exception:
+        log.warning("activity feed: could not record MCP runtime status", exc_info=True)
     log.warning(
         "mcp_hub: reachable_at_boot=%s hub_tools=%d native_tools=%d",
         hub_status.reachable_at_boot, hub_status.hub_tool_count, hub_status.native_tool_count,
@@ -3884,6 +3899,10 @@ def main():
                     await handle_events(scope, receive, send, process_slack_event)
                     return
 
+                from .activity_dashboard import handle_dashboard
+                if await handle_dashboard(scope, receive, send):
+                    return
+
                 # Everything else (/mcp, /authorize, /token, /register,
                 # /revoke, /.well-known/...) is FastMCP's own routing.
                 await mcp_app(scope, receive, send)
@@ -3892,6 +3911,13 @@ def main():
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     else:
         asyncio.run(mcp.run_stdio_async())
+
+
+try:
+    from src.warden.activity_feed import install_mcp_call_journal
+    install_mcp_call_journal(mcp)
+except Exception:
+    log.warning("activity feed: MCP call journal was not installed", exc_info=True)
 
 
 if __name__ == "__main__":

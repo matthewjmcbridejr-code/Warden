@@ -59,6 +59,7 @@
         <button type="button" class="nav-item nav-item-agent" data-section="runners" data-testid="nav-runners">Runner Sessions</button>
 
         <div class="sidebar-group-label">Resources</div>
+        <button type="button" class="nav-item" data-section="activity" data-testid="nav-activity">Activity</button>
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="brain-vault-card" data-testid="nav-brain">Brain</button>
         <button type="button" class="nav-item" data-section="settings" data-scroll-target="mail-accounts-panel" data-testid="nav-mail">Mail Accounts</button>
         <button type="button" class="nav-item" data-section="memory" data-testid="nav-memory">Memories</button>
@@ -601,6 +602,27 @@
           <p>When a Codex session is active, use View Agent to review output or save evidence.</p>
           <button type="button" id="evidence-open-output" class="btn" data-testid="evidence-open-output" style="display:none;">Open Current Output</button>
         </div>
+      </section>
+
+      <section id="warden-section-activity" class="workspace-section" data-section="activity" data-testid="warden-section-activity">
+        <header class="workspace-header">
+          <h2 class="workspace-title">Activity</h2>
+          <p class="workspace-subhead">Cloud Warden: which agent wrote what into Cloud SQL memory, MCP calls, missions, vault notes, and artifacts. The old port 6969 screen on mclab is not this control plane.</p>
+        </header>
+        <div class="act-toolbar">
+          <div class="act-filters" data-testid="activity-filters">
+            <button type="button" class="btn active" data-activity-destination="all">All</button>
+            <button type="button" class="btn" data-activity-destination="brain">Brain</button>
+            <button type="button" class="btn" data-activity-destination="memory">Memory</button>
+            <button type="button" class="btn" data-activity-destination="mcp">MCP</button>
+            <button type="button" class="btn" data-activity-destination="board">Board</button>
+            <button type="button" class="btn" data-activity-destination="artifact">Artifacts</button>
+          </div>
+          <button type="button" id="activity-refresh" class="btn" data-testid="activity-refresh">Refresh</button>
+        </div>
+        <p id="activity-status" class="act-status" data-testid="activity-status">Loading recent writes…</p>
+        <div id="activity-coverage" class="act-coverage" data-testid="activity-coverage"></div>
+        <div id="activity-list" class="act-list" data-testid="activity-list"></div>
       </section>
 
       <!-- ============================================================== -->

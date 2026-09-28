@@ -56,3 +56,9 @@ After the VM is healthy, point the chosen MCP hostname's A record at its
 external IP, wait for Caddy to obtain TLS, and only then update the OAuth
 issuer/callback configuration. Keep the old DNS record and McServer available
 until MCP, memory, restart, and rollback proofs pass.
+
+Caddy sends every path on `mcp.mctable.online` to the MCP process. `/mcp` is
+the MCP endpoint. `/dash` is the operator activity page on that same host.
+`mctable.online` currently points somewhere else and does not complete TLS, so
+it is not the dashboard URL until its A record is the edge VM. The Cloud Run
+service stays private and is not a browser entry.

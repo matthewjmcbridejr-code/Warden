@@ -2517,6 +2517,102 @@
     updateRunsEvidenceActions();
   }
 
+  let activityPollTimer = null;
+  let activityFilter = "all";
+  let activityPayload = null;
+
+  function stopActivityPoll() {
+    if (activityPollTimer) {
+      clearInterval(activityPollTimer);
+      activityPollTimer = null;
+    }
+  }
+
+  function activityWhere(row) {
+    const landed = row && row.landed && row.landed !== row.destination ? row.landed : row.destination;
+    if (row && row.action === "call" && row.destination === "mcp") {
+      return landed && landed !== "mcp" ? `MCP → ${landed}` : "MCP";
+    }
+    return landed || row.destination || "unknown";
+  }
+
+  function renderActivity(payload) {
+    const list = document.getElementById("activity-list");
+    const status = document.getElementById("activity-status");
+    const coverage = document.getElementById("activity-coverage");
+    if (!list) return;
+    const events = (payload && payload.events) || [];
+    const filtered = activityFilter === "all"
+      ? events
+      : events.filter((row) => {
+          if (activityFilter === "mcp") return row.action === "call" || row.destination === "mcp";
+          return row.destination === activityFilter || row.landed === activityFilter;
+        });
+    if (status) {
+      const when = payload && payload.generated_at ? formatHistoryTimestamp(payload.generated_at) : "just now";
+      const place = payload && payload.placement ? payload.placement.control_plane : "local-cache";
+      const retired = payload && payload.placement && payload.placement.retired_local_ui
+        ? ` ${payload.placement.retired_local_ui}`
+        : "";
+      status.textContent = `${place} · ${filtered.length} shown · ${events.length} recent · updated ${when}.${retired}`;
+    }
+    if (coverage) {
+      const rows = (payload && payload.coverage) || [];
+      coverage.innerHTML = rows.map((row) => {
+        const flag = row.included ? "included" : "unavailable";
+        return `<div>${escapeHtml(row.label)}: ${escapeHtml(flag)}. ${escapeHtml(row.detail || "")}</div>`;
+      }).join("");
+    }
+    if (!filtered.length) {
+      list.innerHTML = `<div class="act-empty" data-testid="activity-empty">No ${escapeHtml(activityFilter)} writes in the current window.</div>`;
+      return;
+    }
+    list.innerHTML = filtered.map((row) => {
+      const agent = row.agent || "agent not recorded";
+      const ref = row.ref ? ` · ${row.ref}` : "";
+      const project = row.project ? ` · ${row.project}` : "";
+      const tool = row.tool ? `${row.tool} · ` : "";
+      const fail = row.ok === false ? " act-fail" : "";
+      return `<article class="act-row${fail}" data-testid="activity-row">
+        <div>
+          <div class="act-when">${escapeHtml(formatHistoryTimestamp(row.at))}</div>
+          <div class="act-meta">${escapeHtml(agent)}</div>
+        </div>
+        <div class="act-where">${escapeHtml(activityWhere(row))}</div>
+        <div>
+          <div class="act-title">${escapeHtml(tool + (row.title || row.action || "write"))}</div>
+          <div class="act-meta">${escapeHtml((row.action || "") + ref + project)}</div>
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  async function loadActivity() {
+    const status = document.getElementById("activity-status");
+    try {
+      const data = await requestJson(`${MCH}/warden/activity?limit=80`);
+      activityPayload = data;
+      renderActivity(data);
+    } catch (err) {
+      if (status) status.textContent = `Activity feed unavailable: ${err.message || err}`;
+    }
+  }
+
+  function wireActivity() {
+    if (window._activityWired) return;
+    window._activityWired = true;
+    document.querySelectorAll("[data-activity-destination]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-activity-destination]").forEach((item) => item.classList.remove("active"));
+        btn.classList.add("active");
+        activityFilter = btn.getAttribute("data-activity-destination") || "all";
+        if (activityPayload) renderActivity(activityPayload);
+      });
+    });
+    const refresh = document.getElementById("activity-refresh");
+    if (refresh) refresh.addEventListener("click", () => loadActivity());
+  }
+
   function setActiveSection(sectionId) {
     state.activeSection = sectionId || "mission";
     document.querySelectorAll(".workspace-section").forEach((section) => {
@@ -2539,6 +2635,7 @@
       runs: "Runs",
       evidence: "Proof",
       memory: "Memory",
+      activity: "Activity",
       assistant: "Warden Assistant",
       "proof-gates": "Proof Gates",
       "runner-sessions": "Runner Sessions",
@@ -2552,6 +2649,7 @@
     if (window.WardenControlRoom && window.WardenControlRoom.onSectionChange) {
       window.WardenControlRoom.onSectionChange(state.activeSection);
     }
+    if (state.activeSection !== "activity") stopActivityPoll();
     if (state.activeSection === "captain-desk") {
       if (typeof loadCaptainDeskData === "function") loadCaptainDeskData().catch((e) => console.error(e));
     } else if (state.activeSection === "mission") {
@@ -2567,6 +2665,13 @@
       if (typeof loadRecentEvidence === "function") loadRecentEvidence().catch((e) => console.error(e));
     } else if (state.activeSection === "memory") {
       if (typeof loadMemory === "function") loadMemory().catch((e) => console.error(e));
+    } else if (state.activeSection === "activity") {
+      wireActivity();
+      loadActivity().catch((e) => console.error(e));
+      stopActivityPoll();
+      activityPollTimer = setInterval(() => {
+        loadActivity().catch((e) => console.error(e));
+      }, 8000);
     } else if (state.activeSection === "assistant") {
       if (typeof loadAssistantHealth === "function") loadAssistantHealth().catch((e) => console.error(e));
     } else if (state.activeSection === "settings") {
@@ -6616,6 +6721,10 @@
     if (typeof wireGroupChatListeners === "function") wireGroupChatListeners();
     if (typeof initGroupChat === "function") initGroupChat();
     setActiveSection("group-chat");
+    const hashSection = (window.location.hash || "").replace(/^#/, "").split(/[?&]/)[0];
+    if (/^[a-z0-9-]+$/.test(hashSection) && document.querySelector(`.workspace-section[data-section="${hashSection}"]`)) {
+      setActiveSection(hashSection);
+    }
     await Promise.all([
       typeof loadLibraryStatus === "function" ? loadLibraryStatus() : Promise.resolve(),
       typeof loadCaptainDeckStatus === "function" ? loadCaptainDeckStatus() : Promise.resolve(),
