@@ -191,7 +191,7 @@ def test_cloud_backend_reads_sql_records_not_a_lab_log(tmp_path, monkeypatch):
     assert any(row["ref"] == "mission-1" and row["agent"] == "cloud-worker" for row in feed["events"])
     assert any(row["agent"] == "cloud-worker" and row["destination"] == "artifact" for row in feed["events"])
     assert feed["placement"]["control_plane"] == "cloud"
-    assert "6969" in feed["placement"]["retired_local_ui"]
+    assert feed["placement"]["console_path"] == "https://mcp.mctable.online/dash"
     blob = json.dumps(feed)
     assert "mclab" in blob
 
@@ -202,6 +202,38 @@ class _EmptyStore:
 
     def list_artifacts(self):
         return []
+
+
+def test_dash_page_and_owner_passphrase(monkeypatch):
+    from starlette.responses import JSONResponse
+    from starlette.testclient import TestClient
+
+    from src.warden.activity_dashboard import handle_dashboard
+
+    async def app(scope, receive, send):
+        if not await handle_dashboard(scope, receive, send):
+            await JSONResponse({"ok": False})(scope, receive, send)
+
+    monkeypatch.delenv("MCP_OAUTH_OWNER_PASSPHRASE", raising=False)
+    client = TestClient(app)
+    page = client.get("/dash")
+    assert page.status_code == 200
+    assert "Stable page: https://mcp.mctable.online/dash" in page.text
+    assert "/dash/activity" in page.text
+    activity = client.get("/dash/activity")
+    assert activity.status_code == 200
+    assert activity.json()["ok"] is True
+
+    monkeypatch.setenv("MCP_OAUTH_OWNER_PASSPHRASE", "owner-secret")
+    locked = client.get("/dash/activity")
+    assert locked.status_code == 401
+    bad = client.post("/dash/login", data={"passphrase": "nope"})
+    assert bad.status_code == 401
+    good = client.post("/dash/login", data={"passphrase": "owner-secret"}, follow_redirects=False)
+    assert good.status_code == 303
+    opened = client.get("/dash/activity")
+    assert opened.status_code == 200
+    assert "owner-secret" not in opened.text
 
 
 def test_activity_api_and_page(tmp_path, monkeypatch):

@@ -3899,6 +3899,10 @@ def main():
                     await handle_events(scope, receive, send, process_slack_event)
                     return
 
+                from .activity_dashboard import handle_dashboard
+                if await handle_dashboard(scope, receive, send):
+                    return
+
                 # Everything else (/mcp, /authorize, /token, /register,
                 # /revoke, /.well-known/...) is FastMCP's own routing.
                 await mcp_app(scope, receive, send)

@@ -791,10 +791,10 @@ def build_activity_feed(
         "destination": want or "all",
         "placement": {
             "control_plane": "cloud" if _cloud_primary() else "local-cache",
-            "console_path": "/#activity",
+            "console_path": os.getenv("WARDEN_DASH_PUBLIC_URL", "https://mcp.mctable.online/dash"),
             "retired_local_ui": (
                 "Port 6969 on mclab (formerly mcserver2) was the old McServer dashboard. "
-                "Warden's control plane is Cloud SQL, the cloud MCP edge, and the Vercel console."
+                "The Cloud Run URL is private. The operator dashboard is /dash on the MCP edge."
             ),
         },
         "coverage": coverage,
